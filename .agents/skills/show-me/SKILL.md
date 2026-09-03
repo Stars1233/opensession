@@ -114,13 +114,16 @@ function expandSkill(command: string): string {
 }
 ```
 
-- For a visual UI, layout, state comparison, or concept too dense for Mermaid, write one focused HTML file: a diagram, an infographic, or a short slide deck, whichever fits the point. Match the product's colors, type, spacing, and components; use real labels and data; support desktop and mobile. Sessions run on a headless host, so `open` will not reach the user. Write the file to an absolute path, render it with a headless browser (`bun x playwright screenshot`, or the harness from the `control-ui` skill), and return the capture:
+- For a visual UI, layout, state comparison, or concept too dense for Mermaid, write one focused HTML file: a diagram, an infographic, or a short slide deck, whichever fits the point. Match the product's colors, type, spacing, and components; use real labels and data; support desktop and mobile. Save it as a session asset so it previews live in the Assets tab:
 
 ```text
-OPENSESSION_IMAGE: /abs/path/show-me-{description}.png
+opensession-assets.write_asset
+  path: show-me-{description}.html
+  content: <the page>
+  description: one line on what it shows
 ```
 
-Mention the HTML path too so the user can open the live version.
+Then name the asset path in your reply (`show-me-{description}.html`) so the reader gets a direct open link. Keep it self-contained, or write companion files as extra assets; relative references resolve in the preview. Do not `open` it or screenshot it: sessions run headless, and the asset is the live version.
 
 ### guidance
 
