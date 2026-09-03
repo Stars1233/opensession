@@ -65,7 +65,7 @@ import { audit } from "./audit";
 import type { Repo } from "./config";
 import { configuredPaths } from "./config";
 import { stateDir } from "./paths";
-import { stopPreview } from "./preview";
+import { stopAllPortalServices } from "./portal-supervisor";
 import {
   type ScratchSweepSession,
   sweepSessionScratch,
@@ -484,7 +484,10 @@ function pruneParkedWork(nowMs: number): void {
 
 async function removeDir(repo: Repo, dir: string): Promise<boolean> {
   try {
-    await stopPreview(dir);
+    await stopAllPortalServices({
+      sessionId: "worktree-reaper",
+      worktreeDir: dir,
+    });
   } catch {}
   await $`git -C ${repo.repo} worktree remove --force ${dir}`.quiet().nothrow();
   if (existsSync(dir))

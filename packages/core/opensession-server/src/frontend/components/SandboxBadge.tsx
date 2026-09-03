@@ -185,7 +185,7 @@ export function SandboxBadge({
             <span className="ml-auto font-medium text-faint">Runtime</span>
           </div>
           <div className="mt-1 text-meta text-dim">
-            {sandbox.provider} · session workspace
+            Its own machine · sleeps between turns
           </div>
           {status?.cwd ? (
             <div
@@ -215,13 +215,17 @@ export function SandboxBadge({
             {working === "resume" ? "Waking…" : "Wake sandbox"}
           </button>
         ) : null}
-        <button
-          className={cn(actionClass, "text-red hover:text-red")}
-          disabled={Boolean(working || status?.busy)}
-          onClick={() => void act("recreate")}
-        >
-          {working === "recreate" ? "Recreating…" : "Recreate from clean image"}
-        </button>
+        {status?.materialized !== false || state !== "gone" ? (
+          <button
+            className={cn(actionClass, "text-red hover:text-red")}
+            disabled={Boolean(working || status?.busy)}
+            onClick={() => void act("recreate")}
+          >
+            {working === "recreate"
+              ? "Recreating…"
+              : "Recreate from clean image"}
+          </button>
+        ) : null}
         {status?.logs?.setup || status?.logs?.resume ? (
           <details className="mt-1 rounded-md bg-surface px-2.5 py-2 text-meta text-dim">
             <summary className="cursor-pointer font-semibold text-fg">

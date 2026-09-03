@@ -33,9 +33,9 @@ of that attempt but does not block the session. Interactive creation starts this
 work in the background, so the first turn may begin before dependencies finish
 installing.
 
-Commit `.agents/setup` and `.agents/start.sh` to let each workspace provision
-itself and boot its dev server on demand. This also lets an agent open its own
-change in a browser. See [repo-lifecycle.md](repo-lifecycle.md).
+Commit `.agents/setup` and `.agents/portals.json` to let each workspace
+provision itself and expose its app as a Portal on demand. This also lets an
+agent open its own change in a browser. See [repo-lifecycle.md](repo-lifecycle.md).
 
 ## Modes
 
@@ -59,12 +59,9 @@ workspaces cannot attach repositories. A repository configured as a shared
 checkout cannot itself be attached unless shared-checkout behavior has been
 disabled.
 
-Remote Sandbox providers, and Docker configured with a `volume` workspace, clone
-inside provider-owned storage and create no host worktree. Docker `bind`
-workspaces use the host worktree described here. The low-level schema defaults
-to `bind`, but `opensession sandbox enable docker` currently configures
-`volume`. Provider-owned cleanup is separate, and destroying a volume workspace
-deletes any work not pushed elsewhere. See
+Sandbox sessions clone inside the Sandbox's own disk and create no host
+worktree. Provider-owned cleanup is separate, and destroying a Sandbox deletes
+any work not pushed elsewhere. See
 [self-hosting-sandboxes.md](self-hosting-sandboxes.md).
 
 ## The shared-checkout exception

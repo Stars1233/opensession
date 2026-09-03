@@ -3,6 +3,7 @@
 import { audit } from "../audit";
 import { hostRunBusy } from "../host-registry";
 import { getSandboxProvider } from "../sandbox";
+import { isRetiredSandboxProvider } from "../sandbox/config";
 import {
   recordedTrustPolicy,
   type SandboxTrustPolicy,
@@ -54,6 +55,19 @@ async function sandboxView(
 ) {
   const recorded = session.sandbox;
   if (!recorded?.provider) return { enabled: false, status: "none" as const };
+  if (isRetiredSandboxProvider(recorded.provider)) {
+    return {
+      enabled: true,
+      provider: recorded.provider,
+      workspace: recorded.workspace,
+      status: "gone" as const,
+      lifecycle: "needs_attention" as const,
+      lastLifecycleError: `The ${recorded.provider} Sandbox provider has been retired. Start a new session to continue this work in a Sandbox.`,
+      materialized: false,
+      canPause: false,
+      canResume: false,
+    };
+  }
   if (!recorded.sandboxId) {
     return {
       enabled: true,
@@ -129,6 +143,13 @@ export async function handleSandboxRoutes(
     return Response.json(
       { error: "Session has no materialized sandbox" },
       { status: 400 },
+    );
+  if (isRetiredSandboxProvider(recorded.provider))
+    return Response.json(
+      {
+        error: `The ${recorded.provider} Sandbox provider has been retired; start a new session on Daytona or Box.`,
+      },
+      { status: 410 },
     );
   if (hostRunBusy(session.id))
     return Response.json(

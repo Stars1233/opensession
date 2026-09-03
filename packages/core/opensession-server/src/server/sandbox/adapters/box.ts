@@ -60,6 +60,7 @@ import {
   findRemoteStateBySession,
   makeRemoteSandbox,
   readRemoteState,
+  runResumeHook,
   remoteCloneUrl,
   removeRemoteState,
   resolveTrustPolicy,
@@ -1125,6 +1126,15 @@ export class BoxProvider implements SandboxProvider {
       },
     );
     mark("workspace ready");
+    if (resumingExistingWorkspace) {
+      await runResumeHook(driver, this.id, box.id, {
+        cwd,
+        sessionId: spec.sessionId,
+        repoId: repo.id,
+        trustProfile: trust.trustProfile,
+      });
+      mark("resume hook ran");
+    }
     writeRemoteState({
       sandboxId: box.id,
       provider: this.id,
@@ -1136,7 +1146,9 @@ export class BoxProvider implements SandboxProvider {
       lastActivityAt: new Date().toISOString(),
       ...trust,
     });
-    return this.makeHandle(cfg, box.id, spec.sessionId, cwd);
+    return Object.assign(this.makeHandle(cfg, box.id, spec.sessionId, cwd), {
+      wokeFromSleep: resumingExistingWorkspace,
+    });
   }
 
   private makeHandle(
@@ -1156,7 +1168,6 @@ export class BoxProvider implements SandboxProvider {
       async ports(requestedPorts = []): Promise<PortMap> {
         const map: PortMap = {};
         const ports = new Set([
-          ...(sandboxConfig().previewPorts || []),
           ...requestedPorts.filter(
             (port) => Number.isInteger(port) && port > 0 && port <= 65_535,
           ),
@@ -1252,8 +1263,14 @@ export class BoxProvider implements SandboxProvider {
     }
     const driver = boxDriver(cfg, sandboxId);
     await driver.ensureStarted();
-    if (resumed) primeBoxWorkspaceAfterResume(driver, state.cwd);
-    return this.makeHandle(cfg, sandboxId, state.sessionId, state.cwd);
+    if (resumed) {
+      primeBoxWorkspaceAfterResume(driver, state.cwd);
+      await runResumeHook(driver, this.id, sandboxId, state);
+    }
+    return Object.assign(
+      this.makeHandle(cfg, sandboxId, state.sessionId, state.cwd),
+      { wokeFromSleep: resumed },
+    );
   }
 
   /** Box's public API exposes durable archival rather than hard deletion.

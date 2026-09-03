@@ -59,6 +59,7 @@ import {
   findRemoteStateBySession,
   makeRemoteSandbox,
   readRemoteState,
+  runResumeHook,
   remoteCloneUrl,
   removeRemoteState,
   resolveTrustPolicy,
@@ -665,6 +666,7 @@ export class DaytonaProvider implements SandboxProvider {
       ...trust,
     });
 
+    const wokeFromSleep = !newlyCreated && stateOf(sbx) !== "running";
     try {
       const driver = daytonaDriver(sbx);
       // client.create resolves only after Daytona reports the sandbox started.
@@ -735,6 +737,15 @@ export class DaytonaProvider implements SandboxProvider {
         await prepareRunner();
         await prepareWorkspace();
       }
+      if (wokeFromSleep) {
+        await runResumeHook(driver, this.id, sbx.id, {
+          cwd,
+          sessionId: spec.sessionId,
+          repoId: repo.id,
+          trustProfile: trust.trustProfile,
+        });
+        mark("resume hook ran");
+      }
       writeRemoteState({
         sandboxId: sbx.id,
         provider: this.id,
@@ -746,7 +757,9 @@ export class DaytonaProvider implements SandboxProvider {
         lastActivityAt: new Date().toISOString(),
         ...trust,
       });
-      return this.makeHandle(sbx, spec.sessionId, cwd);
+      return Object.assign(this.makeHandle(sbx, spec.sessionId, cwd), {
+        wokeFromSleep,
+      });
     } catch (error) {
       if (disposable) {
         try {
@@ -777,7 +790,6 @@ export class DaytonaProvider implements SandboxProvider {
       async ports(requestedPorts = []): Promise<PortMap> {
         const map: PortMap = {};
         const ports = new Set([
-          ...(sandboxConfig().previewPorts || []),
           ...requestedPorts.filter(
             (port) => Number.isInteger(port) && port > 0 && port <= 65_535,
           ),
@@ -844,9 +856,14 @@ export class DaytonaProvider implements SandboxProvider {
     const client = await daytonaClient();
     const sbx = await client.get(sandboxId);
     if (!sbx || stateOf(sbx) === "gone") return null;
-    if (stateOf(sbx) !== "running") await sbx.start(120);
-    await daytonaDriver(sbx).ensureStarted();
-    return this.makeHandle(sbx, state.sessionId, state.cwd);
+    const woke = stateOf(sbx) !== "running";
+    if (woke) await sbx.start(120);
+    const driver = daytonaDriver(sbx);
+    await driver.ensureStarted();
+    if (woke) await runResumeHook(driver, this.id, sandboxId, state);
+    return Object.assign(this.makeHandle(sbx, state.sessionId, state.cwd), {
+      wokeFromSleep: woke,
+    });
   }
 
   /** Deletes the sandbox — and with it the volume-style workspace (documented

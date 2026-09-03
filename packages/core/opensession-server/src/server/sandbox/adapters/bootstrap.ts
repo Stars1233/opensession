@@ -1962,6 +1962,47 @@ export async function runRemoteLifecycleHook(
   return { ran: true, log };
 }
 
+/**
+ * `.agents/resume` on every real wake. A sandbox that slept keeps its disk but
+ * loses every process, so the repository gets one idempotent chance to repair
+ * what a fresh boot needs (caches, daemons, generated files) before the agent
+ * or a Portal restart runs. Never fails the wake: the log is surfaced in the
+ * Sandbox badge instead.
+ */
+export async function runResumeHook(
+  driver: RemoteDriver,
+  providerId: SandboxProviderId,
+  sandboxId: string,
+  state: {
+    cwd: string;
+    sessionId: string;
+    repoId?: string;
+    trustProfile?: "interactive" | "automation";
+  },
+): Promise<void> {
+  try {
+    await runRemoteLifecycleHook(
+      driver,
+      state.cwd,
+      "resume",
+      "resume",
+      state.repoId,
+      {
+        sandboxId,
+        provider: providerId,
+        sessionId: state.sessionId,
+        repoId: state.repoId || "",
+        trustProfile: state.trustProfile || "interactive",
+      },
+    );
+  } catch (error) {
+    console.warn(
+      `[sandbox:${providerId}] ${sandboxId}: .agents/resume failed:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
 // ── Run launching (WS transport only — there is no socket option remotely) ───
 
 function sessionRunsDir(sessionId: string): string {
@@ -2354,6 +2395,9 @@ function makeRemoteLauncher(
           NODE_ENV: "production",
           OPENSESSION_MCP_CONFIG: REMOTE_MCP_CONFIG,
           OPENSESSION_RUN_JOURNAL: `${dir}/journal.json`,
+          // Lets the engine tell the model it is inside a Sandbox
+          // (run-instructions.ts): one boolean, never a per-session fact.
+          OPENSESSION_SANDBOX: "1",
           // Where bindOpenaiAccount finds the uploaded rotation-proof openai
           // seeds (only set when something was uploaded this launch).
           ...(openaiUpload.seeds.length

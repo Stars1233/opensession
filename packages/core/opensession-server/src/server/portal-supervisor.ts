@@ -887,6 +887,15 @@ export async function listSandboxPortalServices(
   return listPortals(sandboxPortalOps(sandbox));
 }
 
+/** The registry as persisted, without the liveness probe. A sandbox that just
+ * woke has no processes left, so every record still marked live is a Portal
+ * to restore rather than one to declare failed. */
+export async function readSandboxPortalRecords(
+  sandbox: Sandbox,
+): Promise<PortalRecord[]> {
+  return (await readSandboxPortalRegistry(sandbox)).records;
+}
+
 type SandboxPortalStartInput = {
   sessionId: string;
   sandbox: Sandbox;
