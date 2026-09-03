@@ -53,12 +53,11 @@
 import {
   type Dirent,
   existsSync,
-  lstatSync,
   readdirSync,
   readlinkSync,
   statSync,
 } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { $ } from "bun";
 import { githubRequest } from "../agents/github/github-rest";
@@ -385,18 +384,22 @@ export async function bankWorkingState(
   if (listed.exitCode !== 0) return null;
   const untracked = listed.text().split("\0").filter(Boolean);
   let untrackedBytes = 0;
-  for (const f of untracked) {
+  for (const file of untracked) {
     try {
-      untrackedBytes += lstatSync(join(dir, f)).size;
+      // This runs inside the gateway. Async stats let transcript requests run
+      // between files when a dirty worktree contains thousands of untracked
+      // paths. Stop as soon as banking is known to be unsafe instead of
+      // walking the rest of a multi-gigabyte checkout.
+      untrackedBytes += (await lstat(join(dir, file))).size;
     } catch {
       return null; // unreadable (e.g. root-owned build output) — keep the tree
     }
-  }
-  if (untrackedBytes > BANK_MAX_BYTES) {
-    console.log(
-      `[worktree-reaper] SKIP bank ${branch}: untracked payload ${Math.round(untrackedBytes / 2 ** 20)}M over cap`,
-    );
-    return null;
+    if (untrackedBytes > BANK_MAX_BYTES) {
+      console.log(
+        `[worktree-reaper] SKIP bank ${branch}: untracked payload over ${Math.round(BANK_MAX_BYTES / 2 ** 20)}M cap`,
+      );
+      return null;
+    }
   }
   const bankDir = join(
     parkedWorkDir(),
