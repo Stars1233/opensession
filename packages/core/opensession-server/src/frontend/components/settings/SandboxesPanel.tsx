@@ -901,8 +901,8 @@ export function SandboxesPanel() {
         ))}
       </div>
       <SettingsHint>
-        None remains the default. Personal and per-session choices can override
-        the workspace default.
+        This machine remains the default. Personal and per-session choices can
+        override the workspace default.
       </SettingsHint>
       {reusableEnvironments.length > 0 && (
         <>
