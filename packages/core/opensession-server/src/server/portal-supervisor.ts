@@ -72,7 +72,7 @@ const PREFIX = "# opensession-portal ";
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const MIN_PORT = 1024;
 const MAX_PORT = 19_000;
-const SANDBOX_PORTAL_PATH =
+export const SANDBOX_PORTAL_PATH =
   "/home/ubuntu/.bun/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const remoteRelayAgents: Map<string, { expiresAt: number }> = ((
   globalThis as Record<string, unknown>

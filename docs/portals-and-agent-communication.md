@@ -61,7 +61,10 @@ asset load never wakes anything and simply waits for the rebuild. The page
 also covers a Portal whose service is still booting after a start or a wake,
 and a wake-restore gets the full ten-minute ready window rather than the
 recipe's, since a cold resume pays for its volume before the dev server can
-bind. When the Portal cannot come back (its Sandbox is gone or the service
+bind. Before relaunching, the restore primes the Sandbox (the identity client
+and the issuer connection, which a recipe reaches for first and which a cold
+volume makes seconds slower than a recipe's own wait) and retries a launch
+once when the process exits before it listens. When the Portal cannot come back (its Sandbox is gone or the service
 was stopped) the navigation gets a 404 page with a link back to the session.
 Both pages say nothing about the Sandbox beyond that.
 

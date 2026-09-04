@@ -61,9 +61,11 @@ export function sandboxPortalRouteStarting(httpsPort: number): boolean {
 export function sandboxPortalRouteSession(httpsPort: number): string | null {
   const allocation = sandboxAllocationForHttpsPort(httpsPort);
   if (!allocation) return null;
-  return cachedSandboxPortalOwner(
-    allocation.sandboxId,
-    allocation.containerPort,
+  return (
+    cachedSandboxPortalOwner(allocation.sandboxId, allocation.containerPort) ??
+    // The Portal on this port may be gone from the cache (replaced by one
+    // on another port); the Sandbox still names the session to go back to.
+    cachedSandboxPortalOwner(allocation.sandboxId)
   );
 }
 
