@@ -90,16 +90,6 @@ export function liveSnapshotMatchesQuery(
   return requestQuery === currentQuery;
 }
 
-export function detachPendingRequest<T>(
-  requestRef: { current: T | null },
-  abortRef: { current: AbortController | null },
-): void {
-  const controller = abortRef.current;
-  requestRef.current = null;
-  abortRef.current = null;
-  controller?.abort();
-}
-
 export interface PendingSessionPatch {
   values: Partial<UnifiedSession>;
   /** Runtime revision when a WebSocket status frame was applied. */
