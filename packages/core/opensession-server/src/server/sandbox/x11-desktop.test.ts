@@ -2,10 +2,87 @@ import { describe, expect, test } from "bun:test";
 import type { ExecResult } from "./provider";
 import {
   parseX11Windows,
+  parseXpropWindows,
   x11DesktopControl,
   x11KeyChord,
   x11ScreenshotScript,
+  x11WindowsViaXprop,
 } from "./x11-desktop";
+
+const XPROP_DUMP = [
+  "== 0xa00003 0",
+  '_NET_WM_NAME(UTF8_STRING) = "xfce4-panel"',
+  'WM_NAME(STRING) = "xfce4-panel"',
+  "  Absolute upper-left X:  0",
+  "  Absolute upper-left Y:  0",
+  "  Width: 1024",
+  "  Height: 27",
+  "  Map State: IsViewable",
+  "== 0x1200007 0",
+  'WM_NAME(STRING) = "hidden helper"',
+  "  Absolute upper-left X:  -100",
+  "  Absolute upper-left Y:  -100",
+  "  Width: 10",
+  "  Height: 10",
+  "  Map State: IsUnMapped",
+  "== 0x2200003 1",
+  '_NET_WM_NAME(UTF8_STRING) = "Terminal \\"quoted\\""',
+  'WM_NAME(STRING) = "Terminal"',
+  "  Absolute upper-left X:  5",
+  "  Absolute upper-left Y:  56",
+  "  Width: 817",
+  "  Height: 483",
+  "  Map State: IsViewable",
+  "",
+].join("\n");
+
+describe("parseXpropWindows", () => {
+  test("keeps viewable windows with their EWMH title and geometry", () => {
+    expect(parseXpropWindows(XPROP_DUMP)).toEqual([
+      {
+        id: "0xa00003",
+        title: "xfce4-panel",
+        x: 0,
+        y: 0,
+        width: 1024,
+        height: 27,
+        active: false,
+      },
+      {
+        id: "0x2200003",
+        title: 'Terminal "quoted"',
+        x: 5,
+        y: 56,
+        width: 817,
+        height: 483,
+        active: true,
+      },
+    ]);
+  });
+
+  test("an empty or failed listing is an empty list", () => {
+    expect(parseXpropWindows("")).toEqual([]);
+    expect(parseXpropWindows("xprop: unable to open display")).toEqual([]);
+  });
+});
+
+describe("x11WindowsViaXprop", () => {
+  test("runs one bash script on the given display", async () => {
+    const calls: string[][] = [];
+    const windows = await x11WindowsViaXprop(async (cmd) => {
+      calls.push(cmd);
+      return { exitCode: 0, stdout: XPROP_DUMP, stderr: "" };
+    }, ":1");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.slice(0, 2)).toEqual(["bash", "-c"]);
+    expect(calls[0]?.[2]).toContain("export DISPLAY=:1;");
+    expect(calls[0]?.[2]).toContain("_NET_CLIENT_LIST");
+    expect(windows.map((w) => w.title)).toEqual([
+      "xfce4-panel",
+      'Terminal "quoted"',
+    ]);
+  });
+});
 
 function harness(answers: Record<string, Partial<ExecResult>> = {}) {
   const calls: string[][] = [];

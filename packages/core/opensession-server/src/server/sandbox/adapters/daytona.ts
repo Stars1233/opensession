@@ -54,8 +54,10 @@ import type {
   SandboxStatus,
   SandboxDesktop,
   SandboxDesktopControl,
+  SandboxDesktopWindow,
   SandboxScreenshot,
 } from "../provider";
+import { x11WindowsViaXprop } from "../x11-desktop";
 import {
   assertDialbackReachable,
   bootstrapRemoteSandbox,
@@ -495,6 +497,9 @@ export function daytonaDesktopUrl(signedPreviewUrl: string): string {
  *  pass through: Daytona normalizes `Return`, `cmd`, `control` itself. */
 export function daytonaDesktopControl(
   computerUse: DaytonaSandbox["computerUse"],
+  /** Window list with real geometry; Daytona's own reports every window at
+   *  0x0. Falls back to the API list when it yields nothing. */
+  listWindows?: () => Promise<SandboxDesktopWindow[]>,
 ): SandboxDesktopControl {
   const display = async () => {
     const info = await computerUse.display.getInfo();
@@ -526,6 +531,8 @@ export function daytonaDesktopControl(
     },
     display,
     async windows() {
+      const listed = await listWindows?.().catch(() => []);
+      if (listed?.length) return listed;
       const { windows = [] } = await computerUse.display.getWindows();
       return windows.map((w) => ({
         id: String(w.id ?? ""),
@@ -975,7 +982,13 @@ export class DaytonaProvider implements SandboxProvider {
 
   async desktopControl(sandboxId: string): Promise<SandboxDesktopControl> {
     const sbx = await this.desktopSandbox(sandboxId);
-    return daytonaDesktopControl(sbx.computerUse);
+    const sandbox = await this.get(sandboxId);
+    return daytonaDesktopControl(
+      sbx.computerUse,
+      sandbox
+        ? () => x11WindowsViaXprop((cmd, opts) => sandbox.exec(cmd, opts))
+        : undefined,
+    );
   }
 
   /** The running sandbox with its computer-use stack (Xvfb + xfce4 + x11vnc +

@@ -217,6 +217,77 @@ export function x11DesktopControl(
   };
 }
 
+/** Window list from the EWMH client list via `xprop` and `xwininfo`, for a
+ *  display without xdotool (Daytona's computer-use image). Its own API lists
+ *  titles but reports every window at 0x0, which is useless for aiming. */
+export async function x11WindowsViaXprop(
+  exec: X11Exec,
+  display = ":0",
+): Promise<SandboxDesktopWindow[]> {
+  const result = await exec(
+    [
+      "bash",
+      "-c",
+      `export DISPLAY=${display}; ` +
+        `active=$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | sed 's/.*# //; s/,.*//'); ` +
+        `for w in $(xprop -root _NET_CLIENT_LIST 2>/dev/null | sed 's/.*# //; s/,//g' | head -40); do ` +
+        `printf '== %s %s\\n' "$w" "$([ "$w" = "$active" ] && echo 1 || echo 0)"; ` +
+        `xprop -id "$w" _NET_WM_NAME WM_NAME 2>/dev/null; xwininfo -id "$w" 2>/dev/null; done`,
+    ],
+    { timeoutMs: 30_000 },
+  );
+  return parseXpropWindows(result.stdout);
+}
+
+export function parseXpropWindows(output: string): SandboxDesktopWindow[] {
+  const windows: SandboxDesktopWindow[] = [];
+  let current: SandboxDesktopWindow | undefined;
+  let viewable = false;
+  const flush = () => {
+    if (current && viewable && current.width > 0 && current.height > 0)
+      windows.push(current);
+  };
+  for (const line of output.split("\n")) {
+    const head = /^== (\S+) ([01])$/.exec(line);
+    if (head) {
+      flush();
+      current = {
+        id: head[1]!,
+        title: "",
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        active: head[2] === "1",
+      };
+      viewable = false;
+      continue;
+    }
+    if (!current) continue;
+    const name = /^(?:_NET_WM_NAME|WM_NAME)\([^)]*\) = "(.*)"\s*$/.exec(line);
+    if (name) {
+      // _NET_WM_NAME comes first and is UTF-8; keep it over WM_NAME.
+      if (!current.title) current.title = name[1]!.replace(/\\"/g, '"');
+      continue;
+    }
+    const geom =
+      /^\s+(Absolute upper-left X|Absolute upper-left Y|Width|Height):\s+(-?\d+)/.exec(
+        line,
+      );
+    if (geom) {
+      const value = Number(geom[2]);
+      if (geom[1] === "Absolute upper-left X") current.x = value;
+      else if (geom[1] === "Absolute upper-left Y") current.y = value;
+      else if (geom[1] === "Width") current.width = value;
+      else current.height = value;
+      continue;
+    }
+    if (/^\s+Map State:\s+IsViewable/.test(line)) viewable = true;
+  }
+  flush();
+  return windows;
+}
+
 export function parseX11Windows(output: string): SandboxDesktopWindow[] {
   const windows: SandboxDesktopWindow[] = [];
   for (const line of output.split("\n")) {
