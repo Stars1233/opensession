@@ -92,6 +92,25 @@ describe("stampWorkspaceIdentity", () => {
     expect(out?.branch).toBe("some-branch");
   });
 
+  test("repairs a PR workspace stuck on its review checkout branch", () => {
+    const ws = createWorkspace({
+      name: "#306 Answer the ask card's letters",
+      repo: "opensession",
+      createdBy: "GitHub (automation)",
+      key: "ghpr-opensession-306",
+      prNumber: 306,
+      branch: "ask-question-shortcuts-os-review",
+    });
+    const out = stampWorkspaceIdentity(ws.id, {
+      key: "ghpr-opensession-306",
+      prNumber: 306,
+      branch: "ask-question-shortcuts",
+      repo: "opensession",
+    });
+    expect(out?.branch).toBe("ask-question-shortcuts");
+    expect(getWorkspace(ws.id)?.branch).toBe("ask-question-shortcuts");
+  });
+
   test("leaves the repo alone once the workspace owns a worktree", () => {
     const ws = createWorkspace({
       name: "Materialized",

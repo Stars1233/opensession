@@ -255,6 +255,34 @@ describe("sessionPrBranch", () => {
     ).toBe("add-lottie-primitive");
   });
 
+  // A PR workspace materialized by its review checkout carried that derived
+  // branch instead of the head, so every tab in it showed "No PR open".
+  test("a PR workspace on its own review checkout resolves to the head", () => {
+    const reviewBranchWorkspace = {
+      ...workspace,
+      branch: "add-lottie-primitive-os-review",
+    };
+    expect(sessionPrBranch(session, reviewBranchWorkspace)).toBe(
+      "add-lottie-primitive",
+    );
+    expect(
+      sessionPrBranch(
+        { id: "bks-ask" } as UnifiedSession,
+        reviewBranchWorkspace,
+      ),
+    ).toBe("add-lottie-primitive");
+  });
+
+  test("only strips the review suffix from a PR-backed workspace", () => {
+    expect(
+      sessionPrBranch({ id: "bks-ask" } as UnifiedSession, {
+        ...workspace,
+        prNumber: undefined,
+        branch: "add-lottie-primitive-os-review",
+      }),
+    ).toBe("add-lottie-primitive-os-review");
+  });
+
   test("does not rewrite ordinary session branches", () => {
     expect(
       sessionPrBranch(

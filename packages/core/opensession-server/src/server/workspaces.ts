@@ -620,6 +620,10 @@ export function stampWorkspaceIdentity(
   // is the point where its repo stops being a guess.
   const adoptRepo =
     patch.repo && !cur.branch && !cur.worktreeDir && cur.repo !== patch.repo;
+  // A PR workspace materialized by its review checkout carries the derived
+  // `<head>-os-review` branch; the PR resolve names the real head, so take it.
+  const repairBranch =
+    !!patch.branch && cur.branch === `${patch.branch}-os-review`;
   // externalRefs accrue (a workspace can carry several linked objects, like
   // PRs) — only the dedupe key is refused once present.
   const addRef =
@@ -636,7 +640,9 @@ export function stampWorkspaceIdentity(
     ...(patch.prNumber !== undefined && cur.prNumber === undefined
       ? { prNumber: patch.prNumber }
       : {}),
-    ...(patch.branch && !cur.branch ? { branch: patch.branch } : {}),
+    ...(patch.branch && (!cur.branch || repairBranch)
+      ? { branch: patch.branch }
+      : {}),
     ...(adoptRepo ? { repo: patch.repo } : {}),
     ...(patch.plainThreadId && !cur.plainThreadId
       ? { plainThreadId: patch.plainThreadId }

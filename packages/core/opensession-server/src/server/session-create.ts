@@ -2652,11 +2652,22 @@ export async function handleCreateSessionMessage(
       (!usesSharedCheckout || fromPr) &&
       (worktreeMode !== "stack" || !workspace.branch)
     ) {
+      // A PR workspace's branch is the PR head. The session materializing
+      // it may sit on the derived <head>-os-review checkout, which no PR
+      // ever resolves on, so that checkout never renames the workspace.
+      const workspaceBranch =
+        workspace.prNumber != null && workspace.branch
+          ? workspace.branch
+          : branch;
       updateWorkspace(workspace.id, {
         worktreeDir: wtPath,
-        ...(branch ? { branch } : {}),
+        ...(workspaceBranch ? { branch: workspaceBranch } : {}),
       });
-      workspace = { ...workspace, worktreeDir: wtPath, branch };
+      workspace = {
+        ...workspace,
+        worktreeDir: wtPath,
+        branch: workspaceBranch,
+      };
     }
     // The branch this session actually works on (also persisted below).
     const sessionBranch = forkSource

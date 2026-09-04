@@ -1039,9 +1039,15 @@ registerSessionControl({
       !isScratch &&
       ownedWorktree(wtPath)
     ) {
+      // A PR workspace's branch is the PR head; a session on the derived
+      // <head>-os-review checkout never renames it (see session-pr-target).
+      const workspaceBranch =
+        joinedWorkspace.prNumber != null && joinedWorkspace.branch
+          ? joinedWorkspace.branch
+          : sessionBranch;
       updateWorkspace(joinedWorkspace.id, {
         worktreeDir: wtPath,
-        ...(sessionBranch ? { branch: sessionBranch } : {}),
+        ...(workspaceBranch ? { branch: workspaceBranch } : {}),
       });
     }
 

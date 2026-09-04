@@ -12,7 +12,18 @@ function inheritedBranch(
   if (!workspace?.branch) return null;
   if (session.repo && workspace.repo && session.repo !== workspace.repo)
     return null;
-  return workspace.branch;
+  return workspacePrHead(workspace) ?? workspace.branch;
+}
+
+/**
+ * The PR head a PR-backed workspace names, or null when it has no PR. A PR
+ * workspace materialized by its review checkout can carry the derived
+ * `<head>-os-review` branch instead of the head (the PR cache never has a PR
+ * on that branch), so resolve on the head it was derived from.
+ */
+function workspacePrHead(workspace: Workspace): string | null {
+  if (workspace.prNumber == null || !workspace.branch) return null;
+  return workspace.branch.replace(/-os-review$/, "");
 }
 
 /**
@@ -42,13 +53,11 @@ export function sessionPrBranch(
     workspace === undefined && session.workspaceId
       ? getWorkspace(session.workspaceId)
       : workspace;
+  const prHead = parent ? workspacePrHead(parent) : null;
   const reviewCheckout =
     session.automation === "github-pr-review" ||
-    (!!parent?.branch && session.branch === `${parent.branch}-os-review`);
-  if (reviewCheckout)
-    return parent?.prNumber != null && parent.branch
-      ? parent.branch
-      : session.branch;
+    (!!prHead && session.branch === `${prHead}-os-review`);
+  if (reviewCheckout) return prHead ?? session.branch;
   return session.branch || inheritedBranch(session, parent);
 }
 
