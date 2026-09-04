@@ -33,7 +33,10 @@ import { shellQuoteWord } from "./sandbox/adapters/bootstrap";
 import { sandboxHttpsPortFor } from "./sandbox/preview-ports";
 import { cacheSandboxPortalRecords } from "./sandbox-portals";
 import { REPO_ROOT } from "../runner-host/protocol";
-import { sessionScratchRoot } from "./session-scratch";
+import {
+  sandboxSessionScratchDir,
+  sessionScratchRoot,
+} from "./session-scratch";
 import type { Sandbox } from "./sandbox/provider";
 import type { UnifiedSession } from "./types";
 
@@ -872,7 +875,7 @@ export async function ensureRemoteSandboxPortalAgent(input: {
     const grant = mintSandboxPortalGrant(relayIdentity);
     const callbackBase = remoteSandboxCallbackBaseUrl().replace(/\/$/, "");
     const endpoint = `${callbackBase}/sandbox-portal-ws?session=${encodeURIComponent(input.sessionId)}&sandbox=${encodeURIComponent(input.sandbox.id)}&port=${input.port}`;
-    const logDir = join(sessionScratchRoot(), input.sessionId);
+    const logDir = sandboxSessionScratchDir(input.sessionId);
     const logPath = `${logDir}/sandbox-portal-${input.port}.log`;
     // Portal transport fixes must not wait for a repository image refresh or
     // mutate the prepared project. Copy this small, self-contained sidecar
@@ -966,9 +969,10 @@ function withSandboxPortalOperation(
 async function startSandboxPortalServiceInner(
   input: SandboxPortalStartInput,
 ): Promise<PortalRecord> {
+  // Sandbox-side path: it must match the agent's $OPENSESSION_SCRATCH there,
+  // not the host's scratch root.
   const sandboxRuntimeDir = join(
-    sessionScratchRoot(),
-    input.sessionId,
+    sandboxSessionScratchDir(input.sessionId),
     "portals",
   );
   const awake = await startPortal(
