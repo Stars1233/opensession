@@ -26,6 +26,7 @@ import { ModelMark } from "./ModelMark";
 import { BrandMark } from "./BrandTile";
 import { UserAvatar } from "./UserAvatar";
 import { useCurrentUser } from "./UserPicker";
+import { useNavigation } from "../hooks/useNavigation";
 import { usePeople } from "../lib/people";
 import type { ModelEffortSelectProps } from "../lib/model-effort-select-types";
 import {
@@ -451,6 +452,7 @@ export function ModelEffortSelect({
   // still has a week in it", and that is also why a row for the current
   // model's pool pins that account.
   const viewer = useCurrentUser();
+  const navigation = useNavigation();
   // The owner avatars resolve through the people directory; subscribing here
   // fetches it if nothing else has yet and redraws the rows when it lands.
   usePeople();
@@ -946,6 +948,14 @@ export function ModelEffortSelect({
                 {hasAccount && weeklyRowsForModel.length > 0 && (
                   <MenuHint>Choose one to use it for this session</MenuHint>
                 )}
+                <Menu.Separator className="my-1" />
+                <Menu.Item
+                  className="justify-between gap-3"
+                  onClick={() => navigation.openSettings("providers")}
+                >
+                  <span className="min-w-0 truncate">Manage accounts</span>
+                  <IconChevronRight className="shrink-0 text-dim" size={17} />
+                </Menu.Item>
               </Menu.Popup>
             </Menu.SubmenuRoot>
             <Menu.Separator className="my-1" />
