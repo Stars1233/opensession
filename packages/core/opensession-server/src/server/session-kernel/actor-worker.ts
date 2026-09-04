@@ -291,7 +291,12 @@ export function startSessionKernelActorWorker(): void {
             result = host.central.seedSessionMetadataCatalog(metadata.rows);
           else if (metadata.op === "catalog_complete")
             result = host.central.sessionMetadataCatalogComplete();
-          else result = host.central.markSessionMetadataCatalogComplete();
+          else if (metadata.op === "mark_catalog_complete")
+            result = host.central.markSessionMetadataCatalogComplete();
+          else
+            throw new Error(
+              `Unknown session metadata op ${String((metadata as { op?: unknown }).op)}`,
+            );
         } else if (command.kind === "turn") {
           const turn = command.request;
           if (turn.op === "snapshot")
