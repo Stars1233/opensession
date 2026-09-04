@@ -287,6 +287,8 @@ export function startSessionKernelActorWorker(): void {
             );
           else if (metadata.op === "pending_exports")
             result = host.central.sessionMetadataPendingExports(metadata.limit);
+          else if (metadata.op === "seed_catalog")
+            result = host.central.seedSessionMetadataCatalog(metadata.rows);
           else if (metadata.op === "catalog_complete")
             result = host.central.sessionMetadataCatalogComplete();
           else result = host.central.markSessionMetadataCatalogComplete();

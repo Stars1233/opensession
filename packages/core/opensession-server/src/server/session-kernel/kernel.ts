@@ -222,6 +222,8 @@ export async function sessionMetadata<T extends MetadataActorRequest>(
     ) as R;
   if (request.op === "pending_exports")
     return store.sessionMetadataPendingExports(request.limit) as R;
+  if (request.op === "seed_catalog")
+    return store.seedSessionMetadataCatalog(request.rows) as R;
   if (request.op === "catalog_complete")
     return store.sessionMetadataCatalogComplete() as R;
   return store.markSessionMetadataCatalogComplete() as R;
