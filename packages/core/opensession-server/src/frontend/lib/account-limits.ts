@@ -142,6 +142,9 @@ export interface WeeklyRemainingRow {
   /** Whole percent left, 0-100. */
   remaining: number;
   tone: "low" | "warn" | "ok";
+  /** The viewer's name as the account records it when it is their personal
+   *  subscription; undefined for a shared-pool account. */
+  owner?: string;
 }
 
 /** Percent left → tone, on the same thresholds the accounts page uses for
@@ -211,10 +214,13 @@ export function weeklyRemainingRows(
         resetTitle: resetTitle(limit.resetsAt),
         remaining,
         tone: remainingTone(remaining),
+        owner: account.owner,
       });
     }
   }
-  return rows;
+  // Your own subscriptions first: they are the ones routing spends before the
+  // pool, so they are the numbers you want at a glance.
+  return rows.sort((a, b) => Number(!!b.owner) - Number(!!a.owner));
 }
 
 /** The tightest weekly budget among `rows`, for the menu row's readout. */

@@ -125,7 +125,7 @@ describe("accountLimitsFromUsage", () => {
 });
 
 describe("weeklyRemainingRows", () => {
-  test("only the pool and the viewer's own accounts", () => {
+  test("the viewer's own accounts first, then the pool, nobody else's", () => {
     const limits = [{ utilization: 50, resetsAt: inHours(70), weekly: true }];
     const rows = weeklyRemainingRows(
       [
@@ -149,7 +149,11 @@ describe("weeklyRemainingRows", () => {
       "Kent",
       NOW,
     );
-    expect(rows.map((r) => r.accountId)).toEqual(["pool", "mine", "mine-long"]);
+    expect(rows.map((r) => [r.accountId, r.owner])).toEqual([
+      ["mine", "Kent"],
+      ["mine-long", "Kent de Bruin"],
+      ["pool", undefined],
+    ]);
   });
 
   test("one line per weekly limit, with remaining percent and refill day", () => {

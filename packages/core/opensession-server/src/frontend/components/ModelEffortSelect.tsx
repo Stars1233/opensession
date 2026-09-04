@@ -15,9 +15,16 @@ import {
 import { Menu } from "../ui/menu";
 import { cn } from "../ui/cn";
 import { Tooltip } from "../ui/tooltip";
-import { IconBolt, IconChevronRight, IconSparkle, IconUndo } from "./icons";
+import {
+  IconBolt,
+  IconChevronRight,
+  IconPeople,
+  IconSparkle,
+  IconUndo,
+} from "./icons";
 import { ModelMark } from "./ModelMark";
 import { BrandMark } from "./BrandTile";
+import { UserAvatar } from "./UserAvatar";
 import { useCurrentUser } from "./UserPicker";
 import type { ModelEffortSelectProps } from "../lib/model-effort-select-types";
 import {
@@ -902,6 +909,20 @@ export function ModelEffortSelect({
                         <span className="min-w-0 truncate">{row.label}</span>
                       </span>
                       <span className="flex flex-none items-center gap-2 tabular-nums">
+                        {row.owner ? (
+                          <UserAvatar
+                            name={row.owner}
+                            size={14}
+                            edge={false}
+                            title="Yours"
+                          />
+                        ) : (
+                          <IconPeople
+                            size={14}
+                            className="text-faint"
+                            aria-label="Shared"
+                          />
+                        )}
                         <span className="text-faint" title={row.resetTitle}>
                           {row.day}
                         </span>
