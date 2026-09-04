@@ -36,6 +36,7 @@ import {
 import {
   lookupSandboxHttpsPort,
   releaseSandboxPreviewPorts,
+  sandboxAllocationForHttpsPort,
   sandboxHttpsPortFor,
 } from "./sandbox/preview-ports";
 import type { Sandbox } from "./sandbox/provider";
@@ -708,11 +709,10 @@ export async function getSandboxPreviewStatus(
  */
 export async function dropSandboxPreviewRoutes(
   sandboxId: string,
-  options: { preservePortalCache?: boolean } = {},
 ): Promise<void> {
   revokeSandboxPortalGrants(sandboxId);
   forgetRemoteSandboxPortalAgents(sandboxId);
-  if (!options.preservePortalCache) dropCachedSandboxPortals(sandboxId);
+  dropCachedSandboxPortals(sandboxId);
   for (const httpsPort of releaseSandboxPreviewPorts(sandboxId)) {
     // removePreviewRoute only touches routes this process cached — a destroy
     // right after a restart may miss the cache, so delete unconditionally.
@@ -725,5 +725,23 @@ export async function dropSandboxPreviewRoutes(
         },
       );
     } catch {}
+  }
+}
+
+/**
+ * Sleep hook for a Sandbox that keeps its disk: withdraw the relay and this
+ * process's authority for its routes, but keep the durable https
+ * allocations, the Caddy servers, and the Portal cache. The URLs a person
+ * already has stay reachable; the forward-auth probe finds no authority,
+ * runs route recovery, and a navigation there wakes the Sandbox
+ * (src/server/sandbox-portal-recovery.ts). Dropping the servers instead
+ * would turn every sleeping Portal into a refused connection.
+ */
+export function suspendSandboxPreviewRoutes(sandboxId: string): void {
+  revokeSandboxPortalGrants(sandboxId);
+  forgetRemoteSandboxPortalAgents(sandboxId);
+  for (const [httpsPort] of previewRoutes) {
+    const allocation = sandboxAllocationForHttpsPort(httpsPort);
+    if (allocation?.sandboxId === sandboxId) previewRoutes.delete(httpsPort);
   }
 }

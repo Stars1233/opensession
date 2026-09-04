@@ -4,7 +4,8 @@
  * loopback relay and its authorization map deliberately do not. The first
  * authenticated request after restart uses durable presentation metadata only
  * to find a candidate, then verifies the live session and running sandbox
- * before restoring authority. A sleeping or replaced sandbox stays denied.
+ * before restoring authority. A replaced sandbox stays denied. A sleeping one
+ * is woken only for a person's navigation (`wake`); a fetch stays denied.
  */
 import { ensureRemoteSandboxPortalAgent } from "./portal-supervisor";
 import { portalRouteAuthorized } from "./preview";

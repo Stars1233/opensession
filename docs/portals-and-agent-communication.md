@@ -53,10 +53,11 @@ route.
 While that rebuild runs, a person opening the Portal in a browser sees a
 small "Starting the Portal" page served from the Portal port itself
 (`src/server/portal-waiting-page.ts`): a 503 that refreshes every few seconds
-until the route is live, instead of a blank tab that times out. A signed-in
-navigation is also allowed to wake a sleeping Sandbox, since a person opening
-the URL is as explicit as pressing Wake; a fetch or an asset load never wakes
-anything and simply waits for the rebuild. When the Portal cannot come back
+until the route is live, instead of a blank tab that times out. Sleep keeps
+the Portal's public port and its Caddy route and withdraws only the relay, so
+the URL stays reachable; a signed-in navigation there wakes the Sandbox,
+since a person opening the URL is as explicit as pressing Wake. A fetch or an
+asset load never wakes anything and simply waits for the rebuild. When the Portal cannot come back
 (its Sandbox is gone or the service was stopped) the navigation gets a 404
 page with a link back to the session. Both pages say nothing about the
 Sandbox beyond that.

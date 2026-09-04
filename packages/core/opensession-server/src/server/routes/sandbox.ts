@@ -9,7 +9,10 @@ import {
   type SandboxTrustPolicy,
 } from "../sandbox/adapters/bootstrap";
 import type { SandboxSessionSpec } from "../sandbox/provider";
-import { dropSandboxPreviewRoutes } from "../preview";
+import {
+  dropSandboxPreviewRoutes,
+  suspendSandboxPreviewRoutes,
+} from "../preview";
 import { findSessionAsync, touchNativeSession } from "../session-cache";
 import type { RouteContext } from "./context";
 
@@ -192,9 +195,8 @@ export async function handleSandboxRoutes(
           { error: `${recorded.provider} does not expose manual pause` },
           { status: 400 },
         );
-      await dropSandboxPreviewRoutes(recorded.sandboxId, {
-        preservePortalCache: true,
-      });
+      // The Portal URLs stay up through sleep; opening one wakes the Sandbox.
+      suspendSandboxPreviewRoutes(recorded.sandboxId);
       touchNativeSession(session.id, {
         sandbox: {
           ...recorded,
