@@ -101,6 +101,7 @@ import {
   reconcileRecoverableSafetyFences,
   recordRunOutcome,
   startSessionOwnershipWatchdog,
+  reconcileSessionMetadataExports,
   stopSessionOwnershipWatchdog,
 } from "./src/server/session-cache";
 import { getSessionControl } from "./src/server/session-control";
@@ -275,6 +276,9 @@ if (!g.__opensessionBooted && !isDevInstance()) {
   await restorePendingAsks();
   await hydratePersistedQueueState();
 }
+// Session files are exports of actor-owned metadata. Repair the ones a crash
+// left behind their committed revision before any route reads them.
+if (!g.__opensessionBooted) await reconcileSessionMetadataExports();
 
 const gatewayProcessLabel = process.env.OPENSESSION_GATEWAY_BACKEND_PORT
   ? "gateway backend"

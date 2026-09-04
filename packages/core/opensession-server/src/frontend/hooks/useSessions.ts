@@ -21,9 +21,11 @@ import {
   LIVE_POLL_FALLBACK_MS,
   LIVE_QUERY,
   liveSnapshotMatchesQuery,
+  reconcilePendingSessionPatch,
   reconcilePendingSessionPatches,
   reconcileStickySessions,
   sessionPatchNeedsAcknowledgement,
+  upsertSessionRow,
   type PendingSessionPatch,
   type StickySession,
 } from "../lib/session-list-state";
@@ -36,10 +38,12 @@ export type {
 export {
   LIVE_POLL_FALLBACK_MS,
   liveSnapshotMatchesQuery,
+  reconcilePendingSessionPatch,
   reconcilePendingSessionPatches,
   reconcileStickySessions,
   sessionPatchNeedsAcknowledgement,
   sidebarSessionsQuery,
+  upsertSessionRow,
 } from "../lib/session-list-state";
 
 export function useSessions({
@@ -51,7 +55,9 @@ export function useSessions({
   loadArchived?: boolean;
   pollInterval?: number;
   liveQuery?: string;
-  socket?: Pick<SessionSocket, "addHandler"> & { connected: boolean };
+  socket?: Pick<SessionSocket, "addHandler" | "send"> & {
+    connected: boolean;
+  };
 } = {}) {
   const [runtime] = useState(() => SessionListRuntime.makeSessionListRuntime());
   const [live, setLive] = useState<UnifiedSession[]>([]);
@@ -321,21 +327,63 @@ export function useSessions({
     runtime.invalidate({ refreshArchived: archivedIndex !== null });
   };
 
+  // One row changed on the server and its scope evaluation already ran
+  // there: apply it in place instead of re-reading the whole list. The row is
+  // a server snapshot of that session, so it reconciles against optimistic
+  // patches exactly like a poll would, for that one session only.
+  const onRow = useEffectEvent((row: UnifiedSession) => {
+    lastTextRef.current = null;
+    etagRef.current = null;
+    const sticky = stickyRef.current.get(row.id);
+    if (sticky) {
+      sticky.session = row;
+      sticky.serverSeen = true;
+    }
+    const reconciled = reconcilePendingSessionPatch(
+      row,
+      pendingPatchRef.current,
+      runtimeRevisionRef.current,
+    );
+    if (reconciled.archived) {
+      setLive((prev) => prev.filter((s) => s.id !== row.id));
+      if (archivedIndex !== null) runtime.refreshArchived();
+      return;
+    }
+    setLive((prev) => upsertSessionRow(prev, reconciled));
+  });
+  const onRowRemoved = useEffectEvent((id: string) => {
+    if (!liveRef.current.some((s) => s.id === id)) return;
+    lastTextRef.current = null;
+    etagRef.current = null;
+    setLive((prev) => prev.filter((s) => s.id !== id));
+  });
+
   const onInvalidated = useEffectEvent(() => refreshInvalidated());
   const addHandler = socket?.addHandler;
   useEffect(() => {
     if (!addHandler) return;
     return addHandler((message) => {
       if (message.type === "sessions_invalidated") onInvalidated();
+      else if (message.type === "session_row") onRow(message.row);
+      else if (message.type === "session_row_removed") onRowRemoved(message.id);
     });
   }, [addHandler]);
+
+  // Tell the server which sidebar projection this socket renders, so row
+  // frames are scoped the same way the list request is. Re-sent on every
+  // reconnect and whenever the lens changes.
+  const send = socket?.send;
+  const socketConnected = socket?.connected ?? false;
+  useEffect(() => {
+    if (!socketConnected || !send) return;
+    send({ type: "sessions_subscribe", query: liveQuery });
+  }, [socketConnected, send, liveQuery]);
 
   // A disconnected socket may miss list invalidations. Refresh on every
   // connection, including the first: the initial list request may have read an
   // older snapshot before the socket handler was ready. The keyed request fiber
   // interrupts that older snapshot before reading the newer server state.
   const onConnected = useEffectEvent(() => refreshInvalidated());
-  const socketConnected = socket?.connected ?? false;
   useEffect(() => {
     if (socketConnected) onConnected();
     // Refresh only when connectivity changes. Changes to the current list or
