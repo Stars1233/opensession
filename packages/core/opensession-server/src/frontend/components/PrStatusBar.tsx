@@ -67,7 +67,10 @@ import { Spinner } from "../ui/spinner";
 import { Skeleton, SkeletonBar } from "../ui/state";
 import { cn } from "../ui/cn";
 import { useShortcutLabel } from "../hooks/useShortcutBindings";
-import { useDeferredMergePhase } from "../hooks/useDeferredMerge";
+import {
+  useDeferredMergeDeadline,
+  useDeferredMergePhase,
+} from "../hooks/useDeferredMerge";
 import {
   cancelDeferredMergeByKey,
   deferredMergeKey,
@@ -516,6 +519,7 @@ export function PrStatusBar({
   const { mutate: reloadGit } = gitResource;
   const mergeKey = deferredMergeKey(pr?.url);
   const mergePhase = useDeferredMergePhase(mergeKey);
+  const mergeDeadline = useDeferredMergeDeadline(mergeKey);
   const loaded =
     !prResource.isLoading && (Boolean(promoted) || !gitResource.isLoading);
   const [busy, setBusy] = useState<string | null>(null);
@@ -1007,6 +1011,7 @@ export function PrStatusBar({
           <span className="inline-flex shrink-0 items-center gap-1">
             <MergeUndoControl
               className={variant === "header" ? undefined : "min-h-[30px]"}
+              deadline={mergeDeadline}
               onUndo={handleMerge}
             />
             {mergeButton}

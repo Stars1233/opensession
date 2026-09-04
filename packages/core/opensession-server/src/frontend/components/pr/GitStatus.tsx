@@ -22,6 +22,8 @@ import type {
 } from "../../lib/types";
 import { Button } from "../../ui/button";
 import { MergeUndoControl } from "./MergeUndoControl";
+import { deferredMergeKey } from "../../lib/deferred-merge";
+import { useDeferredMergeDeadline } from "../../hooks/useDeferredMerge";
 
 /**
  * Local/remote discrepancy rows for the Status card: each gets a line with one
@@ -52,6 +54,7 @@ export function GitStatusRows({
 }) {
   const runner = useGitTaskRunner({ sessionId, repo, send, onRefresh });
   const { prompted, error } = runner;
+  const mergeDeadline = useDeferredMergeDeadline(deferredMergeKey(pr?.url));
 
   const base = pr?.baseRefName || git?.baseBranch || "main";
   const tasks = gitTasks(git, pr, base);
@@ -81,7 +84,13 @@ export function GitStatusRows({
         resolveAction ||
         (pr.state === "OPEN" && !pr.isDraft && onMerge ? (
           <span className="inline-flex shrink-0 items-center gap-1">
-            {mergeScheduled && <MergeUndoControl compact onUndo={onMerge} />}
+            {mergeScheduled && (
+              <MergeUndoControl
+                compact
+                deadline={mergeDeadline}
+                onUndo={onMerge}
+              />
+            )}
             <button
               className={GIT_ACTION}
               onClick={onMerge}
