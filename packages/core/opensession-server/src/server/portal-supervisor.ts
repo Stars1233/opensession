@@ -62,6 +62,12 @@ export type PortalRecord = {
   lastError?: string;
 };
 
+/** The longest a Portal may take to listen. A cold Sandbox resume can spend
+ * minutes pulling a lazy volume before a dev server binds, and the waiting
+ * page keeps the person informed meanwhile. The same bound decides when a
+ * "starting" record is stuck. */
+export const MAX_PORTAL_READY_MS = 600_000;
+
 const PREFIX = "# opensession-portal ";
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const MIN_PORT = 1024;
@@ -343,7 +349,8 @@ async function listPortals(ops: PortalOps): Promise<PortalRecord[]> {
       const startedMs = record.startedAt
         ? Date.now() - Date.parse(record.startedAt)
         : 0;
-      const stuckStarting = record.state === "starting" && startedMs > 300_000;
+      const stuckStarting =
+        record.state === "starting" && startedMs > MAX_PORTAL_READY_MS;
       const state: PortalState = listening
         ? "awake"
         : alive && record.state !== "awake" && !stuckStarting
@@ -456,7 +463,7 @@ async function startPortal(
   const record = { ...base, pid };
   await ops.writeRegistry(upsert(records, record));
   const readyTimeoutMs = Math.min(
-    300_000,
+    MAX_PORTAL_READY_MS,
     Math.max(5_000, input.readyTimeoutMs ?? 15_000),
   );
   const readiness = await waitForPortalPort(ops, port, pid, readyTimeoutMs);
@@ -976,6 +983,16 @@ function sandboxPortalOperations(): Map<string, Promise<PortalRecord>> {
     __opensessionSandboxPortalOperations?: Map<string, Promise<PortalRecord>>;
   };
   return (global.__opensessionSandboxPortalOperations ??= new Map());
+}
+
+/** Whether a start, restart, or wake-restore for this Sandbox Portal is
+ * running right now. The forward-auth probe shows the waiting page for it
+ * instead of proxying to a port nobody listens on yet. */
+export function sandboxPortalOperationPending(
+  sandboxId: string,
+  name: string,
+): boolean {
+  return sandboxPortalOperations().has(`${sandboxId}:${name}`);
 }
 
 function withSandboxPortalOperation(

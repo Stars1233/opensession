@@ -7,14 +7,20 @@
  * before restoring authority. A replaced sandbox stays denied. A sleeping one
  * is woken only for a person's navigation (`wake`); a fetch stays denied.
  */
-import { ensureRemoteSandboxPortalAgent } from "./portal-supervisor";
+import {
+  ensureRemoteSandboxPortalAgent,
+  sandboxPortalOperationPending,
+} from "./portal-supervisor";
 import { portalRouteAuthorized } from "./preview";
 import {
   sandboxPortalRelayConnected,
   waitForSandboxPortalRelay,
 } from "./sandbox-portal-relay";
 import { sandboxAllocationForHttpsPort } from "./sandbox/preview-ports";
-import { cachedSandboxPortalOwner } from "./sandbox-portals";
+import {
+  cachedSandboxPortalOwner,
+  cachedSandboxPortalService,
+} from "./sandbox-portals";
 import { findSessionAsync } from "./session-cache";
 import { activeSandboxFor, restoreSandboxPortals } from "./session-sandbox";
 
@@ -32,6 +38,22 @@ const recovering = new Map<
 /** Whether a recovery for this route is in flight right now. */
 export function sandboxPortalRouteRecovering(httpsPort: number): boolean {
   return recovering.has(httpsPort);
+}
+
+/** Whether the Portal behind this route is being started right now (a
+ * start, restart, or wake-restore holds its operation lock), from durable
+ * presentation metadata; false for host/runner routes. */
+export function sandboxPortalRouteStarting(httpsPort: number): boolean {
+  const allocation = sandboxAllocationForHttpsPort(httpsPort);
+  if (!allocation) return false;
+  const service = cachedSandboxPortalService(
+    allocation.sandboxId,
+    allocation.containerPort,
+  );
+  return Boolean(
+    service &&
+    sandboxPortalOperationPending(allocation.sandboxId, service.name),
+  );
 }
 
 /** The session that last registered the Portal behind this route, from the

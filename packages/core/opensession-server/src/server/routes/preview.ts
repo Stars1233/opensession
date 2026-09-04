@@ -97,6 +97,7 @@ export async function handlePreviewRoutes(
         recoverSandboxPortalRoute,
         sandboxPortalRouteConnected,
         sandboxPortalRouteSession,
+        sandboxPortalRouteStarting,
       } = await import("../sandbox-portal-recovery");
       // Caddy routes and their authorization can outlive the outbound relay.
       // Verify both on every authenticated request; a disconnected sandbox
@@ -127,6 +128,14 @@ export async function handlePreviewRoutes(
         if (!recoveredNow)
           return notActive(sandboxPortalRouteSession(httpsPort));
       }
+      // The route is live but its service may still be booting (a start the
+      // agent or a wake kicked off). Proxying now would reach a port nobody
+      // listens on and show a bare 502; keep the person on the waiting page.
+      if (navigation && sandboxPortalRouteStarting(httpsPort))
+        return portalWaitingResponse({
+          state: "waking",
+          retrySeconds: PORTAL_WAITING_RETRY_SECONDS,
+        });
     } catch (error) {
       console.warn(`[portals] Portal ${httpsPort} recovery failed:`, error);
       return notActive(null);

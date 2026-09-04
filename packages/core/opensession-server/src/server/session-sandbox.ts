@@ -14,6 +14,7 @@ import { touchNativeSession } from "./session-cache";
 import { dropSandboxPreviewRoutes } from "./preview";
 import {
   listSandboxPortalServices,
+  MAX_PORTAL_READY_MS,
   portalsToRestore,
   readSandboxPortalRecords,
   restartSandboxPortalService,
@@ -192,6 +193,10 @@ export async function restoreSandboxPortals(
         ...(recipe ? recipeStartOptions(recipe) : { name: record.name }),
         port: record.port,
         env,
+        // A recipe's window is tuned for a warm start. A wake pays for a
+        // cold volume first, and the person is looking at the waiting page
+        // rather than a hung tab, so give it the whole bound.
+        readyTimeoutMs: MAX_PORTAL_READY_MS,
       });
       console.log(
         `[sandbox] ${sandbox.id}: restored Portal ${record.name} on ${record.port}`,

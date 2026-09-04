@@ -136,6 +136,19 @@ export function cachedSandboxPortalOwner(
   return entry?.sessionId ?? null;
 }
 
+/** The cached Portal behind a sandbox service port, by name. */
+export function cachedSandboxPortalService(
+  sandboxId: string,
+  port: number,
+): CachedPortal | null {
+  for (const entry of load().portals) {
+    if (entry.sandboxId !== sandboxId) continue;
+    const service = entry.services.find((item) => item.port === port);
+    if (service) return service;
+  }
+  return null;
+}
+
 export function dropCachedSandboxPortals(sandboxId: string): void {
   const store = load();
   const portals = store.portals.filter(
