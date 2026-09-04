@@ -84,11 +84,15 @@ function prRefKey(ref: Pick<SessionPrRef, "repo" | "branch">): string {
 }
 
 function flatPrRef(session: UnifiedSession): SessionPrRef | null {
-  if ((!session.prUrl && session.prNumber == null) || !session.branch)
-    return null;
+  // The flat fields were resolved through sessionPrBranch, so the ref must
+  // name that branch too: a tab on a `<head>-os-review` checkout otherwise
+  // projects a primary ref on the review branch, and the PR routes then look
+  // up a PR that branch never had.
+  const branch = sessionPrBranch(session);
+  if ((!session.prUrl && session.prNumber == null) || !branch) return null;
   return {
     repo: session.repo || defaultRepo().id,
-    branch: session.branch,
+    branch,
     source: "primary",
     url: session.prUrl,
     state: session.prState,
