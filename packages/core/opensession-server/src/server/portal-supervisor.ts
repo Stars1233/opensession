@@ -931,6 +931,33 @@ export async function readSandboxPortalRecords(
   return (await readSandboxPortalRegistry(sandbox)).records;
 }
 
+/**
+ * The Portals the registry marks live whose process is gone: a provider that
+ * stopped and restarted the Sandbox on its own (an idle timeout) leaves the
+ * registry intact and every process dead, while the session's lifecycle never
+ * saw a wake. `marked` is the registry as persisted; `probed` is the same
+ * registry after the liveness probe (listSandboxPortalServices). A Portal the
+ * probe still finds awake or starting is healthy and stays untouched.
+ */
+export function portalsToRestore(
+  marked: PortalRecord[],
+  probed: PortalRecord[],
+): PortalRecord[] {
+  const live = new Set(
+    probed
+      .filter(
+        (record) => record.state !== "stopped" && record.state !== "failed",
+      )
+      .map((record) => record.name),
+  );
+  return marked.filter(
+    (record) =>
+      record.state !== "stopped" &&
+      record.state !== "failed" &&
+      !live.has(record.name),
+  );
+}
+
 type SandboxPortalStartInput = {
   sessionId: string;
   sandbox: Sandbox;

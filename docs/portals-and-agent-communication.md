@@ -44,7 +44,11 @@ retained route until the restarted server has rediscovered that exact port.
 Portals follow the Sandbox lifecycle. While a Sandbox sleeps the panel still
 shows its Portals, without URLs and without waking anything; the next wake
 restarts every Portal that was awake, with the same command and port, after
-`.agents/resume` has run. Stopping a Portal removes its route.
+`.agents/resume` has run. A provider that stops and restarts a Sandbox on its
+own (an idle timeout) leaves the registry intact and the processes gone; the
+next request to such a Portal relaunches the dead ones while it rebuilds the
+relay (`src/server/sandbox-portal-recovery.ts`), so the first load waits for
+the service rather than answering 502. Stopping a Portal removes its route.
 
 Current boundary: Portals inherit the instance's authenticated team boundary;
 there is no per-session ACL narrower than that team boundary yet.
