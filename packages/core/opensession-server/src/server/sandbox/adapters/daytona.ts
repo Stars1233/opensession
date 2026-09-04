@@ -95,34 +95,59 @@ const AUTOMATION_IDLE_STOP_MINUTES = 60;
  * Prove the domain allowlist is enforced inside the guest: the dial-back host
  * must answer and a host outside the list must not. Qualification confirms the
  * Daytona base image provides curl before automation use is enabled.
+ *
+ * Daytona applies `updateNetworkSettings` asynchronously: the runner rewrites
+ * the guest's policy 8–16s later, and for a moment every host is dark while
+ * it reloads. Probe until both sides settle instead of judging the first
+ * sample, which still shows the previous policy.
  */
+export const EGRESS_POLICY_SETTLE_MS = 90_000;
+const EGRESS_POLICY_PROBE_INTERVAL_MS = 4_000;
+
 export async function assertAutomationEgressRestricted(
   driver: RemoteDriver,
   callbackBaseUrl: string,
   blockedUrl: string,
+  options: {
+    settleMs?: number;
+    intervalMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
 ): Promise<void> {
   const httpBase = callbackBaseUrl
     .replace(/\/+$/, "")
     .replace(/^ws(s?):\/\//, "http$1://");
-  const probe = await driver.exec(
-    `command -v curl >/dev/null 2>&1 || { echo __OPENSESSION_NO_CURL__; exit 0; }; ` +
-      `a=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' ${shellQuoteWord(`${httpBase}/`)} 2>/dev/null || true); ` +
-      `b=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' ${shellQuoteWord(blockedUrl)} 2>/dev/null || true); ` +
-      `echo "allowed=$a blocked=$b"`,
-    { timeoutMs: 40_000 },
-  );
-  if (probe.stdout.includes("__OPENSESSION_NO_CURL__")) {
-    throw new Error(
-      "automation egress policy cannot be verified: curl is missing in the Executor",
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? Bun.sleep;
+  const deadline = now() + (options.settleMs ?? EGRESS_POLICY_SETTLE_MS);
+  let allowed = "000";
+  let blocked = "000";
+  for (;;) {
+    const probe = await driver.exec(
+      `command -v curl >/dev/null 2>&1 || { echo __OPENSESSION_NO_CURL__; exit 0; }; ` +
+        `a=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' ${shellQuoteWord(`${httpBase}/`)} 2>/dev/null || true); ` +
+        `b=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' ${shellQuoteWord(blockedUrl)} 2>/dev/null || true); ` +
+        `echo "allowed=$a blocked=$b"`,
+      { timeoutMs: 40_000 },
     );
+    if (probe.stdout.includes("__OPENSESSION_NO_CURL__")) {
+      throw new Error(
+        "automation egress policy cannot be verified: curl is missing in the Executor",
+      );
+    }
+    const match = /allowed=(\d{3}) blocked=(\d{3})/.exec(probe.stdout);
+    if (!match) {
+      throw new Error(
+        `automation egress probe failed: ${(probe.stderr || probe.stdout).trim().slice(0, 300)}`,
+      );
+    }
+    allowed = match[1]!;
+    blocked = match[2]!;
+    if (allowed !== "000" && blocked === "000") return;
+    if (now() >= deadline) break;
+    await sleep(options.intervalMs ?? EGRESS_POLICY_PROBE_INTERVAL_MS);
   }
-  const match = /allowed=(\d{3}) blocked=(\d{3})/.exec(probe.stdout);
-  if (!match) {
-    throw new Error(
-      `automation egress probe failed: ${(probe.stderr || probe.stdout).trim().slice(0, 300)}`,
-    );
-  }
-  const [, allowed, blocked] = match;
   if (allowed === "000") {
     throw new Error(
       `automation egress policy blocks the dial-back URL ${httpBase}; check callbackBaseUrl and the Daytona org tier`,
@@ -1075,17 +1100,11 @@ export async function qualifyDaytonaConnection(): Promise<void> {
     if (lifecycle.exitCode !== 0)
       throw new Error("Daytona stop/start lost filesystem state");
     await source.updateNetworkSettings({ domainAllowList: "example.com" });
-    const egress = await sourceDriver.exec(
-      "a=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' https://example.com/ 2>/dev/null || true); " +
-        "b=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' https://www.iana.org/ 2>/dev/null || true); " +
-        'echo "allowed=$a blocked=$b"',
-      { timeoutMs: 40_000 },
+    await assertAutomationEgressRestricted(
+      sourceDriver,
+      "https://example.com",
+      "https://www.iana.org/",
     );
-    if (!/allowed=(?!000)\d{3} blocked=000/.test(egress.stdout)) {
-      throw new Error(
-        "Daytona runner did not enforce the sandbox domain allowlist",
-      );
-    }
     await source.updateNetworkSettings({ networkBlockAll: false });
     // Even a nearly-empty Daytona sandbox can take 8–10 minutes to seal when
     // the provider is busy. Keep this aligned with repository templates: a
