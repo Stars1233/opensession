@@ -116,6 +116,16 @@ interface CodexUsageBucket {
   plan?: string;
   primary: (UsageWindow & { windowDurationMins: number | null }) | null;
   secondary: (UsageWindow & { windowDurationMins: number | null }) | null;
+  /** Prepaid credits, present only when the account has some. */
+  credits?: { hasCredits: boolean; unlimited: boolean; balance: string | null };
+  /** The spend cap the ChatGPT workspace set on this member. Amounts are the
+   *  provider's own formatted strings. */
+  spendLimit?: {
+    limit: string;
+    used: string;
+    remainingPercent: number | null;
+    resetsAt: string | null;
+  };
   rateLimitReachedType?: string;
 }
 
@@ -321,6 +331,15 @@ function absoluteReset(resetsAt: string | null): string | undefined {
   const d = resetsAt ? new Date(resetsAt) : null;
   if (!d || isNaN(d.getTime())) return undefined;
   return `Resets ${d.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+}
+
+/** A provider-formatted amount as dollars when it is a bare number ("37.50"),
+ *  otherwise as given: the wire does not say which currency or format it is. */
+function providerAmount(amount: string): string {
+  const n = Number(amount);
+  return amount.trim() && Number.isFinite(n)
+    ? `$${n.toLocaleString([], { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : amount;
 }
 
 /**
@@ -850,20 +869,68 @@ function CodexUsageMeters({ account }: { account: CodexAccountInfo }) {
       ];
     }),
   );
+  // A workspace spend cap stops runs just like a full window does, so it sits
+  // in the same strip, after the windows. Used against the cap, not remaining.
+  const spendCaps = account.usage.buckets.flatMap((bucket) =>
+    bucket.spendLimit ? [{ bucket, cap: bucket.spendLimit }] : [],
+  );
+  // Balances are facts, not limits: one quiet line under the meters.
+  const balances = account.usage.buckets.flatMap((bucket) => {
+    const credits = bucket.credits;
+    if (!credits) return [];
+    const amount = credits.unlimited
+      ? "Unlimited credits"
+      : credits.balance
+        ? `${providerAmount(credits.balance)} credits`
+        : "Credits available";
+    return [multipleBuckets ? `${bucketName(bucket)}: ${amount}` : amount];
+  });
+  if (
+    account.usage.resetCreditsAvailable !== null &&
+    account.usage.resetCreditsAvailable > 0
+  ) {
+    balances.push(
+      `${account.usage.resetCreditsAvailable} rate-limit reset${
+        account.usage.resetCreditsAvailable === 1 ? "" : "s"
+      } available`,
+    );
+  }
   return (
     <>
-      {windows.length > 0 && (
+      {(windows.length > 0 || spendCaps.length > 0) && (
         <MeterGroup>
           <UsageMeters windows={windows} />
+          {spendCaps.map(({ bucket, cap }) => (
+            <Meter
+              key={`${bucket.id}-spend`}
+              label={
+                multipleBuckets
+                  ? `${bucketName(bucket)} spend cap`
+                  : "Spend cap"
+              }
+              labelTitle="Spend cap: what this account has spent this period against the cap its ChatGPT workspace set for it"
+              pct={
+                cap.remainingPercent === null
+                  ? null
+                  : 100 - cap.remainingPercent
+              }
+              value={providerAmount(cap.used)}
+              note={[
+                `${providerAmount(cap.limit)} cap`,
+                formatReset(cap.resetsAt),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              noteTitle={absoluteReset(cap.resetsAt)}
+            />
+          ))}
         </MeterGroup>
       )}
-      {account.usage.resetCreditsAvailable !== null &&
-        account.usage.resetCreditsAvailable > 0 && (
-          <div className="mt-1.5 text-meta text-faint">
-            {account.usage.resetCreditsAvailable} rate-limit reset
-            {account.usage.resetCreditsAvailable === 1 ? "" : "s"} available
-          </div>
-        )}
+      {balances.length > 0 && (
+        <div className="mt-1.5 text-meta text-faint">
+          {balances.join(" · ")}
+        </div>
+      )}
     </>
   );
 }
