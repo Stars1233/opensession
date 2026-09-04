@@ -2,12 +2,11 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MergeUndoControl } from "./MergeUndoControl";
 
-test("keeps the merge result and Undo in one inline control", () => {
+test("renders one icon-only undo button", () => {
   const html = renderToStaticMarkup(
     <MergeUndoControl onUndo={() => undefined} />,
   );
-  expect(html).toContain("PR merged");
-  expect(html).toContain(">Undo</span></button>");
-  expect(html).toContain("phone:hidden");
+  expect(html).toContain('aria-label="Undo merge"');
+  expect(html).not.toContain("PR merged");
   expect(html.match(/<button/g)).toHaveLength(1);
 });

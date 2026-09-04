@@ -966,15 +966,12 @@ export function PrStatusBar({
         ) : null;
       case "ready": {
         const mergeScheduled = mergePhase === "scheduled";
-        const merging = mergePhase === "running" || busy === "merge";
-        if (mergeScheduled)
-          return (
-            <MergeUndoControl
-              className={variant === "header" ? "min-h-[32px]" : undefined}
-              onUndo={handleMerge}
-            />
-          );
-        return (
+        // The five-second window already reads as merging: the button holds
+        // its place and label, and the undo glyph lands in front of it so
+        // nothing the user just pressed moves.
+        const merging =
+          mergeScheduled || mergePhase === "running" || busy === "merge";
+        const mergeButton = (
           <PrBarButton
             className={actionBtn}
             tone="green"
@@ -1004,6 +1001,16 @@ export function PrStatusBar({
               </span>
             )}
           </PrBarButton>
+        );
+        if (!mergeScheduled) return mergeButton;
+        return (
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <MergeUndoControl
+              className={variant === "header" ? undefined : "min-h-[30px]"}
+              onUndo={handleMerge}
+            />
+            {mergeButton}
+          </span>
         );
       }
       default:

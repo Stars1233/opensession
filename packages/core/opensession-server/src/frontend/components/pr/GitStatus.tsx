@@ -80,18 +80,17 @@ export function GitStatusRows({
       action:
         resolveAction ||
         (pr.state === "OPEN" && !pr.isDraft && onMerge ? (
-          mergeScheduled ? (
-            <MergeUndoControl compact onUndo={onMerge} />
-          ) : (
+          <span className="inline-flex shrink-0 items-center gap-1">
+            {mergeScheduled && <MergeUndoControl compact onUndo={onMerge} />}
             <button
               className={GIT_ACTION}
               onClick={onMerge}
-              disabled={merging}
+              disabled={merging || mergeScheduled}
               title="Squash and merge this pull request"
             >
-              {merging ? "Merging…" : "Merge"}
+              {merging || mergeScheduled ? "Merging…" : "Merge"}
             </button>
-          )
+          </span>
         ) : undefined),
     });
   }
