@@ -53,6 +53,8 @@ import type {
   SandboxSessionSpec,
   SandboxStatus,
   SandboxDesktop,
+  SandboxDesktopControl,
+  SandboxScreenshot,
 } from "../provider";
 import {
   assertDialbackReachable,
@@ -489,6 +491,84 @@ export function daytonaDesktopUrl(signedPreviewUrl: string): string {
   return url.toString();
 }
 
+/** Daytona's computer-use API, shaped as the shared desktop control. Chords
+ *  pass through: Daytona normalizes `Return`, `cmd`, `control` itself. */
+export function daytonaDesktopControl(
+  computerUse: DaytonaSandbox["computerUse"],
+): SandboxDesktopControl {
+  const display = async () => {
+    const info = await computerUse.display.getInfo();
+    const primary =
+      info.displays?.find((d) => d.isActive) ?? info.displays?.[0];
+    if (!primary?.width || !primary.height)
+      throw new Error("Could not read the display size");
+    return { width: primary.width, height: primary.height };
+  };
+  return {
+    async screenshot(options = {}) {
+      const format = options.format ?? "png";
+      const [size, shot] = await Promise.all([
+        display(),
+        computerUse.screenshot.takeCompressed({
+          format,
+          scale: options.scale ?? 1,
+          showCursor: true,
+          ...(format === "jpeg" ? { quality: 80 } : {}),
+        }),
+      ]);
+      if (!shot.screenshot) throw new Error("Daytona returned no screenshot");
+      return {
+        data: shot.screenshot,
+        mimeType: format === "jpeg" ? "image/jpeg" : "image/png",
+        width: size.width,
+        height: size.height,
+      } satisfies SandboxScreenshot;
+    },
+    display,
+    async windows() {
+      const { windows = [] } = await computerUse.display.getWindows();
+      return windows.map((w) => ({
+        id: String(w.id ?? ""),
+        title: w.title ?? "",
+        x: w.x ?? 0,
+        y: w.y ?? 0,
+        width: w.width ?? 0,
+        height: w.height ?? 0,
+        active: Boolean(w.isActive),
+      }));
+    },
+    async move(x, y) {
+      await computerUse.mouse.move(x, y);
+    },
+    async click(x, y, options = {}) {
+      await computerUse.mouse.click(
+        x,
+        y,
+        options.button ?? "left",
+        options.double ?? false,
+      );
+    },
+    async drag(from, to, options = {}) {
+      await computerUse.mouse.drag(
+        from.x,
+        from.y,
+        to.x,
+        to.y,
+        options.button ?? "left",
+      );
+    },
+    async scroll(x, y, direction, amount = 3) {
+      await computerUse.mouse.scroll(x, y, direction, amount);
+    },
+    async type(text) {
+      if (text) await computerUse.keyboard.type(text);
+    },
+    async key(chord) {
+      await computerUse.keyboard.hotkey(chord.replace(/\s+/g, ""));
+    },
+  };
+}
+
 function stateOf(sbx: DaytonaSandbox): SandboxStatus {
   const s = String((sbx as any).state || "");
   if (s === "started") return "running";
@@ -881,15 +961,8 @@ export class DaytonaProvider implements SandboxProvider {
     }
   }
 
-  /** Release compute while retaining the session's exact volume workspace. */
   async desktop(sandboxId: string): Promise<SandboxDesktop> {
-    const client = await daytonaClient();
-    const sbx = await client.get(sandboxId);
-    if (!sbx || stateOf(sbx) !== "running")
-      throw new Error("Wake the sandbox first");
-    // Xvfb + xfce4 + x11vnc + noVNC. start() is not idempotent, so ask first.
-    const status = await sbx.computerUse.getStatus().catch(() => null);
-    if (status?.status !== "active") await sbx.computerUse.start();
+    const sbx = await this.desktopSandbox(sandboxId);
     const signed = await sbx.getSignedPreviewUrl(
       DAYTONA_NOVNC_PORT,
       DAYTONA_DESKTOP_URL_TTL_SECONDS,
@@ -898,6 +971,23 @@ export class DaytonaProvider implements SandboxProvider {
       url: daytonaDesktopUrl(signed.url),
       expiresAt: Date.now() + DAYTONA_DESKTOP_URL_TTL_SECONDS * 1000,
     };
+  }
+
+  async desktopControl(sandboxId: string): Promise<SandboxDesktopControl> {
+    const sbx = await this.desktopSandbox(sandboxId);
+    return daytonaDesktopControl(sbx.computerUse);
+  }
+
+  /** The running sandbox with its computer-use stack (Xvfb + xfce4 + x11vnc +
+   *  noVNC) up. start() is not idempotent, so ask first. */
+  private async desktopSandbox(sandboxId: string): Promise<DaytonaSandbox> {
+    const client = await daytonaClient();
+    const sbx = await client.get(sandboxId);
+    if (!sbx || stateOf(sbx) !== "running")
+      throw new Error("Wake the sandbox first");
+    const status = await sbx.computerUse.getStatus().catch(() => null);
+    if (status?.status !== "active") await sbx.computerUse.start();
+    return sbx;
   }
 
   async pause(sandboxId: string): Promise<void> {
