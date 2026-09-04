@@ -8,6 +8,10 @@
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { dirname } from "path";
 import { audit } from "../audit";
+import {
+  sandboxAdapterSignature,
+  sandboxAdapterSignatureCurrent,
+} from "./adapter-signature";
 import { stateDir } from "../paths";
 import { writeJsonAtomic } from "../shared/atomic-write";
 import {
@@ -16,6 +20,7 @@ import {
   resolveWorkspaceSecret,
   workspaceSecretExists,
 } from "../workspace-secrets";
+export { sandboxAdapterSignature } from "./adapter-signature";
 export const WORKSPACE_SANDBOX_PROVIDERS = ["daytona", "box"] as const;
 export type WorkspaceSandboxProvider =
   (typeof WORKSPACE_SANDBOX_PROVIDERS)[number];
@@ -213,31 +218,6 @@ export function getSandboxConnection(
   return listStoredSandboxConnections().find(
     (connection) => connection.provider === provider,
   );
-}
-
-export function sandboxAdapterSignature(
-  provider: WorkspaceSandboxProvider,
-): string {
-  const version =
-    provider === "box"
-      ? "connection-v4"
-      : provider === "daytona"
-        ? "connection-v2"
-        : "connection-v1";
-  return `${provider}:${version}`;
-}
-
-/** Connection qualification proves provider credentials and control-plane
- * semantics. Runner pins and remote bootstrap revisions have their own
- * re-bootstrap lifecycle and must not make a healthy connection disappear
- * after every deploy. Accept the previous signature shape once so existing
- * qualified connections migrate without another destructive provider test. */
-function sandboxAdapterSignatureCurrent(
-  provider: WorkspaceSandboxProvider,
-  stored: string | undefined,
-): boolean {
-  const current = sandboxAdapterSignature(provider);
-  return stored === current || stored?.startsWith(`${current}:`) === true;
 }
 
 export function safeSandboxConnections(): SafeSandboxConnection[] {

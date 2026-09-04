@@ -303,6 +303,25 @@ describe("resolveRequestedSandbox (create-path validation)", () => {
     expect(anySandboxProvider()).toBe(sandboxesEnabled() ? "daytona" : null);
   });
 
+  test("a connection whose qualification predates the current adapter is not usable", () => {
+    write({});
+    ready("daytona");
+    ready("box");
+    const cfg = JSON.parse(readFileSync(cfgPath(), "utf8"));
+    for (const connection of cfg.connections)
+      if (connection.provider === "daytona")
+        connection.qualification.adapterSignature = "daytona:connection-v1:x";
+    write(cfg);
+    expect(sandboxProviderUsability("daytona").state).toBe(
+      sandboxesEnabled() ? "unqualified" : "unavailable",
+    );
+    expect(anySandboxProvider()).toBe(sandboxesEnabled() ? "box" : null);
+    const r = resolveRequestedSandbox("daytona");
+    expect(r.ok).toBe(false);
+    if (!r.ok && sandboxesEnabled())
+      expect(r.error).toContain("needs attention in Workspace > Sandboxes");
+  });
+
   test("true with no ready provider fails with a pointed error", () => {
     write({ provider: "daytona" });
     const r = resolveRequestedSandbox(true);
@@ -378,7 +397,7 @@ describe("resolveRequestedSandbox (create-path validation)", () => {
     expect(resolved.ok).toBe(false);
     if (!resolved.ok)
       expect(resolved.error).toContain(
-        "has not passed workspace qualification",
+        "needs attention in Workspace > Sandboxes",
       );
     const viaDefault = resolveRequestedSandbox(true);
     expect(viaDefault.ok).toBe(false);

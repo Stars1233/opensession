@@ -21,6 +21,8 @@ import { getDefaultModel, providerFor, resolveModel } from "../models";
 import { OPENSESSION_SESSIONS_DIR } from "../paths";
 import { stateDir } from "../paths";
 import { writeJsonAtomic } from "../shared/atomic-write";
+import { workspaceSecretExists } from "../workspace-secrets";
+import { sandboxAdapterSignatureCurrent } from "./adapter-signature";
 import type { SandboxProviderId, SandboxProviderUsability } from "./provider";
 
 // Env-overridable so the verify suite (and unit tests) can point a scratch
@@ -494,6 +496,10 @@ function sandboxConfigPresent(): boolean {
 interface NormalizedConnectionSelection {
   enabled: boolean;
   qualification?: "checking" | "ready" | "failed";
+  /** True when the stored qualification matches the current adapter and the
+   *  referenced workspace secret still exists: the same test Workspace >
+   *  Sandboxes uses to call a connection Ready. */
+  current: boolean;
 }
 
 function normalizedConnectionSelection(
@@ -511,8 +517,18 @@ function normalizedConnectionSelection(
     ) as any;
     if (!connection) return undefined;
     const qualification = connection.qualification?.status;
+    const credentialRef =
+      typeof connection.credentialRef === "string"
+        ? connection.credentialRef
+        : undefined;
+    const current =
+      sandboxAdapterSignatureCurrent(
+        id,
+        connection.qualification?.adapterSignature,
+      ) && Boolean(credentialRef && workspaceSecretExists(credentialRef));
     return {
       enabled: connection.enabled !== false,
+      current,
       ...(qualification === "checking" ||
       qualification === "ready" ||
       qualification === "failed"
@@ -635,7 +651,7 @@ function sandboxProviderSelectionError(
   const usability = sandboxProviderUsability(id);
   if (usability.state === "usable") return undefined;
   if (usability.state === "unqualified") {
-    return `Sandbox provider "${id}" has not passed workspace qualification. Test it in Workspace > Sandboxes first.`;
+    return `Sandbox provider "${id}" needs attention in Workspace > Sandboxes. Test the connection there first.`;
   }
   if (usability.state === "unavailable") {
     if (!sandboxProviderCertified(id)) {
@@ -669,7 +685,10 @@ export function sandboxProviderUsability(
   if (!sandboxesEnabled() || !sandboxProviderCertified(id)) {
     return { state: "unavailable", configured: true, usable: false };
   }
-  if (connection && connection.qualification !== "ready") {
+  if (
+    connection &&
+    (connection.qualification !== "ready" || !connection.current)
+  ) {
     return { state: "unqualified", configured: true, usable: false };
   }
   return { state: "usable", configured: true, usable: true };
@@ -696,7 +715,7 @@ export function sandboxCapabilityStatus(): SandboxCapabilityStatus {
       const notes = [
         configured ? remoteNote : undefined,
         usability.state === "unqualified"
-          ? "has not passed workspace qualification"
+          ? "needs attention in Workspace > Sandboxes"
           : undefined,
         !certification.certified && usability.configured
           ? `not available for new sessions — ${certification.note || "live matrix has not passed"}`

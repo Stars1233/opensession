@@ -40,7 +40,10 @@ The repo's own lifecycle scripts follow the convention every other repo uses
 --frozen-lockfile`. Safe to re-run.
 - `.agents/start.sh` — boots the dev instance in the foreground on `$PORT`,
   loopback only, with the three flags above and
-  `OPENSESSION_STATE_DIR=$PWD/.dev-state`.
+  `OPENSESSION_STATE_DIR=$PWD/.dev-state`. A gateway needs a SessionKernel,
+  so the script first starts a private kernel on a free loopback port with a
+  scratch token, waits for it, then runs the gateway; the kernel dies with
+  the gateway.
 - `.agents/portals.json` — declares that script as the `dev` Portal.
 
 Start it from the session's Portals panel or ask the agent to
@@ -48,13 +51,15 @@ Start it from the session's Portals panel or ask the agent to
 under the Portal supervisor with `PORT` and `PORTAL_URL`, and fronts it at an
 authenticated `https://<host>:<port+6000>` route (in a Sandbox the route comes
 from the 20000–27999 range and relays into the VM). Stop signals the script's
-process group, which kills the instance because `start.sh` `exec`s it.
+process group, which takes the gateway and its kernel down together.
 
 `start.sh` is deliberately paranoid: the environment it inherits is the
-calling server's production env (ports, agent toggles, secrets), so it
-overrides or unsets every operationally significant variable rather than
-inheriting anything — the production port is explicitly refused. Read the
-comment block in the script for the variable-by-variable rationale.
+calling server's production env (ports, agent toggles, gateway lease path,
+secrets), so both processes start from `env -i` and receive only the
+variables the script lists — the production port is explicitly refused, and
+the gateway activation lease lives under `.dev-state`, never in
+`~/.opensession/deploy`. Read the comment block in the script for the
+variable-by-variable rationale.
 
 `.dev-state/` (plus the Portal supervisor's `.ports.conf` / `.ports/`)
 appears in the checkout the Portal ran from; it is disposable and must stay
@@ -65,9 +70,8 @@ gitignored.
 Live integrations are out of scope by design. A dev instance has no Slack,
 Linear, Plain, Stripe, Grafana, or GitHub agents, receives no webhooks, and runs
 no cron automations. It does not adopt or resume detached run hosts left by an
-earlier process. The current `.agents/start.sh` disables the executor but does
-not set `OPENSESSION_PI_DETACH=0`, so Pi turns may still attempt a transient
-detached run host and fall back in-process if launch is unavailable.
+earlier process. `.agents/start.sh` disables the executor and sets
+`OPENSESSION_PI_DETACH=0`, so Pi turns run in-process.
 
 You cannot use a dev instance to test "did my change fix the Slack agent"
 end-to-end. Verify that class of change with tests plus a real deploy. Engine

@@ -799,6 +799,8 @@ export interface RunnerPayloadInputs {
   runnerSha?: string;
   /** `git remote get-url origin` of the host source tree, "" when none. */
   origin: string;
+  /** `git rev-parse HEAD` of the host source tree, undefined when unknown. */
+  head?: string;
   /** `release.json` of a release install, null for a source checkout. */
   release: { version?: string; commit?: string } | null;
 }
@@ -835,7 +837,14 @@ export function resolveRunnerPayload(
   }
   const origin = input.origin && toHttpsUrl(input.origin);
   if (origin) {
-    return { repoUrl: credentialFreeHttpsUrl(origin), pin, source: "origin" };
+    // A source install runs its sandboxes at the commit it runs itself, so
+    // every deploy carries the runner along. An explicit runnerSha still
+    // wins for a deliberate hold or rollback.
+    return {
+      repoUrl: credentialFreeHttpsUrl(origin),
+      pin: pin || input.head || undefined,
+      source: "origin",
+    };
   }
   if (input.release) {
     const tag = pin ? undefined : releaseTag(input.release.version);
@@ -864,7 +873,11 @@ function installRoot(): string {
 }
 
 let hostRunnerSourceCache:
-  | { origin: string; release: RunnerPayloadInputs["release"] }
+  | {
+      origin: string;
+      head?: string;
+      release: RunnerPayloadInputs["release"];
+    }
   | undefined;
 
 /** Origin and release manifest of the host install. Neither changes while
@@ -872,6 +885,7 @@ let hostRunnerSourceCache:
  *  not something the server edits), so read once. */
 function hostRunnerSource(): {
   origin: string;
+  head?: string;
   release: RunnerPayloadInputs["release"];
 } {
   if (hostRunnerSourceCache) return hostRunnerSourceCache;
@@ -889,15 +903,22 @@ function hostRunnerSource(): {
     }
   } catch {}
   let origin = "";
+  let head: string | undefined;
   if (!isCompiledBinary()) {
-    const proc = Bun.spawnSync({
-      cmd: ["git", "-C", REPO_ROOT, "remote", "get-url", "origin"],
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    origin = proc.exitCode === 0 ? proc.stdout.toString().trim() : "";
+    const git = (...args: string[]) => {
+      const proc = Bun.spawnSync({
+        cmd: ["git", "-C", REPO_ROOT, ...args],
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      return proc.exitCode === 0 ? proc.stdout.toString().trim() : "";
+    };
+    origin = git("remote", "get-url", "origin");
+    head = /^[0-9a-f]{40}$/.test(git("rev-parse", "HEAD"))
+      ? git("rev-parse", "HEAD")
+      : undefined;
   }
-  hostRunnerSourceCache = { origin, release };
+  hostRunnerSourceCache = { origin, head, release };
   return hostRunnerSourceCache;
 }
 

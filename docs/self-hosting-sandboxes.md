@@ -121,19 +121,19 @@ never adopt a prewarm or project snapshot. See
 Workspace → Sandboxes writes this file; hand-edit only for the operator
 settings below. Read fresh per call, no restart needed except where noted.
 
-| Key                                             | Meaning                                                                                                              |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `connections`                                   | Provider connections and their qualification state. Managed by Workspace → Sandboxes.                                |
-| `sessionDefault`                                | `"daytona"`, `"box"`, or `"none"`: where new sessions run when nobody chose.                                         |
-| `provider`, `perRepo.<id>.provider`             | Legacy default and per-repo override for API creates that pass `sandbox: true`.                                      |
-| `idleStopMinutes`                               | Sleep after this much idle time (default 30).                                                                        |
-| `callbackBaseUrl`                               | Dial-back URL when the public ingress origin should not be used (tailnet setups).                                    |
-| `publicIngress`                                 | Advanced bind override for the `:3860` listener. Needs a restart.                                                    |
-| `daytona.snapshot`                              | Org snapshot new Daytona sandboxes start from when no project snapshot exists (sizing lives in it).                  |
-| `cloneCredential`                               | `{type: "none"}` or `{type: "https-token", token}` for repository clones inside Sandboxes. The live GitHub App wins. |
-| `prewarm`                                       | `enabled`, `ttlMinutes`, `maxLive`, `keepReady` for the warm-on-typing pool.                                         |
-| `runnerBundleUrl`, `runnerRepoUrl`, `runnerSha` | Where Sandboxes fetch the Open Session runner payload (default: this checkout's origin at its pin).                  |
-| `automation.egressAllowlist`                    | Extra hosts unattended runs may reach.                                                                               |
+| Key                                             | Meaning                                                                                                                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connections`                                   | Provider connections and their qualification state. Managed by Workspace → Sandboxes.                                                                                                                                           |
+| `sessionDefault`                                | `"daytona"`, `"box"`, or `"none"`: where new sessions run when nobody chose.                                                                                                                                                    |
+| `provider`, `perRepo.<id>.provider`             | Legacy default and per-repo override for API creates that pass `sandbox: true`.                                                                                                                                                 |
+| `idleStopMinutes`                               | Sleep after this much idle time (default 30).                                                                                                                                                                                   |
+| `callbackBaseUrl`                               | Dial-back URL when the public ingress origin should not be used (tailnet setups).                                                                                                                                               |
+| `publicIngress`                                 | Advanced bind override for the `:3860` listener. Needs a restart.                                                                                                                                                               |
+| `daytona.snapshot`                              | Org snapshot new Daytona sandboxes start from when no project snapshot exists (sizing lives in it).                                                                                                                             |
+| `cloneCredential`                               | `{type: "none"}` or `{type: "https-token", token}` for repository clones inside Sandboxes. The live GitHub App wins.                                                                                                            |
+| `prewarm`                                       | `enabled`, `ttlMinutes`, `maxLive`, `keepReady` for the warm-on-typing pool.                                                                                                                                                    |
+| `runnerBundleUrl`, `runnerRepoUrl`, `runnerSha` | Where Sandboxes fetch the Open Session runner payload. Unset, a source install runs the runner at its own deployed commit, so every deploy carries it along; set `runnerSha` only to hold or roll back the runner deliberately. |
+| `automation.egressAllowlist`                    | Extra hosts unattended runs may reach.                                                                                                                                                                                          |
 
 Retired keys (`image`, `workspace`, `transport`, `previewPorts`, `snapshots`,
 `e2b`, `modal`, `awsLambdaMicrovm`) are ignored. Sessions that recorded a
