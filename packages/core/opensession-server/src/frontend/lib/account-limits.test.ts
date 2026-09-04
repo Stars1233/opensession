@@ -125,6 +125,33 @@ describe("accountLimitsFromUsage", () => {
 });
 
 describe("weeklyRemainingRows", () => {
+  test("only the pool and the viewer's own accounts", () => {
+    const limits = [{ utilization: 50, resetsAt: inHours(70), weekly: true }];
+    const rows = weeklyRemainingRows(
+      [
+        { id: "pool", name: "Pool", provider: "claude", limits },
+        { id: "mine", name: "Mine", provider: "claude", owner: "Kent", limits },
+        {
+          id: "mine-long",
+          name: "Mine long",
+          provider: "codex",
+          owner: "Kent de Bruin",
+          limits,
+        },
+        {
+          id: "theirs",
+          name: "Theirs",
+          provider: "claude",
+          owner: "Michiel",
+          limits,
+        },
+      ],
+      "Kent",
+      NOW,
+    );
+    expect(rows.map((r) => r.accountId)).toEqual(["pool", "mine", "mine-long"]);
+  });
+
   test("one line per weekly limit, with remaining percent and refill day", () => {
     const rows = weeklyRemainingRows(
       [
@@ -153,6 +180,7 @@ describe("weeklyRemainingRows", () => {
         },
         { id: "c", name: "No usage", provider: "claude" },
       ],
+      "Kent",
       NOW,
     );
     expect(rows.map((r) => [r.label, r.remaining, r.tone])).toEqual([
@@ -176,6 +204,7 @@ describe("weeklyRemainingRows", () => {
           limits: [{ utilization: 100, resetsAt: inHours(-1), weekly: true }],
         },
       ],
+      "Kent",
       NOW,
     );
     expect(rows[0].remaining).toBe(100);
@@ -202,6 +231,7 @@ describe("weeklyRemainingRows", () => {
           limits: [{ utilization: 90, resetsAt: null, weekly: true }],
         },
       ],
+      "Kent",
       NOW,
     );
     expect(lowestRemaining(rows)?.accountId).toBe("b");

@@ -10,6 +10,7 @@
  */
 import { z } from "zod";
 import { liveUtilization } from "./account-usage";
+import { ownerMatchesPerson } from "./automation-audience";
 
 /** One limit an account runs against, as the account list carries it. */
 export interface AccountLimit {
@@ -170,17 +171,30 @@ function resetTitle(resetsAt: string | null): string | undefined {
   })}`;
 }
 
+/** Can `viewer` run on this account: it sits in the shared pool, or it is
+ *  their own personal subscription. Someone else's personal account is not
+ *  theirs to spend, so its budget is noise here. */
+export function accountAvailableTo(
+  account: Pick<AccountLimitSource, "owner">,
+  viewer: string,
+): boolean {
+  return !account.owner || ownerMatchesPerson(account.owner, viewer);
+}
+
 /**
- * The weekly overview: every account that reports a weekly number, in the
- * order the list gives them, soonest-to-refill first within an account. A
- * window whose reset already passed reads as full, as it does everywhere else.
+ * The weekly overview: every account `viewer` can use that reports a weekly
+ * number, in the order the list gives them, soonest-to-refill first within an
+ * account. A window whose reset already passed reads as full, as it does
+ * everywhere else.
  */
 export function weeklyRemainingRows(
   accounts: AccountLimitSource[],
+  viewer: string,
   now = Date.now(),
 ): WeeklyRemainingRow[] {
   const rows: WeeklyRemainingRow[] = [];
   for (const account of accounts) {
+    if (!accountAvailableTo(account, viewer)) continue;
     for (const limit of account.limits ?? []) {
       if (!limit.weekly) continue;
       const used = liveUtilization(

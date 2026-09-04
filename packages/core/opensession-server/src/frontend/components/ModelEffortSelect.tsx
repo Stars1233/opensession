@@ -18,6 +18,7 @@ import { Tooltip } from "../ui/tooltip";
 import { IconBolt, IconChevronRight, IconSparkle, IconUndo } from "./icons";
 import { ModelMark } from "./ModelMark";
 import { BrandMark } from "./BrandTile";
+import { useCurrentUser } from "./UserPicker";
 import type { ModelEffortSelectProps } from "../lib/model-effort-select-types";
 import {
   lowestRemaining,
@@ -437,10 +438,12 @@ export function ModelEffortSelect({
   const accountLabel = currentAccount
     ? providerAccountLabel(currentAccount)
     : "Auto";
-  // Weekly budget left on every account this person can see, all providers:
-  // the question it answers is "which account still has a week in it", and
-  // that is also why a row for the current model's pool pins that account.
-  const weeklyRows = weeklyRemainingRows(accounts ?? []);
+  // Weekly budget left on every account this person can spend (the pool plus
+  // their own), all providers: the question it answers is "which account
+  // still has a week in it", and that is also why a row for the current
+  // model's pool pins that account.
+  const viewer = useCurrentUser();
+  const weeklyRows = weeklyRemainingRows(accounts ?? [], viewer);
   const weeklyRowsForModel = weeklyRows.filter(
     (row) => row.provider === accountProvider,
   );
