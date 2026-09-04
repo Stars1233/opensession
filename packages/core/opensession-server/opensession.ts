@@ -48,7 +48,8 @@ import {
   sharedCheckoutEditors,
   spaEntry,
 } from "./src/server/frontend-build";
-import { configuredIntegration } from "./src/server/config";
+import { configuredIntegration, configuredServer } from "./src/server/config";
+import { portalSignInRedirect } from "./src/server/portal-sign-in";
 import { initHumanAsks } from "./src/server/human-asks";
 import { interactiveMcpServers } from "./src/server/interactive-mcp";
 import {
@@ -537,6 +538,16 @@ const server: import("bun").Server<WSClientData> = hotServe({
           // wider one.
           /^\/(?:opensession\/)?d\//.test(path))
       ) {
+        // A person opening a Portal in a browser that has no session (a
+        // phone's Safari, opened from the native app or the home-screen
+        // web app) gets sent to this app to sign in and back again; the
+        // Portal port itself has no sign-in screen to show.
+        const portalRedirect = portalSignInRedirect(
+          req,
+          path,
+          configuredServer().publicBaseUrl,
+        );
+        if (portalRedirect) return portalRedirect;
         return Response.json(
           reconnectRequired
             ? {
