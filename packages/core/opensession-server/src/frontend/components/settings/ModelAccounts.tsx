@@ -334,12 +334,14 @@ function absoluteReset(resetsAt: string | null): string | undefined {
 }
 
 /** A provider-formatted amount as dollars when it is a bare number ("37.50"),
- *  otherwise as given: the wire does not say which currency or format it is. */
+ *  otherwise as given: the wire does not say which currency or format it is.
+ *  Whole dollars drop the cents ("$50") so a cap fits beside its reset time in
+ *  the meter's one-line note. */
 function providerAmount(amount: string): string {
   const n = Number(amount);
-  return amount.trim() && Number.isFinite(n)
-    ? `$${n.toLocaleString([], { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : amount;
+  if (!amount.trim() || !Number.isFinite(n)) return amount;
+  const cents = Number.isInteger(n) ? 0 : 2;
+  return `$${n.toLocaleString([], { minimumFractionDigits: cents, maximumFractionDigits: 2 })}`;
 }
 
 /**
@@ -921,7 +923,12 @@ function CodexUsageMeters({ account }: { account: CodexAccountInfo }) {
               ]
                 .filter(Boolean)
                 .join(" · ")}
-              noteTitle={absoluteReset(cap.resetsAt)}
+              noteTitle={[
+                `${providerAmount(cap.used)} of ${providerAmount(cap.limit)} spent`,
+                absoluteReset(cap.resetsAt),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             />
           ))}
         </MeterGroup>
