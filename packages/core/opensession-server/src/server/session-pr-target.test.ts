@@ -241,13 +241,28 @@ describe("sessionPrBranch", () => {
     expect(sessionPrBranch(session, workspace)).toBe("add-lottie-primitive");
   });
 
-  test("does not rewrite ordinary session branches", () => {
+  // A tab the user opens in a PR workspace inherits the review checkout branch
+  // rather than the PR head, so it must resolve like the review session does.
+  test("a user tab on the derived review checkout resolves to the PR head", () => {
     expect(
       sessionPrBranch(
         { ...session, automation: undefined } as UnifiedSession,
         workspace,
       ),
-    ).toBe("add-lottie-primitive-os-review");
+    ).toBe("add-lottie-primitive");
+  });
+
+  test("does not rewrite ordinary session branches", () => {
+    expect(
+      sessionPrBranch(
+        {
+          ...session,
+          automation: undefined,
+          branch: "my-own-branch",
+        } as UnifiedSession,
+        workspace,
+      ),
+    ).toBe("my-own-branch");
   });
 
   test("requires a structurally PR-backed workspace", () => {
