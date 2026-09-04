@@ -191,7 +191,7 @@ export function SandboxBadge({
       <Popover.Trigger
         className="flex min-h-10 flex-none items-center gap-1.5 rounded-md border border-line bg-surface px-2 text-meta font-medium text-dim outline-none transition-[color,background-color,border-color,scale] hover:border-line-strong hover:text-fg focus-visible:border-line-strong active:scale-[0.96]"
         data-testid="sandbox-badge"
-        aria-label={`Sandbox · ${lifecycleLabel}`}
+        aria-label={`Sandbox · ${lifecycleLabel[lifecycle]}`}
       >
         <span className={cn("size-2 rounded-full", dot)} aria-hidden="true" />
         <IconBox size={20} className="text-faint" />
