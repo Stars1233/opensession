@@ -6215,6 +6215,12 @@ export class SessionKernelStore {
     return metadataStore.seedSessionMetadataCatalog(this.db, rows);
   }
 
+  sessionMetadataCatalogGet(
+    sessionId: string,
+  ): SessionMetadataCatalogRow | null {
+    return metadataStore.sessionMetadataCatalogGet(this.db, sessionId);
+  }
+
   sessionMetadataCatalogPage(
     afterSessionId: string,
     limit: number,

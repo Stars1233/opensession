@@ -99,8 +99,12 @@ export function startSessionKernelActorWorker(): void {
         // An export receipt only advances catalog bookkeeping. It rides the
         // session mailbox so it lands after the commit it confirms, but it
         // must not mark the actor dirty for a runtime scan.
+        // A catalog read names a session but serves it from the central
+        // projection; opening the actor would defeat the point.
         const centralOnly =
-          command.kind === "metadata" && command.request.op === "exported";
+          command.kind === "metadata" &&
+          (command.request.op === "exported" ||
+            command.request.op === "catalog_get");
         if (sessionId && !centralOnly)
           store = host.storeForSession(
             sessionId,
@@ -280,6 +284,8 @@ export function startSessionKernelActorWorker(): void {
               metadata.sessionId,
               metadata.rev,
             );
+          else if (metadata.op === "catalog_get")
+            result = host.central.sessionMetadataCatalogGet(metadata.sessionId);
           else if (metadata.op === "catalog_page")
             result = host.central.sessionMetadataCatalogPage(
               metadata.afterSessionId,

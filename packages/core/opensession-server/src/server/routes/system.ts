@@ -19,7 +19,7 @@ import {
 } from "../frontend-build";
 import { getPins } from "../pins";
 import { getReads, isUnread } from "../reads";
-import { invalidateSessionsCache, runErrors } from "../session-cache";
+import { publishSessionChange, runErrors } from "../session-cache";
 import { getSessionControl } from "../session-control";
 import { MAX_UPLOAD_BYTES, stageHttpUpload } from "../uploads";
 import { systemStats } from "../system-stats";
@@ -188,7 +188,7 @@ export async function handleSystemRoutes(
       if (changed) {
         deadLettersCaches.clear();
         if (validQuarantine) {
-          invalidateSessionsCache();
+          publishSessionChange(body.sessionId as string);
           broadcastToSession(body.sessionId as string, {
             type: "session_status",
             sessionId: body.sessionId,

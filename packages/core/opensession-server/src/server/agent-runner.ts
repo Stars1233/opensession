@@ -391,6 +391,18 @@ async function* runOnModel(
     yield* engineForTest(opts, mapped);
     return;
   }
+  // Dev-only load harness seam (OPENSESSION_DEV=1 + OPENSESSION_SYNTHETIC_ENGINE=1):
+  // a paced synthetic engine instead of Pi, so an isolated instance can be
+  // driven at scale with zero model spend. Never active in production, where
+  // OPENSESSION_DEV is unset. Loaded lazily so ordinary boots never import it.
+  if (
+    process.env.OPENSESSION_SYNTHETIC_ENGINE === "1" &&
+    process.env.OPENSESSION_DEV === "1"
+  ) {
+    const { syntheticEngine } = await import("./testing/synthetic-engine");
+    yield* syntheticEngine(opts, mapped);
+    return;
+  }
   const route = routeModel(requested, { interactive: isInteractiveRun(opts) });
   yield* runPi(opts, route.model);
 }

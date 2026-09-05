@@ -21,7 +21,7 @@ function recorder(registryIds: string[] = []) {
       files.push(id);
       return true;
     },
-    invalidateSessionsCache() {
+    publishSessionChange() {
       invalidations++;
     },
   };
@@ -80,7 +80,7 @@ describe("unarchiveForHumanTurn", () => {
         await clearing;
         return true;
       },
-      invalidateSessionsCache: () => {
+      publishSessionChange: () => {
         invalidations++;
       },
     };

@@ -215,6 +215,8 @@ export async function sessionMetadata<T extends MetadataActorRequest>(
       request.sessionId,
       request.rev,
     ) as R;
+  if (request.op === "catalog_get")
+    return store.sessionMetadataCatalogGet(request.sessionId) as R;
   if (request.op === "catalog_page")
     return store.sessionMetadataCatalogPage(
       request.afterSessionId,

@@ -105,7 +105,7 @@ import {
   SESSION_EFFORTS,
   findSession,
   findSessionAsync,
-  invalidateSessionsCache,
+  publishSessionChange,
   recordRunOutcome,
   touchNativeSession,
   updateSessionFile,
@@ -1409,7 +1409,7 @@ export async function openCreatedSession(
     )
     .then((t) => {
       if (!t) return;
-      invalidateSessionsCache();
+      publishSessionChange(bksId);
       if (!wsToName) return;
       const cur = getWorkspace(wsToName.id);
       if (cur && cur.name === wsToName.name)
@@ -1682,7 +1682,7 @@ export async function openCreatedSession(
             lifecycle: "awake",
           },
         });
-        invalidateSessionsCache();
+        publishSessionChange(bksId);
         const stored = await findSessionAsync(bksId);
         // The session-list projection may still hold the pre-Runner create row
         // for this same command turn. Launch from the just-committed immutable

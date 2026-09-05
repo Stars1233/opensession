@@ -21,7 +21,7 @@ import {
 } from "../automations";
 import { draftAutomation } from "../draft-automation";
 import { listReportGroups } from "../reports";
-import { invalidateSessionsCache } from "../session-cache";
+import { publishSessionChange } from "../session-cache";
 import { getWorkspace } from "../workspaces";
 import { conditionalJsonResponse } from "../http-json";
 
@@ -119,8 +119,8 @@ export async function handleAutomationsRoutes(
       return Response.json({ error: "Already running" }, { status: 409 });
     }
     // Fire and forget; session shows up in the list once it boots
-    void runAutomation(automation, () => {
-      invalidateSessionsCache();
+    void runAutomation(automation, (sessionId) => {
+      publishSessionChange(sessionId);
     });
     return Response.json({ ok: true });
   }
@@ -135,7 +135,7 @@ export async function handleAutomationsRoutes(
     const result = retriggerAutomationSession(body.sessionId);
     if (!result.ok)
       return Response.json({ error: result.reason }, { status: 400 });
-    invalidateSessionsCache();
+    publishSessionChange(body.sessionId);
     return Response.json(result);
   }
 

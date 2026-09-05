@@ -124,6 +124,11 @@ function send(ws: RowSocket, payload: string): void {
   } catch {}
 }
 
+/** Session ids with a publish pending, in scheduling order. */
+export function __scheduledSessionRowsForTest(): string[] {
+  return [...scheduled.keys()];
+}
+
 export function __resetSessionRowPublishesForTest(): void {
   for (const timer of scheduled.values()) clearTimeout(timer);
   scheduled.clear();

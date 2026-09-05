@@ -344,6 +344,43 @@ describe("actor-owned session metadata", () => {
     expect(page.some((row) => row.sessionId === sessionId)).toBe(false);
   });
 
+  test("catalog_get serves the committed document from the central projection", async () => {
+    const host = await actor();
+    const sessionId = `metadata-catalog-get-${crypto.randomUUID()}`;
+    expect(
+      await host.decideMetadataAsync({ op: "catalog_get", sessionId }),
+    ).toBeNull();
+    await put(host, sessionId, 1, null);
+    await put(host, sessionId, 2, 1);
+    const row = await host.decideMetadataAsync({
+      op: "catalog_get",
+      sessionId,
+    });
+    expect(row).toMatchObject({ sessionId, rev: 2, exportedRev: 0 });
+    expect(JSON.parse(row!.doc)).toMatchObject({ id: sessionId, rev: 2 });
+    // A seeded-only session answers too: the read never needs an actor
+    // document to exist.
+    const seeded = `metadata-catalog-get-seeded-${crypto.randomUUID()}`;
+    await host.decideMetadataAsync({
+      op: "seed_catalog",
+      rows: [
+        {
+          sessionId: seeded,
+          doc: doc(seeded, 3),
+          rev: 3,
+          archived: false,
+          lastActivityMs: 0,
+        },
+      ],
+    });
+    expect(
+      await host.decideMetadataAsync({ op: "catalog_get", sessionId: seeded }),
+    ).toMatchObject({ sessionId: seeded, rev: 3, exportedRev: 3 });
+    expect(
+      await host.decideMetadataAsync({ op: "get", sessionId: seeded }),
+    ).toBeNull();
+  });
+
   test("seeds historical files into the catalog without touching the actor", async () => {
     const host = await actor();
     const legacy = `metadata-seed-${crypto.randomUUID()}`;

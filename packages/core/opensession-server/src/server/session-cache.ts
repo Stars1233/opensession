@@ -10,6 +10,7 @@ import {
   engineSessionIdFor,
   getAllSessions,
   getAllSessionsAsync,
+  nativeSessionDetailFromData,
   nativeSessionRow,
   readNativeSession,
   readNativeSessionListRow,
@@ -17,11 +18,16 @@ import {
   type SessionArchiveSlice,
 } from "./sessions";
 import {
+  indexedActiveWorkspaceIds,
+  indexedLiveSessionsByBranch,
   indexedSessions,
+  indexedWorkspaceMembers,
   upsertIndexedSession,
   upsertIndexedSessions,
 } from "./session-list-store";
 import { publishSessionRow } from "./session-row-events";
+import { workspacePrHead } from "./session-pr-target";
+import { getWorkspace } from "./workspaces";
 import { activeRunRecords } from "./run-journal";
 import {
   getRunState,
@@ -108,6 +114,48 @@ export function invalidateSessionsCache(): void {
   // immediately cannot race ahead of the invalidation it was told about.
   // Older and native clients safely ignore unknown server frames.
   broadcastToAll({ type: "sessions_invalidated" });
+}
+
+/**
+ * One session changed outside the metadata facade: an override (title,
+ * status, review), the archive registry, a PR link, a generated title. Refresh
+ * its index row from the current document and overlays, mark the list caches
+ * stale and publish the row. Nothing tells every client to refetch.
+ */
+export function publishSessionChange(sessionId: string): void {
+  const indexed = readNativeSessionListRow(sessionId);
+  if (indexed) {
+    enrichSessionRuntime([indexed]);
+    upsertIndexedSession(indexed);
+  }
+  markSessionListStale();
+  publishSessionRow(sessionId);
+}
+
+/**
+ * PR state for `branch` changed (merge, close, review, a webhook). The rows
+ * that surface it are the live sessions on that branch, on its review
+ * checkout, and in a PR workspace whose head it is. Publish exactly those;
+ * every other client's list is unaffected. Falls back to the whole-list
+ * invalidation only while the live index has no coverage to query.
+ */
+export function publishSessionRowsForBranch(branch: string): void {
+  if (!branch) return;
+  const rows = indexedLiveSessionsByBranch([branch, `${branch}-os-review`]);
+  if (rows === null) {
+    invalidateSessionsCache();
+    return;
+  }
+  const ids = new Set(rows.map((session) => session.id));
+  for (const workspaceId of indexedActiveWorkspaceIds() ?? []) {
+    const workspace = getWorkspace(workspaceId);
+    if (!workspace || workspacePrHead(workspace) !== branch) continue;
+    for (const member of indexedWorkspaceMembers(workspaceId))
+      if (!member.archived) ids.add(member.id);
+  }
+  if (ids.size === 0) return;
+  markSessionListStale();
+  for (const id of ids) publishSessionRow(id);
 }
 
 /** Mark every list cache stale without telling clients to refetch. Row-level
@@ -552,13 +600,44 @@ export function findSession(sessionId: string): UnifiedSession | undefined {
   );
 }
 
+/**
+ * Detail read for one native session. With the actor up, the committed
+ * document comes from the central catalog (`metadata catalog_get`): one
+ * indexed lookup in one database, written in the same lane pass as the commit
+ * so it is never behind the derived file, and never opening the session's
+ * actor. The file remains the fallback for a session the catalog has not
+ * seen, and the source for the synchronous readers.
+ */
+export async function readNativeSessionAsync(
+  sessionId: string,
+): Promise<UnifiedSession | undefined> {
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(sessionId)) return undefined;
+  if (sessionKernelActorActive() || process.env.NODE_ENV === "test") {
+    try {
+      const stored = await sessionMetadata({ op: "catalog_get", sessionId });
+      if (stored) {
+        const data = JSON.parse(stored.doc) as NativeSessionFile;
+        if (data?.id === sessionId) return nativeSessionDetailFromData(data);
+      }
+    } catch (error) {
+      console.warn(
+        `[session-metadata] catalog read failed for ${sessionId}; reading the file:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+  return readNativeSession(sessionId);
+}
+
 export async function findSessionAsync(
   sessionId: string,
 ): Promise<UnifiedSession | undefined> {
-  // Native ids and exact Slack deep links map one-to-one to files. Reading that
-  // file lets a newly announced conversation open before the materialized list
-  // projection has observed it. Historical aliases still need the merged list.
-  const direct = readNativeSession(sessionId) ?? readSlackSession(sessionId);
+  // Native ids come from the metadata catalog, exact Slack deep links map
+  // one-to-one to files. Either lets a newly announced conversation open
+  // before the materialized list projection has observed it. Historical
+  // aliases still need the merged list.
+  const direct =
+    (await readNativeSessionAsync(sessionId)) ?? readSlackSession(sessionId);
   if (direct) return enrichSessionRuntime([direct])[0];
   return (await getCachedSessionsAsync()).find(
     (s) => s.id === sessionId || s.aliasIds?.includes(sessionId),

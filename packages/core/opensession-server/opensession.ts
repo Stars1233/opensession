@@ -103,6 +103,7 @@ import {
   recordRunOutcome,
   startSessionOwnershipWatchdog,
   primeSessionListIndex,
+  publishSessionChange,
   reconcileSessionMetadataExports,
   stopSessionOwnershipWatchdog,
 } from "./src/server/session-cache";
@@ -793,7 +794,8 @@ if (!g.__opensessionBooted) {
     }
 
     // Cron-scheduled automations + internal event bus (agents → automations)
-    const onAutomationSession = () => invalidateSessionsCache();
+    const onAutomationSession = (sessionId: string) =>
+      publishSessionChange(sessionId);
     setEventSessionCallback(onAutomationSession);
     const resumedAutomationIntents =
       resumePendingAutomationRuns(onAutomationSession);
@@ -809,9 +811,7 @@ if (!g.__opensessionBooted) {
     hydrateScheduledPromptTimers();
 
     // Archive triage sessions when their Plain ticket is done.
-    startPlainArchiveSweep(() => {
-      invalidateSessionsCache();
-    });
+    startPlainArchiveSweep();
 
     // Unattended installs stage a Claude token in the env or a file; import it
     // into the pool before anything can ask for an account.
@@ -870,9 +870,7 @@ if (!g.__opensessionBooted) {
 
     // Re-try sidebar titles whose one-shot died in flight (a restart, or an
     // engine-spawn outage) — without this they stay raw forever.
-    startGeneratedTitleSweep(() => {
-      invalidateSessionsCache();
-    });
+    startGeneratedTitleSweep(publishSessionChange);
   } else {
     agents = [];
     g.__agents = agents;
@@ -1117,6 +1115,11 @@ if (!g.__opensessionBooted) {
       // readiness prerequisite and only extended every handoff.
     }, 0);
   } else {
+    // A dev instance has no recovery stage to wait for, but its actors still
+    // need durable timers and creation effects to wake: without the runtime
+    // every create waits on a workspace effect nobody executes and times out.
+    // The state dir is isolated, so this touches nothing live.
+    startSessionKernelRuntime();
     setServiceReadiness("ready");
   }
 

@@ -1,6 +1,6 @@
 import { isArchivedId, setArchived } from "./archive";
 import { clearSessionFileArchive } from "./plain-archive";
-import { invalidateSessionsCache } from "./session-cache";
+import { publishSessionChange } from "./session-cache";
 import type { UnifiedSession } from "./types";
 
 type ArchivableSession = Pick<UnifiedSession, "id" | "aliasIds" | "archived">;
@@ -9,14 +9,14 @@ export interface HumanTurnUnarchiveDeps {
   isArchivedId: typeof isArchivedId;
   setArchived: typeof setArchived;
   clearSessionFileArchive: typeof clearSessionFileArchive;
-  invalidateSessionsCache: typeof invalidateSessionsCache;
+  publishSessionChange: typeof publishSessionChange;
 }
 
 const defaultDeps: HumanTurnUnarchiveDeps = {
   isArchivedId,
   setArchived,
   clearSessionFileArchive,
-  invalidateSessionsCache,
+  publishSessionChange,
 };
 
 /** Restore an archived session when accepting a person's turn. */
@@ -29,6 +29,6 @@ export async function unarchiveForHumanTurn(
 
   for (const id of ids) deps.setArchived(id, false);
   await deps.clearSessionFileArchive(session.id);
-  deps.invalidateSessionsCache();
+  deps.publishSessionChange(session.id);
   return true;
 }

@@ -11,7 +11,7 @@ import { listAutomations, runAutomation } from "../automations";
 import {
   findSessionAsync,
   getCachedSessionsAsync,
-  invalidateSessionsCache,
+  publishSessionChange,
 } from "../session-cache";
 import { type Workspace } from "../workspaces";
 
@@ -72,7 +72,7 @@ async function resolvePlainTriageSession(
     void runAutomation(
       automation,
       (id) => {
-        invalidateSessionsCache();
+        publishSessionChange(id);
         clearTimeout(timer);
         resolve(id);
       },

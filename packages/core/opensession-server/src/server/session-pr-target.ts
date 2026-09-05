@@ -21,7 +21,7 @@ function inheritedBranch(
  * `<head>-os-review` branch instead of the head (the PR cache never has a PR
  * on that branch), so resolve on the head it was derived from.
  */
-function workspacePrHead(workspace: Workspace): string | null {
+export function workspacePrHead(workspace: Workspace): string | null {
   if (workspace.prNumber == null || !workspace.branch) return null;
   return workspace.branch.replace(/-os-review$/, "");
 }

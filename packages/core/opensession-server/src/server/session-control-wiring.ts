@@ -66,7 +66,7 @@ import {
   getCachedSessions,
   getCachedSessionsAsync,
   getSessionListSnapshotAsync,
-  invalidateSessionsCache,
+  publishSessionChange,
   touchNativeSession,
   touchNativeSessionStrict,
 } from "./session-cache";
@@ -392,7 +392,7 @@ registerSessionControl({
         user,
       );
       if (notice !== null) {
-        invalidateSessionsCache();
+        publishSessionChange(session.id);
         return { status: "handled" as const, message: notice, deliveryId };
       }
 

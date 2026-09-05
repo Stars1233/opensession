@@ -392,8 +392,16 @@ rebuilds page it, and `pending_exports` is a bounded work index. Nothing
 walks the placement catalog to find documents.
 
 `<sessions dir>/<id>.json` is a derived export written after the commit for
-out-of-process readers (agents, scripts, run hosts) and for this process's
-synchronous detail reads. The gateway confirms each export with `metadata
+out-of-process readers (scripts, run hosts) and for this process's
+synchronous detail reads. Async detail reads (`findSessionAsync`, so every
+WebSocket handler and detail route) come from the catalog instead:
+`readNativeSessionAsync` asks `metadata catalog_get`, one indexed lookup in
+the central database that never opens the session's actor and is never behind
+the file, and falls back to the file only for a session the catalog has not
+seen. Agents run inside the gateway and read the derived file directly; none
+of them may write it (the `spawn_task` depth stamp commits through
+`updateSessionFile`), and the ownership test scans `src/agents` for writers.
+The gateway confirms each export with `metadata
 exported`; a crash in between leaves `exported_rev < rev`, and boot repairs
 exactly those sessions (`reconcileSessionMetadataExports`) instead of
 scanning the directory. A session written before the actor owned metadata
@@ -468,10 +476,22 @@ gateway evaluates the changed session against each distinct subscribed scope
 (its workspace or worktree group and parent chain, from the list index) and
 sends `session_row` or `session_row_removed` only to the sockets whose lens
 shows it, coalesced per session (`session-row-events.ts`). The cost of a write
-is O(distinct scopes) and a few hundred bytes per socket. `sessions_invalidated`
-remains for mutations that have no row to send yet (overrides, PR state,
-auth); the client's slow fallback poll and reconnect refetch heal a lost frame
-either way.
+is O(distinct scopes) and a few hundred bytes per socket.
+
+Changes that bypass the metadata document publish rows the same way.
+`publishSessionChange(sessionId)` refreshes one index row from the current
+document and overlays (title, status and review overrides, the archive
+registry, a PR link, a generated title, a run starting or settling through
+`session-list-runtime-sync`) and publishes it. PR state lives in the PR cache,
+so a merge, close, review or webhook calls `publishSessionRowsForBranch`,
+which finds the live rows on that branch, its `-os-review` checkout and the
+members of a PR workspace whose head it is through the list index's `branch`
+column, and publishes exactly those. `sessions_invalidated` is now reserved
+for changes with no row to name: bulk archive, boot recovery, auth changes,
+integration reloads, and the fallback while the live index has no coverage.
+The client's slow fallback poll and reconnect refetch heal a lost frame either
+way. `scripts/load-control-plane.ts` measures this; see
+`docs/control-plane-load.md`.
 
 Transcript clients already reconnect by durable `changeSeq`. Current user
 entries also carry the stable source delivery ids that formed the turn, so

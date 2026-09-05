@@ -978,6 +978,15 @@ export function readNativeSessionListRow(
     `${SESSIONS_DIR}/${sessionId}.json`,
   );
   if (!data?.id || data.id !== sessionId) return undefined;
+  return nativeSessionListRowFromData(data);
+}
+
+/** The list row for a native session document with the sidebar overlays
+ * (generated title, title/status overrides, review request) applied. Shared
+ * by the file reader and the catalog-backed detail read. */
+export function nativeSessionListRowFromData(
+  data: NativeSessionFile,
+): UnifiedSession {
   const session = nativeSessionRow(data);
   const generated = getGeneratedTitle(session.id);
   if (generated) session.title = generated;
@@ -999,7 +1008,18 @@ export function readNativeSession(
   sessionId: string,
 ): UnifiedSession | undefined {
   const session = readNativeSessionListRow(sessionId);
-  if (!session) return undefined;
+  return session ? withTranscriptPath(session) : undefined;
+}
+
+/** Detail shape of a native session document: the list row plus its resolved
+ * transcript path. */
+export function nativeSessionDetailFromData(
+  data: NativeSessionFile,
+): UnifiedSession {
+  return withTranscriptPath(nativeSessionListRowFromData(data));
+}
+
+function withTranscriptPath(session: UnifiedSession): UnifiedSession {
   session.transcriptPath = resolveTranscriptPath(
     findTranscriptPath(session.worktreeDir, session.claudeSessionId),
     session.codexThreadId,

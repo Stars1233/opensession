@@ -152,7 +152,7 @@ import type { SessionUsage, TranscriptEntry, UnifiedSession } from "./types";
 import {
   findSession,
   getCachedSessions,
-  invalidateSessionsCache,
+  publishSessionChange,
   persistAutoModelSwitch,
   retryAutoFallbackModel,
   recordRunOutcome,
@@ -1122,7 +1122,7 @@ export async function recordRecoveredRunEvent(
         shouldPersistModelSwitch(event) &&
         syncAgentSessionEngine(session, { model: event.toModel })
       ) {
-        invalidateSessionsCache();
+        publishSessionChange(session.id);
       }
     } else if (
       (event.type === "init" || event.type === "done") &&
@@ -1138,7 +1138,7 @@ export async function recordRecoveredRunEvent(
             : { engineSessionId: event.sessionId },
         )
       )
-        invalidateSessionsCache();
+        publishSessionChange(session.id);
       if (session.worktreeDir)
         attachSessionWatchersToEngineTranscript(
           osSessionId,
@@ -1248,7 +1248,7 @@ export async function recordRecoveredRunEvent(
           ],
         });
         linkThreadInIndex(osSessionId, post.channel, post.threadTs);
-        invalidateSessionsCache();
+        publishSessionChange(osSessionId);
       }
     }
     if (event.type === "done" || event.type === "error")
@@ -1273,7 +1273,7 @@ export async function recordRecoveredRunEvent(
         at: new Date().toISOString(),
         by: reason,
       },
-    }).then(() => invalidateSessionsCache());
+    }).then(() => publishSessionChange(osSessionId));
     return;
   }
 
@@ -1322,7 +1322,7 @@ export async function recordRecoveredRunEvent(
       engineSessionId,
     );
   }
-  invalidateSessionsCache();
+  publishSessionChange(osSessionId);
 }
 
 /**
@@ -2946,7 +2946,7 @@ async function runSessionPromptInner(
       user || session.startedBy || undefined,
       session.model || undefined,
     ).then((t) => {
-      if (t) invalidateSessionsCache();
+      if (t) publishSessionChange(session.id);
     });
   }
 
@@ -3251,7 +3251,7 @@ async function runSessionPromptInner(
                   }
                 : {}),
             });
-            invalidateSessionsCache(); // new watchers must see the new transcriptPath
+            publishSessionChange(session.id); // new watchers must see the new transcriptPath
           } else if (
             // Slack/linear-source sessions need the same persistence, into
             // the owning agent's store — otherwise a fallback/rotation-minted
@@ -3268,7 +3268,7 @@ async function runSessionPromptInner(
                 : { engineSessionId: finalSessionId },
             )
           ) {
-            invalidateSessionsCache();
+            publishSessionChange(session.id);
           }
           attachSessionWatchersToEngineTranscript(
             sessionId,
@@ -3319,7 +3319,7 @@ async function runSessionPromptInner(
               at: new Date().toISOString(),
               by: reason,
             },
-          }).then(() => invalidateSessionsCache());
+          }).then(() => publishSessionChange(session.id));
           // Track it either way: a walk that hops twice must expect what
           // IT last wrote, and if the first write was refused (a human
           // chose meanwhile) every later hop is refused too, which is
@@ -3332,7 +3332,7 @@ async function runSessionPromptInner(
           // Keep the slack/linear store's model in step so the next turn
           // (from the loop or the UI) resumes on the fallback, not the
           // exhausted model. The new engine id follows via the init event.
-          invalidateSessionsCache();
+          publishSessionChange(session.id);
         }
         if (persistSwitch)
           broadcastToSession(sessionId, {
@@ -3454,7 +3454,7 @@ async function runSessionPromptInner(
             } catch {}
           }
         }
-        invalidateSessionsCache();
+        publishSessionChange(sessionId);
         break;
       case "error":
         // "Session is busy" = we lost the start race to a concurrent run (the
