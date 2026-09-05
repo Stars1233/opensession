@@ -34,6 +34,11 @@ import { sandboxHttpsPortFor } from "./sandbox/preview-ports";
 import { cacheSandboxPortalRecords } from "./sandbox-portals";
 import { REPO_ROOT } from "../runner-host/protocol";
 import {
+  previewScopeCommand,
+  stopUserScopeAndWait,
+  userScopeActive,
+} from "./systemd-scopes";
+import {
   sandboxSessionScratchDir,
   sessionScratchRoot,
 } from "./session-scratch";
@@ -58,6 +63,8 @@ export type PortalRecord = {
   defaultPath?: string;
   state: PortalState;
   pid?: number;
+  /** Detached user scope for a host Portal's complete process tree. */
+  scopeUnit?: string;
   startedAt?: string;
   lastError?: string;
 };
@@ -225,6 +232,8 @@ type PortalOps = {
   probePort: (port: number) => Promise<boolean>;
   pidAlive: (pid?: number) => Promise<boolean>;
   signalGroup: (pid: number, signal: "SIGTERM" | "SIGKILL") => Promise<void>;
+  scopeAlive?: (unit: string) => Promise<boolean>;
+  stopScope?: (unit: string) => Promise<void>;
 };
 
 function hostPortalOps(worktreeDir: string): PortalOps {
@@ -233,6 +242,8 @@ function hostPortalOps(worktreeDir: string): PortalOps {
     writeRegistry: async (records) => writePortalRegistry(worktreeDir, records),
     probePort: portListening,
     pidAlive,
+    scopeAlive: userScopeActive,
+    stopScope: stopUserScopeAndWait,
     // Signal the whole setsid group even if its original leader has already
     // exited. That is the common failure mode for a supervisor which leaves
     // its worker behind after a server restart.
@@ -248,16 +259,34 @@ function hostPortalOps(worktreeDir: string): PortalOps {
   };
 }
 
+type PortalProcess = Pick<PortalRecord, "pid" | "scopeUnit">;
+
+async function portalProcessAlive(
+  ops: PortalOps,
+  processRef: PortalProcess,
+): Promise<boolean> {
+  // The systemd-run client remains in the gateway cgroup while its detached
+  // scope runs. Check both so launch cannot race unit creation, while a new
+  // gateway can still rediscover a surviving Portal by its persisted unit.
+  if (
+    processRef.scopeUnit &&
+    ops.scopeAlive &&
+    (await ops.scopeAlive(processRef.scopeUnit))
+  )
+    return true;
+  return ops.pidAlive(processRef.pid);
+}
+
 async function waitForPortalPort(
   ops: PortalOps,
   port: number,
-  pid: number,
+  processRef: PortalProcess,
   timeoutMs = 15_000,
 ): Promise<"ready" | "exited" | "timeout"> {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     if (await ops.probePort(port)) return "ready";
-    if (!(await ops.pidAlive(pid))) return "exited";
+    if (!(await portalProcessAlive(ops, processRef))) return "exited";
     await Bun.sleep(200);
   }
   return "timeout";
@@ -338,7 +367,7 @@ async function listPortals(ops: PortalOps): Promise<PortalRecord[]> {
       if (record.state === "stopped" || record.state === "failed")
         return record;
       const listening = await ops.probePort(record.port);
-      const alive = await ops.pidAlive(record.pid);
+      const alive = await portalProcessAlive(ops, record);
       // "pid alive but not listening" only means starting while the Portal has
       // never been awake. Once it WAS awake, losing the listener is a crash even
       // when a wrapper (just/concurrently) survives its dead dev server —
@@ -401,7 +430,7 @@ async function startPortal(
       command: string;
       port: number;
       url: string;
-    }) => Promise<number>;
+    }) => Promise<Required<Pick<PortalRecord, "pid">> & PortalProcess>;
   },
 ): Promise<PortalRecord & { url: string }> {
   const name = validateName(input.name);
@@ -423,7 +452,7 @@ async function startPortal(
   // A dead record can leave its process group behind (a crashed dev server's
   // wrapper, watchers, lock holders). Reap it before starting anew so the
   // fresh start does not collide with orphaned ReScript/Next processes.
-  if (current) await terminatePortalProcess(ops, current.pid);
+  if (current) await terminatePortalProcess(ops, current);
   const port =
     input.port == null
       ? await input.allocatePort(records)
@@ -448,9 +477,9 @@ async function startPortal(
     startedAt: new Date().toISOString(),
   };
   await ops.writeRegistry(upsert(records, base));
-  let pid: number;
+  let processRef: Required<Pick<PortalRecord, "pid">> & PortalProcess;
   try {
-    pid = await input.launch({ name, command, port, url });
+    processRef = await input.launch({ name, command, port, url });
   } catch (error) {
     const failed = {
       ...base,
@@ -460,13 +489,18 @@ async function startPortal(
     await ops.writeRegistry(upsert(records, failed));
     throw error;
   }
-  const record = { ...base, pid };
+  const record = { ...base, ...processRef };
   await ops.writeRegistry(upsert(records, record));
   const readyTimeoutMs = Math.min(
     MAX_PORTAL_READY_MS,
     Math.max(5_000, input.readyTimeoutMs ?? 15_000),
   );
-  const readiness = await waitForPortalPort(ops, port, pid, readyTimeoutMs);
+  const readiness = await waitForPortalPort(
+    ops,
+    port,
+    processRef,
+    readyTimeoutMs,
+  );
   if (readiness !== "ready") {
     const lastError =
       (readiness === "exited"
@@ -476,10 +510,11 @@ async function startPortal(
     // A timed-out process may still be compiling and can leave watchers or
     // lock files behind. Never lose its PID by overwriting the failed record
     // before the complete process group has been terminated.
-    await terminatePortalProcess(ops, pid);
+    await terminatePortalProcess(ops, processRef);
     const failed = {
       ...record,
       pid: undefined,
+      scopeUnit: undefined,
       state: "failed" as const,
       lastError,
     };
@@ -493,8 +528,13 @@ async function startPortal(
 
 async function terminatePortalProcess(
   ops: PortalOps,
-  pid?: number,
+  processRef: PortalProcess,
 ): Promise<void> {
+  if (processRef.scopeUnit && ops.stopScope) {
+    await ops.stopScope(processRef.scopeUnit);
+    if (!(await portalProcessAlive(ops, processRef))) return;
+  }
+  const pid = processRef.pid;
   if (!pid || pid < 2 || !(await ops.pidAlive(pid))) return;
   await ops.signalGroup(pid, "SIGTERM");
   await Bun.sleep(1_500);
@@ -505,8 +545,13 @@ async function stopPortal(ops: PortalOps, name: string): Promise<PortalRecord> {
   const records = await ops.readRegistry();
   const current = records.find((record) => record.name === name);
   if (!current) throw new Error(`Portal '${name}' does not exist.`);
-  await terminatePortalProcess(ops, current.pid);
-  const stopped = { ...current, state: "stopped" as const, pid: undefined };
+  await terminatePortalProcess(ops, current);
+  const stopped = {
+    ...current,
+    state: "stopped" as const,
+    pid: undefined,
+    scopeUnit: undefined,
+  };
   await ops.writeRegistry(upsert(records, stopped));
   return stopped;
 }
@@ -557,28 +602,39 @@ export async function startPortalService(input: {
     launch: async ({ name, command, port, url }) => {
       mkdirSync(logDir, { recursive: true });
       const log = openSync(logPath, "w");
-      const proc = Bun.spawn(["setsid", "bash", "-lc", `exec ${command}`], {
+      const directCommand = ["setsid", "bash", "-lc", `exec ${command}`];
+      const portalEnv = {
+        PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+        HOME: process.env.HOME || "/tmp",
+        ...input.env,
+        PORT: String(port),
+        PORTAL_URL: url,
+        OPENSESSION_PORTAL: name,
+        // Next's detached telemetry flusher escapes the Portal process group
+        // during shutdown. Portals do not need telemetry, so never create it.
+        NEXT_TELEMETRY_DISABLED: "1",
+      };
+      const scoped = previewScopeCommand(
+        directCommand,
+        input.worktreeDir,
+        name,
+        { env: portalEnv },
+      );
+      const proc = Bun.spawn(scoped.command, {
         cwd: input.worktreeDir,
         // Portal commands are user-authored code. Do not hand them the Open
         // Session service environment, which can include operator credentials.
-        env: {
-          PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
-          HOME: process.env.HOME || "/tmp",
-          ...input.env,
-          PORT: String(port),
-          PORTAL_URL: url,
-          OPENSESSION_PORTAL: name,
-          // Next's detached telemetry flusher escapes the Portal process group
-          // during shutdown. Portals do not need telemetry, so never create it.
-          NEXT_TELEMETRY_DISABLED: "1",
-        },
+        env: scoped.env,
         stdin: "ignore",
         stdout: log,
         stderr: log,
       });
       closeSync(log);
       proc.unref();
-      return proc.pid;
+      return {
+        pid: proc.pid,
+        ...(scoped.unit ? { scopeUnit: scoped.unit } : {}),
+      };
     },
   });
   audit({
@@ -1064,7 +1120,7 @@ async function startSandboxPortalServiceInner(
           const pid = Number(marker.stdout.trim());
           if (Number.isInteger(pid) && pid >= 2) {
             await input.sandbox.exec(["rm", "-f", pidPath]);
-            return pid;
+            return { pid };
           }
           await Bun.sleep(250);
         }
