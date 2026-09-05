@@ -109,7 +109,11 @@ export function modelEfforts(
       : id.slice(0, slash);
   const slug = slash === -1 ? id : id.slice(slash + 1);
 
-  if (provider === "openai" && /^gpt-5\./.test(slug)) return OPENAI_EFFORTS;
+  if (
+    provider === "openai" &&
+    (/^gpt-5\./.test(slug) || slug === "gpt-6-astra")
+  )
+    return OPENAI_EFFORTS;
   if (provider === "anthropic") {
     if (slug.startsWith("claude-haiku-4-5")) return ["high", "max"];
     if (/^claude-(?:fable|opus|sonnet)-/.test(slug)) return CLAUDE_EFFORTS;
@@ -167,6 +171,7 @@ export const DEFAULT_BRIDGE_PICKER_MODELS = [
   "claude-opus-5",
   "claude-sonnet-5",
   "claude-haiku-4-5",
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -227,6 +232,12 @@ export const KNOWN_MODELS: ModelInfo[] = [
     provider: "codex",
     label: "Best available (Codex)",
     aliases: ["best", "best-available", "best-codex"],
+  },
+  {
+    id: "gpt-6-astra",
+    provider: "codex",
+    label: "GPT-6 Astra",
+    aliases: ["astra", "gpt6"],
   },
   {
     id: "gpt-5.6-sol",
@@ -818,6 +829,7 @@ const CODEX_MODEL_ORDER = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
  */
 const FALLBACK_TIER: Record<string, number> = {
   "claude-fable-5-1": 3,
+  "gpt-6-astra": 3,
   "gpt-5.6-sol": 3,
   "claude-opus-5": 3,
   "gpt-5.6-terra": 3,
