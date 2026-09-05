@@ -36,6 +36,7 @@ import { REPO_ROOT } from "../runner-host/protocol";
 import {
   previewScopeCommand,
   stopUserScopeAndWait,
+  systemdUserScopesAvailable,
   userScopeActive,
 } from "./systemd-scopes";
 import {
@@ -691,6 +692,23 @@ export type PortalReapResult = {
   stopped: Array<{ sessionId: string; worktreeDir: string; name: string }>;
 };
 
+export function portalsNeedingContainment(
+  records: readonly PortalRecord[],
+  scopesAvailable = systemdUserScopesAvailable(),
+): PortalRecord[] {
+  if (!scopesAvailable) return [];
+  return records.filter(
+    (record) =>
+      (record.state === "awake" || record.state === "starting") &&
+      !record.scopeUnit &&
+      !!record.pid,
+  );
+}
+
+export type PortalContainmentMigrationResult = {
+  migrated: Array<{ sessionId: string; worktreeDir: string; name: string }>;
+};
+
 function canonicalDir(dir: string): string {
   return resolve(dir);
 }
@@ -763,7 +781,66 @@ export async function reapOrphanedPortalServices(
   return { stopped };
 }
 
+/**
+ * A release predating Portal scopes can leave live preview trees inside the
+ * gateway service cgroup. Restart only durable, live-owned Portal records so
+ * they re-enter through startPortalService and acquire their private scope.
+ * Stopped/failed records and non-systemd development hosts are untouched.
+ */
+export async function migrateUnscopedPortalServices(
+  sessions: readonly PortalOwnerSession[],
+): Promise<PortalContainmentMigrationResult> {
+  if (!systemdUserScopesAvailable()) return { migrated: [] };
+  const owners = new Map<string, Set<string>>();
+  const addOwner = (dir: string | null | undefined, sessionId: string) => {
+    if (!dir) return;
+    const key = canonicalDir(dir);
+    const set = owners.get(key) ?? new Set<string>();
+    set.add(sessionId);
+    owners.set(key, set);
+  };
+  for (const session of sessions) {
+    addOwner(session.worktreeDir, session.id);
+    for (const repo of session.attachedRepos ?? [])
+      addOwner(repo.dir, session.id);
+  }
+
+  const migrated: PortalContainmentMigrationResult["migrated"] = [];
+  for (const [worktreeDir, liveOwners] of owners) {
+    const records = readPortalRegistry(worktreeDir);
+    for (const portal of portalsNeedingContainment(records, true)) {
+      const owned = portal.sessionId
+        ? liveOwners.has(portal.sessionId)
+        : liveOwners.size > 0;
+      if (!owned) continue;
+      const sessionId = portal.sessionId || liveOwners.values().next().value;
+      if (!sessionId) continue;
+      try {
+        await restartPortalService({
+          sessionId,
+          worktreeDir,
+          name: portal.name,
+          readyTimeoutMs: 180_000,
+        });
+        migrated.push({ sessionId, worktreeDir, name: portal.name });
+        audit({
+          msg: "portal_containment_migrated",
+          session_id: sessionId,
+          portal: portal.name,
+        });
+      } catch (error) {
+        console.warn(
+          `[portals] could not migrate ${portal.name} in ${worktreeDir} into a private scope:`,
+          error,
+        );
+      }
+    }
+  }
+  return { migrated };
+}
+
 let portalReapTimer: ReturnType<typeof setInterval> | null = null;
+let portalReconcileInFlight = false;
 
 /** Reconcile Portal process groups after boot and every five minutes. */
 export function startPortalReaper(
@@ -771,6 +848,7 @@ export function startPortalReaper(
 ): void {
   if (portalReapTimer) return;
   const run = () => {
+    if (portalReconcileInFlight) return;
     let sessions: readonly PortalOwnerSession[];
     try {
       sessions = getSessions();
@@ -781,14 +859,25 @@ export function startPortalReaper(
       );
       return;
     }
+    portalReconcileInFlight = true;
     void reapOrphanedPortalServices(sessions)
-      .then(({ stopped }) => {
+      .then(async ({ stopped }) => {
         if (stopped.length)
           console.log(
             `[portals] reaped ${stopped.length} orphaned Portal service(s)`,
           );
+        const { migrated } = await migrateUnscopedPortalServices(sessions);
+        if (migrated.length)
+          console.log(
+            `[portals] migrated ${migrated.length} Portal service(s) into private scopes`,
+          );
       })
-      .catch((error) => console.error("[portals] orphan reap failed:", error));
+      .catch((error) =>
+        console.error("[portals] reconciliation failed:", error),
+      )
+      .finally(() => {
+        portalReconcileInFlight = false;
+      });
   };
   run();
   portalReapTimer = setInterval(run, PORTAL_REAP_INTERVAL_MS);

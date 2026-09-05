@@ -7,6 +7,7 @@ import {
   listPortalServices,
   listSandboxPortalServices,
   normalizePortalPath,
+  portalsNeedingContainment,
   type PortalRecord,
   portalsToRestore,
   readPortalRegistry,
@@ -101,6 +102,37 @@ describe("portalsToRestore", () => {
         [record("web", "starting")],
       ),
     ).toEqual([]);
+  });
+});
+
+describe("Portal containment migration", () => {
+  test("selects only live legacy host Portals when user scopes are available", () => {
+    const record = (
+      name: string,
+      state: PortalRecord["state"],
+      extra: Partial<PortalRecord> = {},
+    ): PortalRecord => ({
+      name,
+      key: `${name.toUpperCase()}_PORT`,
+      command: `serve ${name}`,
+      port: 4000,
+      state,
+      pid: 100,
+      ...extra,
+    });
+    const records = [
+      record("awake-legacy", "awake"),
+      record("starting-legacy", "starting"),
+      record("managed", "awake", { scopeUnit: "opensession-preview-a" }),
+      record("stopped", "stopped"),
+      record("failed", "failed"),
+      record("missing-pid", "awake", { pid: undefined }),
+    ];
+
+    expect(portalsNeedingContainment(records, true).map((r) => r.name)).toEqual(
+      ["awake-legacy", "starting-legacy"],
+    );
+    expect(portalsNeedingContainment(records, false)).toEqual([]);
   });
 });
 
