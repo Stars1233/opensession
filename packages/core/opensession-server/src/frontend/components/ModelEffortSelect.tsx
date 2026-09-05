@@ -116,7 +116,7 @@ export function friendlyModelSlug(slug: string): string {
       const suffix = m[2]
         ?.replace(/-/g, " ")
         .replace(
-          /^(sol|terra|luna)$/i,
+          /^(astra|sol|terra|luna)$/i,
           (name) => name.charAt(0).toUpperCase() + name.slice(1).toLowerCase(),
         );
       return `GPT-${m[1].replace(/-/g, ".")}${suffix ? ` ${suffix}` : ""}`;

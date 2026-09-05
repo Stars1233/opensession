@@ -52,6 +52,12 @@ describe("workspace preset labels", () => {
     );
   });
 
+  it("capitalizes named GPT variants", () => {
+    expect(shortModelLabel("pi/openai/gpt-6-astra", models)).toBe(
+      "GPT-6 Astra",
+    );
+  });
+
   it("names OpenRouter's nested GLM-5.3 slug", () => {
     expect(shortModelLabel("pi/openrouter/z-ai/glm-5.3", models)).toBe(
       "GLM-5.3",
