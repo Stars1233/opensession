@@ -372,6 +372,11 @@ export function ModelEffortSelect({
   } = actions;
   const effectiveModel = model || defaultModel;
   const isPreferredDefault = preferredDefaultModel === effectiveModel;
+  const [open, setOpen] = React.useState(false);
+  const setMenuOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
   const [recentModelIds, setRecentModelIds] = React.useState(getRecentModels);
   React.useEffect(
     () => onRecentModelsChanged(() => setRecentModelIds(getRecentModels())),
@@ -782,9 +787,16 @@ export function ModelEffortSelect({
   const heroTrigger = triggerVariant === "hero";
 
   return (
-    <Menu.Root onOpenChange={onOpenChange}>
+    <Menu.Root open={open} onOpenChange={setMenuOpen}>
       <Menu.Trigger
         type="button"
+        onTouchEnd={(event) => {
+          // iOS synthesizes mousedown after touchend. That blur collapses an
+          // empty phone composer and unmounts this trigger before Base UI can
+          // open its menu, so finish the touch here and keep the trigger alive.
+          event.preventDefault();
+          setMenuOpen(!open);
+        }}
         className={cn(
           menuRowTrigger
             ? "flex w-full cursor-pointer items-center gap-[7px] whitespace-nowrap rounded-control border border-line-strong bg-transparent px-3 py-[7px] text-control-label font-medium text-faint hover:bg-hover hover:text-fg data-[popup-open]:bg-hover data-[popup-open]:text-fg"
