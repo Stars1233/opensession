@@ -11,6 +11,7 @@ import {
   portalRouteAuthorized,
   recipeStartOptions,
   sandboxPreviewIdentityContext,
+  seedHostEnvFiles,
   type PreviewStatus,
 } from "../preview";
 import { findSessionAsync } from "../session-cache";
@@ -277,6 +278,7 @@ export async function handlePreviewRoutes(
             { error: "Session has no Portal workspace" },
             { status: 400 },
           );
+        seedHostEnvFiles(session.worktreeDir);
         await startPortalService({
           sessionId: session.id,
           worktreeDir: session.worktreeDir,

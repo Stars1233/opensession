@@ -356,6 +356,72 @@ describe("session kernel actor service", () => {
     }
   });
 
+  test("a fail-stop withdraws the listener and reports through onFailed", async () => {
+    const failures: Error[] = [];
+    const isolatedService = await startSessionKernelService({
+      port: 0,
+      token,
+      workerCount: 1,
+      responseTimeoutMs: 100,
+      workerUrl: new URL(
+        "./testing/mutation-timeout-worker.ts",
+        import.meta.url,
+      ),
+      onFailed: (error) => failures.push(error),
+    });
+    try {
+      const helloResponse = await fetch(`${isolatedService.url}/rpc`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          version: SESSION_KERNEL_TRANSPORT_VERSION,
+          actorVersion: SESSION_KERNEL_ACTOR_VERSION,
+          request: {
+            t: "hello",
+            rpcId: "mutation-timeout-handshake",
+            version: SESSION_KERNEL_ACTOR_VERSION,
+          },
+        }),
+      });
+      const hello = (await helloResponse.json()) as { serviceEpoch: string };
+      expect(helloResponse.status).toBe(200);
+
+      // A catalog-lane mutation that never answers is ambiguous placement
+      // authority: the service fail-stops instead of retrying it.
+      await fetch(`${isolatedService.url}/rpc`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          version: SESSION_KERNEL_TRANSPORT_VERSION,
+          actorVersion: SESSION_KERNEL_ACTOR_VERSION,
+          serviceEpoch: hello.serviceEpoch,
+          request: {
+            t: "call",
+            rpcId: "stalled-mutation",
+            outputBytes: 1024,
+            request: { t: "store", method: "clearAskRecords", args: [] },
+          },
+        }),
+      }).catch(() => undefined);
+      for (let attempt = 0; attempt < 50 && !failures.length; attempt += 1)
+        await Bun.sleep(10);
+      expect(failures.map((error) => error.message)).toEqual([
+        "Session actor lane 0 response timed out",
+      ]);
+      // The listener is gone: a process that stays alive here is a wedge that
+      // only an operator restart clears, which is why the entry point exits.
+      await expect(fetch(`${isolatedService.url}/ready`)).rejects.toThrow();
+    } finally {
+      isolatedService.stop();
+    }
+  });
+
   test("accepts the transport worker's first message immediately", async () => {
     const previousToken = process.env.OPENSESSION_SESSION_KERNEL_TOKEN;
     const previousUrl = process.env.OPENSESSION_SESSION_KERNEL_URL;

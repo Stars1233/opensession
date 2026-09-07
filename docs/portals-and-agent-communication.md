@@ -19,7 +19,11 @@ process under a session-scoped supervisor with `PORT` and `PORTAL_URL`, waits
 for it to listen, and returns the URL. A host Portal's environment is minimal:
 `PATH`, `HOME`, those two, and the same short-lived AWS credential pointer the
 agent's shell gets (`AWS_SHARED_CREDENTIALS_FILE`, when the mint is on), never
-the service environment. Sandbox Portals get the workload identity instead.
+the service environment. Before a host Portal starts, the gitignored env files
+a repository's dev server needs (`packages/core/webapp/.env.local`, `.envrc`)
+are copied from the main checkout when the worktree lacks them; an existing
+copy is never overwritten. Sandbox Portals get the workload identity instead
+and materialize their environment from the repository's configured source.
 The tools answer within 90 seconds: a Portal still booting past that (a
 declared dev server may allow 180) is reported as still starting, and
 `list_portals` shows the URL or the error once it settles. Supervisor records

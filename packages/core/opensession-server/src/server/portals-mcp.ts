@@ -7,6 +7,7 @@ import {
   getSandboxPreviewStatus,
   recipeStartOptions,
   sandboxPreviewIdentityContext,
+  seedHostEnvFiles,
 } from "./preview";
 import {
   listPortalServices,
@@ -172,6 +173,7 @@ async function startPortalForContext(
     });
     return `${portal.name} is ready at ${(await runnerPortalUrl(portal)) ?? "its authenticated Portal URL"}.`;
   }
+  if (!sandbox) seedHostEnvFiles(dir);
   const starting = sandbox
     ? startSandboxPortalService({
         sessionId: ctx.sessionId,

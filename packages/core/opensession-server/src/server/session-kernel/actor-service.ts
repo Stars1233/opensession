@@ -163,6 +163,14 @@ export type SessionKernelServiceOptions = {
   readMailboxLimit?: number;
   priorityMailboxLimit?: number;
   laneQueueLimit?: number;
+  /**
+   * Called once when the service fail-stops (an ambiguous catalog mutation, a
+   * lane that could not be restarted). The listener is already withdrawn by
+   * then; the process keeps running only for the caller to decide how to end
+   * it. The systemd entry point exits so `Restart=always` brings a fresh
+   * service up instead of leaving a live process nothing can reach.
+   */
+  onFailed?: (error: Error) => void;
 };
 
 function mailboxLimit(
@@ -389,6 +397,7 @@ export async function startSessionKernelService(
     console.error("Session kernel actor service failed", error);
     for (const slot of slots) stopSlot(slot, error);
     server?.stop(true);
+    options.onFailed?.(error);
   }
 
   function sessionQuarantinedResponse(

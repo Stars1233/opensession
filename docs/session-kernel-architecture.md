@@ -36,7 +36,11 @@ and gives that actor stable lane affinity, so process-local reducer caches remai
 coherent and two turns for one session cannot overlap. Many actors share each
 lane, while the short isolated SQLite wait bound leaves unrelated lanes
 available. A failed lane is restarted without stopping healthy lanes;
-system-catalog ambiguity still fail-stops the service. After startup ownership
+system-catalog ambiguity still fail-stops the service. A fail-stop withdraws
+the listener and, under systemd, exits the process so `Restart=always` brings a
+fresh service up: a live process with no listener is a wedge that every gateway
+boot fails against ("runtime peer generations are unavailable") until an
+operator restarts the unit. After startup ownership
 checks, actor turns perform bounded SQLite
 reductions only. They do not bind sockets, perform filesystem or process work,
 invoke models, or execute outbox effects. Physical filesystem, network,
