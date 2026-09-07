@@ -1876,6 +1876,9 @@ export async function maybeLaunchSandboxedRun(
     promptEntryId?: string;
     seedTranscriptEntries?: TranscriptEntry[];
     engineSessionId?: string;
+    /** The prompt already opens with an engine-switch handoff note, so a
+     *  replacement Sandbox must not add a second one. */
+    promptCarriesHandoff?: boolean;
     cwd: string;
     user?: string;
     images?: ImageInput[];
@@ -2110,13 +2113,34 @@ export async function maybeLaunchSandboxedRun(
     const portablePreset = workspacePreset
       ? portableWorkspacePresetRun(workspacePreset)
       : undefined;
+    // A replacement Sandbox starts a fresh engine: the old one's database
+    // lived in the VM that is gone, or on this host for a session that just
+    // moved. Pi only bridges history when it was told to RESUME and the file
+    // is missing, so bridge it here the same way, from the entries the host
+    // already read, or the model forgets everything the person said and saw.
+    const replacedHandoff =
+      remoteSandboxReplaced &&
+      !opts.promptCarriesHandoff &&
+      opts.seedTranscriptEntries?.length
+        ? buildEngineSwitchHandoffNote({
+            fromModel: session.model,
+            fromProvider: "pi",
+            toProvider: "pi",
+            sameEngineRestart: true,
+            entries: opts.seedTranscriptEntries,
+            maxEntries: 200,
+            maxChars: 60_000,
+          })
+        : null;
     const spec: RunHostSpec = {
       // Bind the physical sandbox host to the admitted run token, exactly like
       // the Runner and local paths: exact-token Stop must reach the live host,
       // and restart adoption must reattach under the same durable identity.
       hostId: opts.startToken || `rh-${randomUUIDv7()}`,
       osSessionId: session.id,
-      prompt: opts.prompt,
+      prompt: replacedHandoff
+        ? `${wrapContext(replacedHandoff, "handoff")}\n\n${opts.prompt}`
+        : opts.prompt,
       promptEntryId: opts.promptEntryId,
       seedTranscriptEntries: opts.seedTranscriptEntries,
       engineSessionId: remoteSandboxReplaced
@@ -3009,6 +3033,7 @@ async function runSessionPromptInner(
         promptEntryId: durablePromptEntryId,
         seedTranscriptEntries: piHostSeedEntries,
         engineSessionId: engineSessionId || undefined,
+        promptCarriesHandoff: !!switchHandoff,
         cwd,
         user,
         images,
