@@ -517,9 +517,19 @@ async function ensurePreviewRoute(
       body: JSON.stringify(server),
     });
   try {
-    // PUT creates the key; if it already exists (e.g. Caddy kept the server
-    // across an opensession restart, so our cache is cold) it 409s — drop it
-    // and recreate so the route always points at the current upstream.
+    // Caddy may already hold this exact route: it outlived a gateway handoff,
+    // or an earlier PUT was still queued behind a reload when its response
+    // timed out. Adopt it instead of writing again. Every write is a Caddy
+    // config reload that waits for the previous servers to drain, so a
+    // needless DELETE + PUT costs two reloads and briefly drops the listener.
+    const existing = await caddyFetch(path);
+    if (existing.ok && Bun.deepEquals(await existing.json(), server)) {
+      previewRoutes.set(httpsPort, signature);
+      return true;
+    }
+    // PUT creates the key; if it already exists with another upstream (the
+    // host port moved) it 409s — drop it and recreate so the route always
+    // points at the current upstream.
     let res = await put();
     if (res.status === 409) {
       await caddyFetch(path, { method: "DELETE" }).catch(() => {});
