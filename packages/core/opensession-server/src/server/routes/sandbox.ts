@@ -207,11 +207,16 @@ async function sandboxView(
     };
   }
   if (!recorded.sandboxId) {
+    // Nothing exists yet: a fresh or just-moved session provisions on its
+    // next turn. Without the recorded lifecycle the client reads "gone" as
+    // Needs attention.
     return {
       enabled: true,
       provider: recorded.provider,
       workspace: recorded.workspace,
       status: "gone" as const,
+      lifecycle: recorded.lifecycle ?? ("preparing" as const),
+      lastLifecycleError: recorded.lastLifecycleError,
       materialized: false,
     };
   }
