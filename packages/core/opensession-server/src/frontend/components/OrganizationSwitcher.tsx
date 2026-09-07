@@ -17,7 +17,7 @@ import { GithubMemberDialog } from "./SetupTeam";
 import { DownloadAppsDialog } from "./DownloadAppsDialog";
 import {
   IconArrowDown,
-  IconChevronDown,
+  IconChevronsUpDown,
   IconCopy,
   IconGear,
   IconPeople,
@@ -202,10 +202,10 @@ export function OrganizationSwitcher({
                 title={status}
               />
             </span>
-            <span className="min-w-0 flex-1 truncate">{name}</span>
-            <IconChevronDown
-              size={16}
-              className="shrink-0 text-faint transition-[color,rotate] group-hover:text-dim group-data-[popup-open]:rotate-180"
+            <span className="min-w-0 truncate">{name}</span>
+            <IconChevronsUpDown
+              size={14}
+              className="-ml-0.5 shrink-0 text-faint transition-colors group-hover:text-dim"
               aria-hidden="true"
             />
           </Menu.Trigger>
