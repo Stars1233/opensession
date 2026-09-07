@@ -75,8 +75,20 @@ describe("sandboxAttachRefusal", () => {
 
   test("a session already in a Sandbox may not move again", () => {
     expect(
-      sandboxAttachRefusal({ ...host, sandbox: { provider: "box" } }),
+      sandboxAttachRefusal({
+        ...host,
+        sandbox: { provider: "box", sandboxId: "bx_1" },
+      }),
     ).toMatch(/already runs in a Sandbox/);
+  });
+
+  test("a move that has not materialized may be retried", () => {
+    expect(
+      sandboxAttachRefusal({
+        ...host,
+        sandbox: { provider: "box", lifecycle: "needs_attention" },
+      }),
+    ).toBeNull();
   });
 
   test("an explicit host record does not count as a Sandbox", () => {

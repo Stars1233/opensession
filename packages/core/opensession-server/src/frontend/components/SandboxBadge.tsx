@@ -119,7 +119,7 @@ function HostBadge({ sessionId, host }: { sessionId: string; host: HostRef }) {
           </div>
           <div className="mt-1 text-meta text-dim">
             {moved
-              ? `Moving to ${sandboxProviderLabel(moved)}. The Sandbox is set up on the next message.`
+              ? `Moving to ${sandboxProviderLabel(moved)}. The Sandbox is starting; the next message runs there.`
               : "Runs on the Open Session host, in this session's worktree"}
           </div>
         </div>
@@ -135,8 +135,8 @@ function HostBadge({ sessionId, host }: { sessionId: string; host: HostRef }) {
         ) : (
           <>
             <div className="px-2.5 pb-1.5 text-meta text-dim">
-              A Sandbox clones this branch from origin and takes over on the
-              next message. Portals on this machine stop.
+              The Sandbox starts now, clones this branch from origin, and takes
+              over on the next message. Portals on this machine stop.
             </div>
             {providers.map((provider) => (
               <button

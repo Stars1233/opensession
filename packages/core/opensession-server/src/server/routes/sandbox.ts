@@ -7,6 +7,7 @@ import { hostRunBusy } from "../host-registry";
 import { stopAllPortalServices } from "../portal-supervisor";
 import { hasActiveRunFor } from "../run-journal";
 import { getSandboxProvider } from "../sandbox";
+import { ensureSandboxWithTransientRetry } from "../sandbox/reliability";
 import {
   isRemoteSandboxProvider,
   isRetiredSandboxProvider,
@@ -51,7 +52,9 @@ type AttachSession = Pick<
 
 /** Why a host session cannot move into a Sandbox, or null when it can. */
 export function sandboxAttachRefusal(session: AttachSession): string | null {
-  if (session.sandbox?.provider && session.sandbox.provider !== "local")
+  // A recorded provider without a Sandbox id is a move that has not
+  // materialized (still preparing, or failed); moving again retries it.
+  if (session.sandbox?.sandboxId && session.sandbox.provider !== "local")
     return "This session already runs in a Sandbox.";
   if (session.runner?.id)
     return "This session runs on a Runner. Start a new session to use a Sandbox.";
@@ -92,9 +95,72 @@ export function unpublishedWorkSummary(
 }
 
 /**
- * Move a host session into a Sandbox. Nothing is provisioned here: the record
- * says "preparing" and the next turn takes the same path as a Sandbox
- * session's first turn, seeding a fresh engine from the stored transcript.
+ * Provision the Sandbox a session just moved into, off the request. The next
+ * turn's own ensure() queues behind this one on the provider's per-session
+ * lock and adopts the result, so a message sent meanwhile does not start a
+ * second Sandbox; it only waits.
+ */
+async function provisionAttachedSandbox(
+  session: StoredSession,
+  provider: string,
+): Promise<void> {
+  const recorded = async () => {
+    const current = await findSessionAsync(session.id);
+    // Only the move this call started may finish it: a later move, a turn
+    // that recorded the Sandbox first, or a detach leaves nothing to write.
+    return current?.sandbox?.provider === provider && !current.sandbox.sandboxId
+      ? current.sandbox
+      : null;
+  };
+  try {
+    const sandbox = await ensureSandboxWithTransientRetry(
+      getSandboxProvider(provider),
+      {
+        sessionId: session.id,
+        repo: session.repo,
+        branch: session.branch || undefined,
+        mode: session.mode,
+        cwd: session.worktreeDir || undefined,
+        attachedDirs: (session.attachedRepos || [])
+          .map((r) => r.dir)
+          .filter(Boolean),
+      },
+    );
+    const current = await recorded();
+    if (!current) return;
+    touchNativeSession(session.id, {
+      sandbox: {
+        ...current,
+        sandboxId: sandbox.id,
+        workspace: sandbox.workspace,
+        lifecycle: "awake",
+        lastLifecycleError: undefined,
+      },
+    });
+    console.log(`[sandbox] ${session.id}: moved into ${sandbox.id}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[sandbox] ${session.id}: could not provision the ${provider} Sandbox it moved to:`,
+      message,
+    );
+    const current = await recorded();
+    if (!current) return;
+    touchNativeSession(session.id, {
+      sandbox: {
+        ...current,
+        lifecycle: "needs_attention",
+        lastLifecycleError: message,
+      },
+    });
+  }
+}
+
+/**
+ * Move a host session into a Sandbox. The record says "preparing" and the
+ * Sandbox is provisioned in the background; the next turn takes the same path
+ * as a Sandbox session's first turn, seeding a fresh engine from the stored
+ * transcript, and adopts the Sandbox whether it is ready or still booting.
  */
 async function attachSandbox(
   ctx: RouteContext,
@@ -157,9 +223,9 @@ async function attachSandbox(
     },
   });
   audit({ msg: "sandbox_attach", session_id: session.id, provider });
-  return Response.json(
-    await sandboxView((await findSessionAsync(session.id)) || session),
-  );
+  const moved = (await findSessionAsync(session.id)) || session;
+  void provisionAttachedSandbox(moved, provider);
+  return Response.json(await sandboxView(moved));
 }
 
 /**
