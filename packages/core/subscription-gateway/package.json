@@ -13,11 +13,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./pool": "./src/pool/index.ts",
-    "./storage": "./src/storage/index.ts",
-    "./openai": "./src/openai/index.ts"
-  },
-  "dependencies": {
-    "@earendil-works/pi-ai": "0.84.3",
-    "zod": "^4.3.6"
+    "./storage": "./src/storage/index.ts"
   }
 }

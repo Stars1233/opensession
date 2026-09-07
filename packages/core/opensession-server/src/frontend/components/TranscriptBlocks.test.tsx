@@ -987,6 +987,7 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
       },
     ];
     setTurnPrefs("open", "folded");
+    setThinkingMessagesPref("all");
     const html = renderToStaticMarkup(<TranscriptBlocks entries={entries} />);
 
     expect(html).toContain(
@@ -994,6 +995,7 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
     );
     expect(html).not.toContain("<br>");
     setTurnPrefs(null);
+    setThinkingMessagesPref(null);
   });
 
   test("keeps reasoning quiet inside one work disclosure", () => {
@@ -1104,8 +1106,10 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
     setThinkingMessagesPref(null);
   });
 
-  test("shows only the newest thinking message by default", () => {
+  test("latest keeps one thought at the tail of the live turn", () => {
     setTurnPrefs("open", "folded");
+    // Thought, step, thought, step: in transcript order each thought sits
+    // above the step it produced.
     const entries: TranscriptEntry[] = [
       {
         id: "prompt",
@@ -1136,28 +1140,60 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
         timestamp: "2026-08-28T08:00:03Z",
       },
       {
-        id: "answer",
-        type: "assistant",
-        content: "Done.",
+        id: "tool-2",
+        type: "tool_use",
+        toolUseId: "tool-call-2",
+        toolName: "bash",
+        content: "Using bash again",
         timestamp: "2026-08-28T08:00:04Z",
       },
     ];
 
-    const latest = renderToStaticMarkup(<TranscriptBlocks entries={entries} />);
+    // Live, the default shows the newest thought only, after the last step,
+    // shimmering as the turn's current status.
+    const latest = renderToStaticMarkup(
+      <TranscriptBlocks entries={entries} live />,
+    );
     expect(latest).not.toContain("Reading the current state");
     expect(latest).toContain("Verifying the result");
     expect(latest.match(/data-reasoning=""/g)).toHaveLength(1);
+    expect(latest.indexOf("Verifying the result")).toBeGreaterThan(
+      latest.indexOf('data-eid="tool-2#sec"'),
+    );
+    expect(latest).toContain('data-text-shimmer=""');
+
+    // Settled, the status has done its job and the rail keeps the steps.
+    const settled = renderToStaticMarkup(
+      <TranscriptBlocks entries={entries} />,
+    );
+    expect(settled).not.toContain('data-reasoning=""');
+    expect(settled).toContain('data-eid="tool-2#sec"');
 
     setThinkingMessagesPref("none");
-    const none = renderToStaticMarkup(<TranscriptBlocks entries={entries} />);
+    const none = renderToStaticMarkup(
+      <TranscriptBlocks entries={entries} live />,
+    );
     expect(none).not.toContain('data-reasoning=""');
     expect(none).not.toContain("Verifying the result");
 
+    // All is the trace: every thought stays where it happened, before the
+    // step it led to, live or settled.
     setThinkingMessagesPref("all");
-    const all = renderToStaticMarkup(<TranscriptBlocks entries={entries} />);
-    expect(all).toContain("Reading the current state");
-    expect(all).toContain("Verifying the result");
-    expect(all.match(/data-reasoning=""/g)).toHaveLength(2);
+    for (const all of [
+      renderToStaticMarkup(<TranscriptBlocks entries={entries} live />),
+      renderToStaticMarkup(<TranscriptBlocks entries={entries} />),
+    ]) {
+      expect(all.match(/data-reasoning=""/g)).toHaveLength(2);
+      expect(all.indexOf("Reading the current state")).toBeLessThan(
+        all.indexOf('data-eid="tool#sec"'),
+      );
+      expect(all.indexOf("Verifying the result")).toBeGreaterThan(
+        all.indexOf('data-eid="tool#sec"'),
+      );
+      expect(all.indexOf("Verifying the result")).toBeLessThan(
+        all.indexOf('data-eid="tool-2#sec"'),
+      );
+    }
 
     setTurnPrefs(null);
     setThinkingMessagesPref(null);

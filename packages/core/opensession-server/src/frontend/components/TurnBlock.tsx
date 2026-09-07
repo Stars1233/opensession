@@ -146,6 +146,22 @@ export const TurnBlock = function TurnBlock({
   const timing = blockTiming(items, toolResults);
   const duration = timing.duration;
   const lastTool = tools[tools.length - 1];
+  // The collapsed live line names the current activity: the thought the rail
+  // ends on, otherwise its newest step.
+  const lastItem = items[items.length - 1];
+  const activity =
+    !live || !hasNarration || !lastItem
+      ? null
+      : lastItem.type === "assistant" && reasoningEntry(lastItem)
+        ? reasoningDisplay(lastItem.content).title || "Thinking"
+        : lastTool
+          ? `${toolDisplayName(lastTool.toolName)}: ${toolSummary(
+              lastTool.toolName || "Tool",
+              lastTool.toolInput,
+              lastTool.content,
+              pathRoots,
+            )}`
+          : null;
 
   // Memoized against the house rule: a live turn re-renders on every stream
   // event, and this walks every step it has taken so far (collectTouchedFiles
@@ -261,15 +277,9 @@ export const TurnBlock = function TurnBlock({
             {toolOnlyAggregate.mediaLabel}
           </span>
         )}
-        {live && !expanded && hasNarration && lastTool && (
+        {!expanded && activity && (
           <span className="min-w-0 truncate text-label leading-4 text-faint">
-            {toolDisplayName(lastTool.toolName)}:{" "}
-            {toolSummary(
-              lastTool.toolName || "Tool",
-              lastTool.toolInput,
-              lastTool.content,
-              pathRoots,
-            )}
+            {activity}
           </span>
         )}
       </button>

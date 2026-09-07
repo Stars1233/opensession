@@ -19,67 +19,39 @@ export const setThinkingMessagesPref = pref.set;
 export const onThinkingMessagesChanged = pref.onChanged;
 
 /**
- * Find reasoning rows using the same turn boundary rule as TranscriptBlocks.
- * A legacy bold-only assistant row counts only after a later turn item proves
- * it was an intermediate update, so a bold final answer stays an answer.
+ * A work-rail row where the model is thinking rather than talking. Work never
+ * holds a turn's final answer, so a bold-only assistant row here is a legacy
+ * reasoning heading, not a bold answer.
  */
-export function thinkingMessageEntryIds(
-  entries: TranscriptEntry[],
-): ReadonlySet<string> {
-  const ids = new Set<string>();
-  let turn: TranscriptEntry[] = [];
-
-  function flushTurn() {
-    const last = turn[turn.length - 1];
-    const finalId =
-      last?.type === "assistant" && !last.isReasoning ? last.id : null;
-    for (const entry of turn) {
-      if (
-        entry.type === "assistant" &&
-        (entry.isReasoning ||
-          (entry.id !== finalId && isLegacyReasoningHeading(entry.content)))
-      ) {
-        ids.add(entry.id);
-      }
-    }
-    turn = [];
-  }
-
-  for (const entry of entries) {
-    if (entry.type === "tool_result") continue;
-    if (entry.type === "assistant" || entry.type === "tool_use") {
-      turn.push(entry);
-    } else {
-      flushTurn();
-    }
-  }
-  flushTurn();
-  return ids;
+export function isThinkingEntry(entry: TranscriptEntry): boolean {
+  return (
+    entry.type === "assistant" &&
+    Boolean(entry.isReasoning || isLegacyReasoningHeading(entry.content))
+  );
 }
 
-export interface ThinkingMessageVisibility {
-  mode: ThinkingMessagesPref;
-  entryIds: ReadonlySet<string>;
-  latestId: string | null;
-}
-
-export function thinkingMessageVisibility(
-  entries: TranscriptEntry[],
+/**
+ * Lay out the thinking rows of one turn's work rail.
+ *
+ * Thinking has two jobs. While the turn is live it is a status: what the
+ * model is doing right now. A status belongs at the tail of the rail as one
+ * row that is replaced in place and never sits above later steps. Once the
+ * turn settles, thinking is a trace: why each step happened. A trace belongs
+ * where it happened.
+ *
+ * - none: no thinking rows.
+ * - latest: status only. The newest thought of a live turn follows its last
+ *   step; a settled turn shows none.
+ * - all: the trace. Every thought stays in transcript order.
+ */
+export function arrangeThinkingMessages(
+  work: TranscriptEntry[],
   mode: ThinkingMessagesPref,
-): ThinkingMessageVisibility {
-  const entryIds = thinkingMessageEntryIds(entries);
-  return {
-    mode,
-    entryIds,
-    latestId: Array.from(entryIds).at(-1) ?? null,
-  };
-}
-
-export function thinkingMessageIsVisible(
-  entry: TranscriptEntry,
-  visibility: ThinkingMessageVisibility | undefined,
-): boolean {
-  if (!visibility?.entryIds.has(entry.id)) return true;
-  if (visibility.mode === "all") return true;
-  return visibility.mode === "latest" && entry.id === visibility.latestId;
+  live: boolean,
+): TranscriptEntry[] {
+  if (mode === "all") return work;
+  const steps = work.filter((entry) => !isThinkingEntry(entry));
+  if (mode === "none" || !live) return steps;
+  const newest = work.findLast(isThinkingEntry);
+  return newest ? [...steps, newest] : steps;
 }
