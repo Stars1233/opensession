@@ -205,7 +205,7 @@ export function OrganizationSwitcher({
             <span className="min-w-0 truncate">{name}</span>
             <IconChevronsUpDown
               size={14}
-              className="-ml-0.5 shrink-0 text-faint transition-colors group-hover:text-dim"
+              className="-ml-1 shrink-0 text-faint transition-colors group-hover:text-dim"
               aria-hidden="true"
             />
           </Menu.Trigger>
