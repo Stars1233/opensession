@@ -6,6 +6,10 @@
  * returns their fenced results. Engines and WebSockets never become owners.
  */
 import { audit } from "../audit";
+import {
+  notifyCreationStateChanged,
+  requestSessionKernelRuntimeDrain,
+} from "./wakes";
 import type { AskActorRequest, AskActorResult } from "./ask-protocol";
 import {
   type SessionActorEffectFor,
@@ -624,6 +628,13 @@ export class SessionKernel {
         creation_generation: result.state?.generation,
         event: input.event,
       });
+    if (result.accepted) {
+      // The waiters on this session re-read the committed state now instead
+      // of on their next poll, and an emitted effect is drained now instead of
+      // on the runtime's next tick.
+      notifyCreationStateChanged(this.sessionId);
+      if (input.effect) requestSessionKernelRuntimeDrain();
+    }
     return result;
   }
 

@@ -452,6 +452,18 @@ Slack `client_msg_id`. Durable timers use the same bounded backoff discipline.
 The runtime starts only after run-host recovery and queue restoration establish
 ownership. Any recovery-gate error fail-stops the gateway before timers or
 outbox effects can run. Shutdown stops the runtime before draining the server.
+A dev instance has no recovery gate and starts the runtime at once; its state
+dir is isolated.
+
+The runtime's one-second tick is the floor, not the cadence. `wakes.ts` holds
+two in-process, non-durable wake-ups: an accepted creation event that emits an
+effect, and a freed execution slot, request a drain pass within 50 ms (one
+pass per burst, so at most twenty passes a second), so a group's throughput is not its concurrency per tick. The
+creation waiters (`creation-intents.ts`) are woken by the creation event that
+changes their state in this process and re-read the actor once; their poll is
+only the fallback for a commit made elsewhere, starting at 25 ms and backing
+off to one second. Before this, every pending create and every running
+opening turn asked the actor for its state forty times a second.
 
 Background intake observes the same process-wide shutdown fence. New cron,
 automation webhook, GitHub review and queued boot-recovery work cannot start
@@ -524,8 +536,13 @@ existing settlement protocols remain additive and mixed-version safe.
 Before every isolated mutation, the host durably marks that session's catalog
 wake record dirty. A crash can therefore leave an extra scan but cannot hide a
 committed timer or outbox item. Runtime reconciliation first asks the catalog
-for at most four dirty or due session ids. The service then enqueues one claim
-on each session's normal actor mailbox. That actor reads its authoritative
+for a bounded batch of dirty or due session ids (32 by default;
+`OPENSESSION_KERNEL_RUNTIME_WAKE_CANDIDATES` in the kernel service drop-in,
+never the gateway env file). The service then enqueues one claim on each
+session's normal actor mailbox, in parallel across lanes. That batch is also
+the runtime's discovery throughput: a pass admits at most that many sessions'
+due effects, which at the old bound of four made a create burst drain at four
+sessions per pass. That actor reads its authoritative
 database through its existing lane-local connection and repairs the catalog
 wake projection before ending the same turn. The catalog lane never opens an
 isolated actor database, and runtime discovery creates no fleet-wide mutation

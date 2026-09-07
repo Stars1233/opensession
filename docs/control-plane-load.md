@@ -60,13 +60,29 @@ regressed to `invalidateSessionsCache()` for a change that names a session;
 route it through `publishSessionChange` or `publishSessionRowsForBranch`
 (`docs/session-kernel-architecture.md`, Read projections).
 
-Create latency is dominated by the kernel runtime tick: durable creation
-effects (workspace, then opening turn) are executed by
-`drainSessionKernelRuntime` on a 1 s interval with
+Create latency is the creation-effect pipeline: the durable workspace effect
+and then the opening turn are executed by `drainSessionKernelRuntime`, which
+runs on a 1 s tick and on wakes (an emitted effect, a freed slot; see
+`docs/session-kernel-architecture.md`, Timers and effects), with
 `OPENSESSION_KERNEL_CREATION_PREPARATION_OUTBOX_CONCURRENCY` (16) and
-`OPENSESSION_KERNEL_OPENING_OUTBOX_CONCURRENCY` (100) slots per tick, so a
-burst of creates queues behind the tick, not behind the model. Prompts to an
-existing session do not pay this.
+`OPENSESSION_KERNEL_OPENING_OUTBOX_CONCURRENCY` (100) slots, discovering at
+most `OPENSESSION_KERNEL_RUNTIME_WAKE_CANDIDATES` (32) sessions' work per
+pass. The waiter in
+`requestCreationWorkspace` is woken by the effect's result and otherwise
+polls with backoff, so pending creates cost the kernel lanes nothing while
+they wait. Before the wakes and the wider batch, discovery admitted four sessions per
+one-second tick, so a 12/s create stream backed up until every create hit
+its 30 s deadline; a `create` p50 near 30 s with `http errors` counting
+`creation effect ... remains durably pending` is that regression. Prompts to
+an existing session do not pay any of this.
+
+Measured on the live box (16 cores, isolated instance, synthetic engine):
+300 sessions, 100 clients, 2 turns at 12/s went from create p50 30.6 s with
+189 of 300 creates failing to create p50 277 ms, p99 661 ms, 0 http errors,
+prompt p50 8 ms, list p50 10 ms, row latency p50 265 ms, gateway 665 MB and
+kernel 1063 MB peak RSS. A 300-session burst at 30/s went from 228 failures
+to all 300 created in 10.2 s, create p50 141 ms, max 292 ms, 0 http errors,
+gateway 1455 MB peak RSS.
 
 The synthetic engine does not cover one-shot helpers (generated titles), so a
 load instance logs `[oneshot:generated-titles] failed` per create; that is
