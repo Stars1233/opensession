@@ -68,6 +68,17 @@ The session's **Sandbox** badge shows Preparing, Awake, Sleeping, Waking, or
 Needs attention, with manual sleep, wake, and recreate, plus the `setup` and
 `resume` logs.
 
+A session that started on this machine can move into a Sandbox later. The
+**This machine** badge on a code session offers _Move to Daytona_ or _Move to
+Box_ (`POST /api/sessions/<id>/sandbox/attach`). Nothing is provisioned at
+that moment: the session records the provider as Preparing, its Portals on
+this machine stop, and the next message takes the same path as a Sandbox
+session's first turn. The Sandbox clones the session's branch from origin and
+a fresh engine is seeded from the stored transcript, so the conversation
+carries over. Uncommitted files and unpushed commits do not; when the worktree
+has any, the move answers 428 and the badge asks before moving anyway. The
+move needs the agent to be idle, and the reverse move is not offered.
+
 Terminal tabs land inside the Sandbox (Daytona's native PTY, Box's SSH).
 
 ## Desktop

@@ -265,13 +265,14 @@ export function SessionHeader({
             <IconRobot size={18} />
           </span>
         ) : null}
-        {/* Sandbox badge: this session's runs execute inside an isolated
-            container (docker/daytona/e2b). Renders nothing for host sessions
-            — purely from session fields, no container polling. */}
+        {/* Where this session's runs execute: a Sandbox, a Runner, or this
+            machine (with the move into a Sandbox). Purely from session
+            fields until opened; no provider polling in the header. */}
         <SandboxBadge
           sessionId={session.id}
           sandbox={session.sandbox}
           runner={session.runner}
+          host={session}
         />
         {/* The parent edge is the crumb before the title; this is the other
             direction, the workers this session delegated to. */}

@@ -1,9 +1,17 @@
 /** Per-session sandbox status and explicit lifecycle controls. */
 
+import { existsSync } from "node:fs";
 import { audit } from "../audit";
+import { getGitStatus, type GitStatusInfo } from "../git-status";
 import { hostRunBusy } from "../host-registry";
+import { stopAllPortalServices } from "../portal-supervisor";
+import { hasActiveRunFor } from "../run-journal";
 import { getSandboxProvider } from "../sandbox";
-import { isRetiredSandboxProvider } from "../sandbox/config";
+import {
+  isRemoteSandboxProvider,
+  isRetiredSandboxProvider,
+  resolveRequestedSandbox,
+} from "../sandbox/config";
 import {
   recordedTrustPolicy,
   type SandboxTrustPolicy,
@@ -13,11 +21,20 @@ import {
   dropSandboxPreviewRoutes,
   suspendSandboxPreviewRoutes,
 } from "../preview";
-import { findSessionAsync, touchNativeSession } from "../session-cache";
+import {
+  findSessionAsync,
+  touchNativeSession,
+  touchNativeSessionStrict,
+} from "../session-cache";
+import { resolveWorktreeTarget } from "../session-repos";
+import { sessionTouchedPaths } from "../session-touched";
+import { isSharedCheckoutDir } from "../worktree";
 import type { RouteContext } from "./context";
 
+type StoredSession = NonNullable<Awaited<ReturnType<typeof findSessionAsync>>>;
+
 type RecreateSession = Pick<
-  NonNullable<Awaited<ReturnType<typeof findSessionAsync>>>,
+  StoredSession,
   | "id"
   | "repo"
   | "branch"
@@ -26,6 +43,124 @@ type RecreateSession = Pick<
   | "automation"
   | "automationId"
 >;
+
+type AttachSession = Pick<
+  StoredSession,
+  "mode" | "repo" | "sandbox" | "runner" | "automation" | "automationId"
+>;
+
+/** Why a host session cannot move into a Sandbox, or null when it can. */
+export function sandboxAttachRefusal(session: AttachSession): string | null {
+  if (session.sandbox?.provider && session.sandbox.provider !== "local")
+    return "This session already runs in a Sandbox.";
+  if (session.runner?.id)
+    return "This session runs on a Runner. Start a new session to use a Sandbox.";
+  if (session.automationId || session.automation)
+    return "An automation's sessions take their Sandbox from the automation.";
+  if (session.mode !== "code" || !session.repo)
+    return "Only code sessions with a repository can move to a Sandbox.";
+  return null;
+}
+
+/**
+ * What a Sandbox's fresh clone of origin would not have, phrased for the
+ * person deciding whether to move anyway; null when everything is published.
+ */
+export function unpublishedWorkSummary(
+  git: Pick<
+    GitStatusInfo,
+    "branch" | "hasUpstream" | "ahead" | "uncommittedFiles"
+  >,
+): string | null {
+  const parts: string[] = [];
+  if (git.uncommittedFiles > 0)
+    parts.push(
+      `${git.uncommittedFiles} uncommitted ${git.uncommittedFiles === 1 ? "file" : "files"}`,
+    );
+  if (!git.hasUpstream)
+    parts.push(
+      git.branch
+        ? `the branch ${git.branch}, which was never pushed`
+        : "an unpushed branch",
+    );
+  else if (git.ahead > 0)
+    parts.push(
+      `${git.ahead} unpushed ${git.ahead === 1 ? "commit" : "commits"}`,
+    );
+  if (!parts.length) return null;
+  return `This machine has ${parts.join(" and ")}. The Sandbox clones the branch from origin, so push first, or move anyway and leave them here.`;
+}
+
+/**
+ * Move a host session into a Sandbox. Nothing is provisioned here: the record
+ * says "preparing" and the next turn takes the same path as a Sandbox
+ * session's first turn, seeding a fresh engine from the stored transcript.
+ */
+async function attachSandbox(
+  ctx: RouteContext,
+  session: StoredSession,
+): Promise<Response> {
+  const body = (await ctx.req.json().catch(() => ({}))) as {
+    provider?: unknown;
+    confirm?: unknown;
+  };
+  const refusal = sandboxAttachRefusal(session);
+  if (refusal) return Response.json({ error: refusal }, { status: 409 });
+  if (hostRunBusy(session.id) || hasActiveRunFor(session.id))
+    return Response.json(
+      { error: "Wait for the agent to finish before moving this session." },
+      { status: 409 },
+    );
+  const resolved = resolveRequestedSandbox(
+    typeof body.provider === "string" && body.provider ? body.provider : true,
+    session.repo,
+    session.model,
+  );
+  if (!resolved.ok)
+    return Response.json({ error: resolved.error }, { status: 400 });
+  const provider = resolved.provider;
+  if (!provider)
+    return Response.json(
+      { error: "Name the Sandbox provider to move to: daytona or box." },
+      { status: 400 },
+    );
+  const target = resolveWorktreeTarget(session);
+  if (target && existsSync(target.dir)) {
+    // A shared checkout holds every session's edits; count only this one's.
+    const ownPaths = isSharedCheckoutDir(target.dir)
+      ? await sessionTouchedPaths(session, target.dir)
+      : undefined;
+    const unpublished = unpublishedWorkSummary(
+      await getGitStatus(target.dir, target.defaultBranch, undefined, ownPaths),
+    );
+    if (unpublished && body.confirm !== true)
+      return Response.json(
+        { error: unpublished, confirmRequired: true },
+        { status: 428 },
+      );
+    // The Portals on this machine belong to the worktree the agent leaves;
+    // the Sandbox starts its own from the repository's declarations.
+    await stopAllPortalServices({
+      sessionId: session.id,
+      worktreeDir: target.dir,
+    });
+  }
+  await touchNativeSessionStrict(session.id, {
+    sandbox: {
+      provider,
+      lifecycle: "preparing",
+      // Remote providers never mount the host worktree; recording volume
+      // intent now routes workspace reads to the Sandbox once it exists.
+      ...(isRemoteSandboxProvider(provider)
+        ? { workspace: "volume" as const }
+        : {}),
+    },
+  });
+  audit({ msg: "sandbox_attach", session_id: session.id, provider });
+  return Response.json(
+    await sandboxView((await findSessionAsync(session.id)) || session),
+  );
+}
 
 /**
  * The ensure() spec a recreate re-enters the provider with. The trust policy
@@ -124,7 +259,7 @@ export async function handleSandboxRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
   const match = ctx.path.match(
-    /^\/api\/sessions\/([^/]+)\/sandbox(?:\/(pause|resume|recreate|desktop))?$/,
+    /^\/api\/sessions\/([^/]+)\/sandbox(?:\/(pause|resume|recreate|desktop|attach))?$/,
   );
   if (!match) return undefined;
   const session = await findSessionAsync(decodeURIComponent(match[1]!));
@@ -142,6 +277,16 @@ export async function handleSandboxRoutes(
     }
   }
   if (!action || ctx.req.method !== "POST") return undefined;
+  if (action === "attach") {
+    try {
+      return await attachSandbox(ctx, session);
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      );
+    }
+  }
   const recorded = session.sandbox;
   if (!recorded?.provider || !recorded.sandboxId)
     return Response.json(

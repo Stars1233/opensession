@@ -2,19 +2,36 @@ import React, { use, useCallback, useEffect, useState } from "react";
 import { NavigationContext } from "../hooks/useNavigation";
 import { Popover } from "../ui/popover";
 import { cn } from "../ui/cn";
+import { fetchSandboxStatus } from "../lib/api/automations";
+import { ApiError } from "../lib/api/request";
 import {
+  attachSandbox,
   fetchSessionSandbox,
   openSandboxDesktop,
   sandboxAction,
   type SessionSandboxStatus,
 } from "../lib/api/sandboxes";
-import { IconBox, IconConnections } from "./icons";
+import {
+  readySandboxProviders,
+  sandboxProviderLabel,
+} from "../lib/ready-sandbox-providers";
+import { IconBox, IconConnections, IconServer } from "./icons";
 import { errorMessage } from "../lib/error-message";
+import { getCurrentUser } from "./UserPicker";
 
 type SandboxRef = {
   provider: string;
   sandboxId?: string;
   workspace?: "bind" | "volume";
+};
+
+/** What decides whether a host session may move into a Sandbox. */
+type HostRef = {
+  mode?: string;
+  repo?: string;
+  automation?: string;
+  automationId?: string;
+  isRunning?: boolean;
 };
 
 type RunnerRef = {
@@ -28,6 +45,137 @@ type RunnerRef = {
 const actionClass =
   "flex min-h-10 w-full items-center rounded-md px-2.5 text-left text-xs font-semibold text-dim outline-none transition-[color,background-color,scale] hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg active:scale-[0.96] disabled:pointer-events-none disabled:opacity-45";
 
+const triggerClass =
+  "flex min-h-10 flex-none items-center gap-1.5 rounded-md border border-line bg-surface px-2 text-meta font-medium text-dim outline-none transition-[color,background-color,border-color,scale] hover:border-line-strong hover:text-fg focus-visible:border-line-strong active:scale-[0.96]";
+
+/** The host counterpart of the Sandbox badge: where a code session runs when
+ * it has no Sandbox, and the way to move it into one. Once the move lands the
+ * session carries a `sandbox` record and the parent renders the Sandbox badge
+ * instead, so this never has to show the provisioning itself. */
+function HostBadge({ sessionId, host }: { sessionId: string; host: HostRef }) {
+  const [open, setOpen] = useState(false);
+  const [providers, setProviders] = useState<string[] | null>(null);
+  const [working, setWorking] = useState<string | null>(null);
+  const [moved, setMoved] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetchSandboxStatus(getCurrentUser())
+      .then((status) => {
+        if (!cancelled) setProviders(readySandboxProviders(status));
+      })
+      .catch(() => {
+        if (!cancelled) setProviders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  async function move(provider: string) {
+    setWorking(provider);
+    setError(null);
+    await attachSandbox(sessionId, provider)
+      .catch(async (cause: unknown) => {
+        // 428: work that exists only here would stay behind. Ask, then move.
+        if (!(cause instanceof ApiError) || cause.status !== 428) throw cause;
+        if (!window.confirm(cause.message)) return null;
+        return attachSandbox(sessionId, provider, { confirm: true });
+      })
+      .then(async (status) => {
+        if (status) setMoved(provider);
+      })
+      .catch(async (cause: unknown) => {
+        setError(errorMessage(cause, "Could not move to a Sandbox"));
+      })
+      .finally(async () => {
+        setWorking(null);
+      });
+  }
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        className={triggerClass}
+        data-testid="host-badge"
+        aria-label="Runs on this machine"
+      >
+        <IconServer size={20} className="text-faint" />
+        <span>This machine</span>
+      </Popover.Trigger>
+      <Popover.Popup
+        side="bottom"
+        align="start"
+        initialFocus
+        className="w-[300px] p-2.5"
+      >
+        <div className="px-2 pb-2 pt-1">
+          <div className="flex items-center gap-2 text-xs font-semibold text-fg">
+            <span>This machine</span>
+            <span className="ml-auto font-medium text-faint">Runtime</span>
+          </div>
+          <div className="mt-1 text-meta text-dim">
+            {moved
+              ? `Moving to ${sandboxProviderLabel(moved)}. The Sandbox is set up on the next message.`
+              : "Runs on the Open Session host, in this session's worktree"}
+          </div>
+        </div>
+        {moved ? null : providers === null ? (
+          <div className="px-2.5 py-2 text-meta text-dim">
+            Checking Sandboxes…
+          </div>
+        ) : providers.length === 0 ? (
+          <div className="px-2.5 py-2 text-meta text-dim">
+            No Sandbox is ready. Connect Daytona or Box in Workspace &gt;
+            Sandboxes.
+          </div>
+        ) : (
+          <>
+            <div className="px-2.5 pb-1.5 text-meta text-dim">
+              A Sandbox clones this branch from origin and takes over on the
+              next message. Portals on this machine stop.
+            </div>
+            {providers.map((provider) => (
+              <button
+                key={provider}
+                className={actionClass}
+                disabled={Boolean(working) || host.isRunning}
+                onClick={() => void move(provider)}
+              >
+                {working === provider
+                  ? `Moving to ${sandboxProviderLabel(provider)}…`
+                  : `Move to ${sandboxProviderLabel(provider)}`}
+              </button>
+            ))}
+            {host.isRunning ? (
+              <div className="px-2.5 py-1.5 text-meta text-dim">
+                Available once the agent finishes.
+              </div>
+            ) : null}
+          </>
+        )}
+        {error ? (
+          <div className="px-2 py-1.5 text-meta font-medium text-red">
+            {error}
+          </div>
+        ) : null}
+      </Popover.Popup>
+    </Popover.Root>
+  );
+}
+
+function canMoveToSandbox(host: HostRef | undefined): host is HostRef {
+  return (
+    !!host &&
+    host.mode === "code" &&
+    !!host.repo &&
+    !host.automation &&
+    !host.automationId
+  );
+}
+
 /** Live sandbox status + lifecycle controls. The compact trigger remains the
  * old provider badge; opening it resolves provider state without polling every
  * session row in the background. */
@@ -35,10 +183,14 @@ export function SandboxBadge({
   sessionId,
   sandbox,
   runner,
+  host,
 }: {
   sessionId: string;
   sandbox?: SandboxRef;
   runner?: RunnerRef;
+  /** Pass the session to offer "This machine" with a move into a Sandbox
+   * when it has neither a Sandbox nor a Runner. */
+  host?: HostRef;
 }) {
   const [open, setOpen] = useState(false);
   // Null outside the app shell (a bare badge in a test); then the desktop
@@ -122,7 +274,11 @@ export function SandboxBadge({
     );
   }
 
-  if (!sandbox?.provider || sandbox.provider === "local") return null;
+  if (!sandbox?.provider || sandbox.provider === "local") {
+    return canMoveToSandbox(host) ? (
+      <HostBadge sessionId={sessionId} host={host} />
+    ) : null;
+  }
   const state = status?.status || (sandbox.sandboxId ? "running" : "gone");
   const lifecycle =
     status?.lifecycle ||
