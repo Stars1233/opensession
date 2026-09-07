@@ -1,5 +1,12 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer } from "node:net";
@@ -371,6 +378,36 @@ describe("session Portal supervisor", () => {
       }),
     ]);
     expect((await listPortalServices(worktree))[0]?.state).toBe("stopped");
+  });
+
+  test("a worktree spelled through a symlink is the same worktree to the reaper", async () => {
+    const alias = join(
+      mkdtempSync(join(tmpdir(), "os-portals-alias-")),
+      "repo",
+    );
+    symlinkSync(worktree, alias);
+    await startPortalService({
+      sessionId: "owner",
+      worktreeDir: worktree,
+      name: "shared",
+      port: 18_705,
+      command:
+        "bun -e 'Bun.serve({port:Number(process.env.PORT),fetch(){return new Response(\"shared\")}})'",
+    });
+    // Another live session records the same checkout under its alias. Keyed
+    // by spelling, the registry read under the alias saw only that session
+    // as owner and reaped the Portal.
+    const result = await reapOrphanedPortalServices([
+      { id: "owner", worktreeDir: worktree, attachedRepos: [] },
+      { id: "other", worktreeDir: alias, attachedRepos: [] },
+    ]);
+    expect(result.stopped).toEqual([]);
+    expect((await listPortalServices(worktree))[0]?.state).toBe("awake");
+    await stopPortalService({
+      sessionId: "owner",
+      worktreeDir: worktree,
+      name: "shared",
+    });
   });
 
   test("supervises and deduplicates a Portal through the Sandbox execution boundary", async () => {

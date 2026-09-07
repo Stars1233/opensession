@@ -13,10 +13,12 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from "fs";
 import { join, resolve } from "path";
 import { audit } from "./audit";
+import { ensureAgentAwsCredsFile } from "./aws-creds";
 import { configuredPaths, configuredServer } from "./config";
 import {
   ensureSandboxPortalRelay,
@@ -593,6 +595,12 @@ export async function startPortalService(input: {
 }): Promise<PortalRecord & { url: string }> {
   const logDir = join(sessionScratchRoot(), input.sessionId, "portals");
   const logPath = join(logDir, `${input.name}.log`);
+  // The same short-lived AWS credentials the agent's own shell gets (a pointer
+  // to a file the server keeps fresh). The service cgroup denies IMDS, and a
+  // repository's dev server (tella-fusion's start.sh) otherwise falls back to
+  // an operator SSO profile and hangs on an interactive login. {} when the
+  // mint is off.
+  const awsEnv = await ensureAgentAwsCredsFile();
   const started = await startPortal(hostPortalOps(input.worktreeDir), {
     ...input,
     ownsProcess: true,
@@ -607,6 +615,7 @@ export async function startPortalService(input: {
       const portalEnv = {
         PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
         HOME: process.env.HOME || "/tmp",
+        ...awsEnv,
         ...input.env,
         PORT: String(port),
         PORTAL_URL: url,
@@ -709,8 +718,18 @@ export type PortalContainmentMigrationResult = {
   migrated: Array<{ sessionId: string; worktreeDir: string; name: string }>;
 };
 
+/**
+ * One key per directory, whatever path spells it. Sessions record the shared
+ * checkout under both its real name and an old symlinked alias; keyed by the
+ * spelling, the same registry read under the alias made every Portal owned by
+ * a session spelled the other way look orphaned, and the reaper killed it.
+ */
 function canonicalDir(dir: string): string {
-  return resolve(dir);
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve(dir);
+  }
 }
 
 /**
