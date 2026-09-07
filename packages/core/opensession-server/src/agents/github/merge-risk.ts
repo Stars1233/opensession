@@ -259,8 +259,8 @@ End with EXACTLY ONE fenced \`json\` block and nothing after it:
 {
   "recovery": "minutes | hours | days | irreversible",
   "factors": ["schema_migration"],
-  "reasoning": "One or two sentences naming the concrete evidence in the diff.",
-  "guidance": "One line on how to land this safely (flag, order of operations, backup, human sign-off). Empty string when recovery is minutes."
+  "reasoning": "One sentence, under 20 words, naming the concrete evidence in the diff. No preamble.",
+  "guidance": "Under 12 words: the one thing that makes landing safe (flag, backup, order, sign-off). Empty string when recovery is minutes."
 }
 \`\`\``;
 }
@@ -387,7 +387,10 @@ export function mergeRiskBadge(result: MergeRiskResult | null): string {
   return result ? ` · risk ${result.risk}` : "";
 }
 
-/** Summary-comment section: level, recovery time, evidence, landing guidance. */
+/**
+ * Summary-comment section: one scannable line (level · recovery · factors),
+ * then one line of evidence with the landing advice in italics.
+ */
 export function mergeRiskSection(result: MergeRiskResult | null): string {
   if (!result) return "";
   const factors = result.factors.map((f) => RISK_FACTOR_LABELS[f]).join(", ");
@@ -395,12 +398,18 @@ export function mergeRiskSection(result: MergeRiskResult | null): string {
     result.recovery === "irreversible"
       ? "not fully recoverable"
       : `recovery in ${result.recovery}`;
-  return [
-    `\n\n${RISK_EMOJI[result.risk]} **Merge risk: ${result.risk}** — if this is wrong, ${recovery}${factors ? ` · ${factors}` : ""}.`,
-    result.reasoning,
-    result.guidance ? `_Landing: ${result.guidance}_` : "",
-    "<sub>Scored separately from quality by a diff-only pass: how hard a mistake is to undo, not how good the code is.</sub>",
+  const head = [
+    `${RISK_EMOJI[result.risk]} **Risk ${result.risk}**`,
+    recovery,
+    factors,
   ]
     .filter(Boolean)
-    .join("\n");
+    .join(" · ");
+  const detail = [
+    result.reasoning,
+    result.guidance ? `_${result.guidance}_` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return `\n\n${head}${detail ? `\n${detail}` : ""}`;
 }

@@ -199,7 +199,7 @@ export async function maybeHandoffFindings(
     await appendToSummary(
       pr,
       delivered.summaryCommentId,
-      `🔁 Handed ${review.findings} finding(s) to the owning session — fix round ${round}/${MAX_ROUNDS} · [open session](${uiSessionUrl(target.id)})`,
+      `🔁 ${review.findings} finding${review.findings === 1 ? "" : "s"} → [owning session](${uiSessionUrl(target.id)}) · fix round ${round}/${MAX_ROUNDS}`,
     );
   } catch (e) {
     console.error(`[github] review handoff failed for PR #${pr.number}:`, e);

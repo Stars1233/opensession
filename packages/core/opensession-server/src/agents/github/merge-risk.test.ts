@@ -151,10 +151,10 @@ describe("rendering", () => {
     expect(mergeRiskBadge(result)).toBe(" · risk high");
     expect(mergeRiskBadge(null)).toBe("");
     const section = mergeRiskSection(result);
-    expect(section).toContain("🔴 **Merge risk: high**");
-    expect(section).toContain("not fully recoverable");
-    expect(section).toContain("data to a third party, schema migration");
-    expect(section).toContain("_Landing: Land behind a flag");
+    expect(section).toBe(
+      "\n\n🔴 **Risk high** · not fully recoverable · data to a third party, schema migration\n" +
+        "Invoices are sent to Stripe on save. _Land behind a flag and dry-run against a test account first._",
+    );
     expect(mergeRiskSection(null)).toBe("");
   });
 
@@ -166,9 +166,8 @@ describe("rendering", () => {
       factors: [],
       guidance: "",
     });
-    expect(section).toContain(
-      "🟢 **Merge risk: low** — if this is wrong, recovery in minutes.",
+    expect(section).toBe(
+      "\n\n🟢 **Risk low** · recovery in minutes\nInvoices are sent to Stripe on save.",
     );
-    expect(section).not.toContain("_Landing:");
   });
 });

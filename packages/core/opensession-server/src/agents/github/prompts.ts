@@ -72,7 +72,7 @@ End your turn with EXACTLY ONE fenced \`json\` code block — and nothing after 
 {
   "verdict": "approve | comment | request_changes",
   "confidence": 5,
-  "summary_markdown": "Lead with merge-readiness (e.g. \\"Safe to merge\\" or \\"Safe once the P1 below is fixed\\"), then 1-2 sentences on what the PR does, then the key risks. Concise — a few sentences, not an essay.",
+  "summary_markdown": "One line of merge-readiness (\\"Safe to merge\\" or \\"Safe once the P1 below is fixed\\"), then at most one short sentence on what still blocks or what changed since the last review. Under 40 words total. Do not restate the findings, list what is fine, or describe the PR back to its author.",
   "diagram": { "type": "sequence | flow | er | class", "mermaid": "valid mermaid source" },
   "findings": [
     {

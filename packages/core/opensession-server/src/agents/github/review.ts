@@ -1048,15 +1048,12 @@ async function postReview(
       : "";
   const risk = mergeRiskBadge(mergeRisk);
   const findingCount = findings.length;
-  // Next-steps footer pointing at the action labels.
-  const tip = publicReview
-    ? "> 🔒 Reviewed from an immutable patch after the fork commits were verified in a disposable MicroVM. No contributor code ran on Open Session's host."
-    : findingCount
-      ? "> 💡 Labels: **`os-auto-fix`** — I fix these and push until CI passes · **`os-adversarial`** — deeper two-pass review · **`os-simplify`** — quality cleanup pass."
-      : "> 💡 Labels: **`os-adversarial`** — deeper two-pass review · **`os-simplify`** — quality cleanup pass · **`os-auto-fix`** — fix anything outstanding and push until CI passes.";
+  // One footer line: provenance, then the action labels. Earlier comments
+  // already announce themselves as outdated, so that is not repeated here.
+  const reviewed = `Reviewed \`${shortSha}\`${modelUsed ? ` · ${modelLabel(modelUsed)}` : ""}`;
   const footer = publicReview
-    ? `<sub>Reviewed \`${shortSha}\`${modelUsed ? ` · ${modelLabel(modelUsed)}` : ""} · isolated public review</sub>`
-    : `<sub>Reviewed \`${shortSha}\`${modelUsed ? ` · ${modelLabel(modelUsed)}` : ""} · earlier reviews collapse above · [open session](${sessionUrl(pr.number, "review", pr.ghRepo)})</sub>`;
+    ? `<sub>${reviewed} · 🔒 isolated public review: immutable patch, fork commits verified in a disposable MicroVM, no contributor code ran on the host.</sub>`
+    : `<sub>${reviewed} · [open session](${sessionUrl(pr.number, "review", pr.ghRepo)}) · labels: \`os-auto-fix\` fix and push · \`os-adversarial\` deeper pass · \`os-simplify\` cleanup</sub>`;
   // Blocks are separated by blank lines: the summary can end in an HTML
   // `</details>` block, and GitHub keeps treating following lines as raw HTML
   // (no markdown parsing) until it hits a blank line.
@@ -1069,7 +1066,6 @@ async function postReview(
     withheld
       ? `<sub>${withheld} low-signal finding${withheld === 1 ? "" : "s"} withheld by repo config / feedback history.</sub>`
       : "",
-    tip,
     footer,
   ]
     .filter((l) => l !== "")
