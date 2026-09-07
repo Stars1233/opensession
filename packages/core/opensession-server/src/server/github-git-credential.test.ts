@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../scripts/lib/github-credential";
 import {
   githubCredentialHelperCommand,
   githubGitCredentialEnv,
@@ -24,6 +25,35 @@ describe("GitHub Git credential environment", () => {
     expect(env.GH_TOKEN).toBe("");
     expect(env.GIT_CONFIG_VALUE_2).toBe("git@github.com:");
     expect(env.GIT_TERMINAL_PROMPT).toBe("0");
+  });
+
+  test("carries the configured push credential next to a session token", () => {
+    const env = githubGitCredentialEnv(
+      "projected-token",
+      "!credential-helper",
+      "github_pat_push_only",
+    );
+    expect(env[GITHUB_PUSH_TOKEN_RUN_ENV]).toBe("github_pat_push_only");
+    expect(env.GH_TOKEN).toBe("projected-token");
+  });
+
+  test("omits the push credential when none is configured", () => {
+    const env = githubGitCredentialEnv(
+      "projected-token",
+      "!credential-helper",
+      undefined,
+    );
+    expect(env).not.toHaveProperty(GITHUB_PUSH_TOKEN_RUN_ENV);
+  });
+
+  test("keeps a credential-free run credential-free despite a push token", () => {
+    const env = githubGitCredentialEnv(
+      "",
+      "!credential-helper",
+      "github_pat_push_only",
+    );
+    expect(env).not.toHaveProperty(GITHUB_PUSH_TOKEN_RUN_ENV);
+    expect(env.GH_TOKEN).toBe("");
   });
 });
 

@@ -51,6 +51,7 @@ import { audit } from "./audit";
 import { configuredIdentity, getConfig } from "./config";
 import { writeJsonAtomic } from "./shared/atomic-write";
 import { fetchWithTimeout } from "./shared/fetch-with-timeout";
+import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../scripts/lib/github-credential";
 import { githubGitCredentialEnv } from "./github-git-credential";
 
 /** Env override is for tests/sandboxes; read per call so it can change. */
@@ -871,7 +872,19 @@ function projectedGithubAuthEnv(): Record<string, string> {
         : typeof parsed.GITHUB_TOKEN === "string"
           ? parsed.GITHUB_TOKEN
           : "";
-    return token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {};
+    // The launcher projects the operator's git-transport credential alongside
+    // the run token; a remote host has no ~/.opensession.env to read it from.
+    const pushToken =
+      typeof parsed[GITHUB_PUSH_TOKEN_RUN_ENV] === "string"
+        ? (parsed[GITHUB_PUSH_TOKEN_RUN_ENV] as string)
+        : "";
+    return token
+      ? {
+          GH_TOKEN: token,
+          GITHUB_TOKEN: token,
+          ...(pushToken ? { [GITHUB_PUSH_TOKEN_RUN_ENV]: pushToken } : {}),
+        }
+      : {};
   } catch {
     return {};
   }
@@ -882,7 +895,12 @@ function githubProcessEnv(
 ): Record<string, string> {
   // Empty authority still rewrites GitHub SSH remotes to non-interactive HTTPS.
   // A missing projected user token must fail closed, never inherit a host key.
-  return githubGitCredentialEnv(auth.GH_TOKEN || "");
+  return githubGitCredentialEnv(
+    auth.GH_TOKEN || "",
+    undefined,
+    auth[GITHUB_PUSH_TOKEN_RUN_ENV] ||
+      process.env.OPENSESSION_GITHUB_PUSH_TOKEN,
+  );
 }
 
 /** Consume only the private run-scoped file projected by a remote launcher.
