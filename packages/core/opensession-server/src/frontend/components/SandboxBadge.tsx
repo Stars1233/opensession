@@ -23,6 +23,7 @@ type SandboxRef = {
   provider: string;
   sandboxId?: string;
   workspace?: "bind" | "volume";
+  lifecycle?: NonNullable<SessionSandboxStatus["lifecycle"]>;
 };
 
 /** What decides whether a host session may move into a Sandbox. */
@@ -280,8 +281,11 @@ export function SandboxBadge({
     ) : null;
   }
   const state = status?.status || (sandbox.sandboxId ? "running" : "gone");
+  // Before the popover has fetched anything, the session row's recorded
+  // lifecycle is the truth: a Sandbox with no id yet is Preparing, not gone.
   const lifecycle =
     status?.lifecycle ||
+    sandbox.lifecycle ||
     (state === "running"
       ? "awake"
       : state === "stopped"

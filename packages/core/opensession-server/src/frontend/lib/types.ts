@@ -536,6 +536,14 @@ export interface UnifiedSession {
     provider: string;
     sandboxId?: string;
     workspace?: "bind" | "volume";
+    /** Recorded compute lifecycle; the status route refines it live. */
+    lifecycle?:
+      | "preparing"
+      | "awake"
+      | "sleeping"
+      | "waking"
+      | "needs_attention";
+    lastLifecycleError?: string;
   };
   runner?: {
     id: string;
