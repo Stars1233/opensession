@@ -28,14 +28,19 @@ export type SessionSource = "slack" | "linear" | "opensession" | "cli";
 
 /**
  * What the last automated (os-review) run concluded about a PR, as the UI needs
- * it: the same verdict and 1-5 confidence its PR comment ends with, plus whether
- * the branch has moved on since.
+ * it: the same verdict, 1-5 quality score, and merge risk its PR comment ends
+ * with, plus whether the branch has moved on since.
  */
 export interface OsReview {
   /** approve | comment | request_changes. */
   verdict?: string;
-  /** 1-5: how safe the reviewer thought this was to merge. */
+  /** 1-5: quality of the change as written. */
   confidence?: number;
+  /** How hard a mistake would be to undo, scored separately from quality. */
+  risk?: "low" | "medium" | "high";
+  /** Time to recover every user if the change is wrong. */
+  recovery?: "minutes" | "hours" | "days" | "irreversible";
+  riskFactors?: string[];
   findings: number;
   /** P0/P1 findings — what would block a merge. */
   blocking: number;
