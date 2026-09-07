@@ -135,6 +135,7 @@ import { PeopleBand } from "./sidebar/PeopleBand";
 import { PersonalBand } from "./sidebar/PersonalBand";
 import { ProjectBands } from "./sidebar/ProjectBands";
 import { SetupWidget } from "./sidebar/SetupWidget";
+import { SidebarAccountFooter } from "./sidebar/SidebarAccountFooter";
 import { SidebarChrome } from "./sidebar/SidebarChrome";
 import { SidebarCustomizeDialog } from "./sidebar/SidebarCustomizeDialog";
 import { SidebarItem } from "./sidebar/SidebarItem";
@@ -1775,6 +1776,9 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
           onOpenSettings={navigation.openSettings}
           onNewSession={navigation.openNewWorkspace}
         />
+      )}
+      {!isPhone && (
+        <SidebarAccountFooter onOpenSettings={navigation.openSettings} />
       )}
       <SidebarCustomizeDialog
         open={customizeOpen}
