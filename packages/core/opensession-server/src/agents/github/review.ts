@@ -994,12 +994,12 @@ async function postReview(
   const footer = publicReview
     ? `<sub>Reviewed \`${shortSha}\`${modelUsed ? ` · ${modelLabel(modelUsed)}` : ""} · isolated public review</sub>`
     : `<sub>Reviewed \`${shortSha}\`${modelUsed ? ` · ${modelLabel(modelUsed)}` : ""} · earlier reviews collapse above · [open session](${sessionUrl(pr.number, "review", pr.ghRepo)})</sub>`;
+  // Blocks are separated by blank lines: the summary can end in an HTML
+  // `</details>` block, and GitHub keeps treating following lines as raw HTML
+  // (no markdown parsing) until it hits a blank line.
   const composed = [
-    REVIEW_MARKER,
-    `### 🤖 ${personaName()} review${verdict}${confidence}`,
-    "",
+    `${REVIEW_MARKER}\n### 🤖 ${personaName()} review${verdict}${confidence}`,
     summaryBody,
-    "",
     findingCount
       ? `_${findingCount} inline comment${findingCount === 1 ? "" : "s"} below._`
       : "",
@@ -1010,7 +1010,7 @@ async function postReview(
     footer,
   ]
     .filter((l) => l !== "")
-    .join("\n");
+    .join("\n\n");
 
   // Edit the placeholder posted at the start; fall back to a new comment if it's gone.
   let id: number | null = knownCommentId ?? null;

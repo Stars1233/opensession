@@ -51,10 +51,11 @@ import {
 } from "./session-viewer/transcript-hydration";
 import { isLegacyReasoningHeading } from "../lib/reasoning-display";
 import {
-  arrangeThinkingMessages,
   getThinkingMessagesPref,
   onThinkingMessagesChanged,
-  type ThinkingMessagesPref,
+  thinkingMessageIsVisible,
+  thinkingMessageVisibility,
+  type ThinkingMessageVisibility,
 } from "../lib/thinking-messages-pref";
 
 type RenderBlock =
@@ -132,8 +133,9 @@ interface Props {
   virtualize?: boolean;
   /** Stable outer range identity for the one work turn rendered inside it. */
   turnMountScope?: string;
-  /** Which thinking rows each work rail shows; see arrangeThinkingMessages. */
-  thinkingMessages?: ThinkingMessagesPref;
+  /** Resolved once against the full loaded payload, then shared with indexed
+   * range renderers so "Latest" means one row across the whole transcript. */
+  thinkingVisibility?: ThinkingMessageVisibility;
 }
 
 type ReviewBlockRole =
@@ -317,7 +319,11 @@ export const TranscriptBlocks = function TranscriptBlocks(props: Props) {
       ),
     [],
   );
-  const renderedProps: Props = { ...props, entries, thinkingMessages };
+  const renderedProps: Props = {
+    ...props,
+    entries,
+    thinkingVisibility: thinkingMessageVisibility(entries, thinkingMessages),
+  };
   return (
     <>
       {props.sessionId && (
@@ -358,7 +364,7 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   scrollElement,
   shouldMaintainEnd,
   onLayout,
-  thinkingMessages = getThinkingMessagesPref(),
+  thinkingVisibility,
 }: Props) {
   // Top level only (nested per-range instances pass virtualize={false} and are
   // suppressed): without an outline every block renders real content, so the
@@ -375,7 +381,11 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   const pendingDeliveryEntryIds = new Set(pendingDeliveryIds ?? []);
   const renderedEntries = normalizeLegacyVoiceToolEntries(entries)
     .map(classifyEntry)
-    .filter((entry) => entry.turnBoundary || !isRenderlessUserEntry(entry));
+    .filter(
+      (entry) =>
+        thinkingMessageIsVisible(entry, thinkingVisibility) &&
+        (entry.turnBoundary || !isRenderlessUserEntry(entry)),
+    );
   const shareAfterEntryIds = new Set<string>();
   if (slackShare) {
     for (let i = 0; i < renderedEntries.length; i++) {
@@ -413,13 +423,7 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
     // an earlier candidate moves into work only once a later step proves it was
     // intermediate narration.
     const final = last.type === "assistant" && !last.isReasoning ? last : null;
-    // Thinking is laid out per rail: a status at the tail of the live turn, or
-    // the full trace in place. See arrangeThinkingMessages.
-    const work = arrangeThinkingMessages(
-      final ? turn.slice(0, -1) : turn,
-      thinkingMessages,
-      Boolean(live) && trailing,
-    );
+    const work = final ? turn.slice(0, -1) : turn;
     if (work.length > 0) {
       blocks.push({
         kind: "turn",
@@ -829,18 +833,10 @@ function IndexedTranscriptBlocks(props: Props) {
   // every height on screen is a real measurement.
   const renderedTimeline = timeline
     .map((item, index) => ({ item, index }))
-    .filter(({ item, index }) => {
-      // A loose thinking atom renders as a one-row rail of its own. Skip it
-      // when arrangement would leave that rail empty, so it never occupies an
-      // empty measured row.
+    .filter(({ item }) => {
       if (
         item.kind === "entry" &&
-        item.entry.isReasoning &&
-        arrangeThinkingMessages(
-          [item.entry],
-          props.thinkingMessages ?? getThinkingMessagesPref(),
-          Boolean(props.live) && index === timeline.length - 1,
-        ).length === 0
+        !thinkingMessageIsVisible(item.entry, props.thinkingVisibility)
       ) {
         return false;
       }

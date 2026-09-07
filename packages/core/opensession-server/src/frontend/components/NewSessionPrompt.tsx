@@ -15,11 +15,7 @@ import { saveDraft, NEW_SESSION_DRAFT_KEY as DRAFT_KEY } from "../lib/drafts";
 import { appendDictation } from "../lib/dictation";
 import { attachingLabel } from "../lib/attachments";
 import { imageFilesFromPaste } from "../lib/images";
-import {
-  pastedTextFile,
-  shouldAttachPastedTextAsFile,
-  shouldCollapsePastedText,
-} from "../lib/pasted-text";
+import { shouldCollapsePastedText } from "../lib/pasted-text";
 import { fileChipRow } from "../lib/composer-classes";
 import { insertPastedSessionId } from "../lib/session-url";
 import { insideOpenFence, isSendCombo } from "../lib/send-key";
@@ -354,13 +350,6 @@ export function NewSessionPrompt({
     // A long paste becomes a chip, the same as in a session's composer, and
     // travels beside the prompt rather than inside it.
     const pastedText = e.clipboardData?.getData("text/plain") ?? "";
-    // Past the file threshold the paste is staged like a dropped file, so the
-    // agent reads it with its tools instead of the prompt carrying it whole.
-    if (shouldAttachPastedTextAsFile(pastedText)) {
-      e.preventDefault();
-      onAddAttachments([pastedTextFile(pastedText)]);
-      return;
-    }
     if (shouldCollapsePastedText(pastedText)) {
       e.preventDefault();
       onAddPastedText(pastedText);
