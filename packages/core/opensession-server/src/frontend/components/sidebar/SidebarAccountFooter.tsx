@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { SIDEBAR_HOVER_LAYER } from "../../lib/sidebar-classes";
 import { usePeople } from "../../lib/people";
 import { cn } from "../../ui/cn";
@@ -8,13 +9,16 @@ import { useCurrentUser } from "../UserPicker";
 
 /**
  * Desktop only: the last row of the sidebar. Who you are on the left, Settings
- * on the right. Phones reach both through the top bar's organization menu and
- * the Settings sheet's own account card, so they carry no second copy here.
+ * on the right, with `accessory` (the Update nudge) beside it. Phones reach
+ * both through the top bar's organization menu and the Settings sheet's own
+ * account card, so they carry no second copy here.
  */
 export function SidebarAccountFooter({
   onOpenSettings,
+  accessory,
 }: {
   onOpenSettings: () => void;
+  accessory?: ReactNode;
 }) {
   const currentUser = useCurrentUser();
   const people = usePeople();
@@ -31,6 +35,7 @@ export function SidebarAccountFooter({
       >
         {fullName}
       </span>
+      {accessory}
       <Tooltip label="Settings" side="top">
         <button
           className={cn(

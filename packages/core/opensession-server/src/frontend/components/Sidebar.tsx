@@ -170,6 +170,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     reportsActive,
     analyticsActive,
     showDraftRow,
+    footerAccessory,
     draftRowActive,
     onRenameWorkspace,
     onDeleteWorkspace,
@@ -1778,7 +1779,10 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         />
       )}
       {!isPhone && (
-        <SidebarAccountFooter onOpenSettings={navigation.openSettings} />
+        <SidebarAccountFooter
+          onOpenSettings={navigation.openSettings}
+          accessory={footerAccessory}
+        />
       )}
       <SidebarCustomizeDialog
         open={customizeOpen}
