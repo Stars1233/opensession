@@ -2,7 +2,6 @@
 
 import { existsSync } from "fs";
 import { resolve } from "path";
-import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../scripts/lib/github-credential";
 import { SHIM_PATH } from "../../../../../scripts/lib/paths";
 import { isCompiledBinary } from "../runner-host/exe";
 
@@ -41,22 +40,18 @@ export function githubCredentialHelperCommand(
  * so existing SSH checkouts use the projected HTTPS identity without mutating
  * .git/config or falling through to a host SSH key.
  *
- * An operator-configured OPENSESSION_GITHUB_PUSH_TOKEN rides along — under
- * the run-scoped name the credential helper reads — so git transport uses it
- * while API calls keep GH_TOKEN. It rides only next to a real session token:
- * a run that carries no GitHub credential must stay credential-free, and the
- * distinct name keeps the operator's ambient variable inert in children that
- * merely inherit the server's environment.
+ * One token does both API calls and git transport. There is deliberately no
+ * second, git-only credential: the only way a process pushes is with the
+ * identity it was handed, and what that identity may push is GitHub's
+ * ruleset decision (docs/github-authority.md).
  */
 export function githubGitCredentialEnv(
   token: string,
   helper = githubCredentialHelperCommand(),
-  pushToken = process.env.OPENSESSION_GITHUB_PUSH_TOKEN,
 ): Record<string, string> {
   return {
     GH_TOKEN: token,
     GITHUB_TOKEN: token,
-    ...(token && pushToken ? { [GITHUB_PUSH_TOKEN_RUN_ENV]: pushToken } : {}),
     GIT_TERMINAL_PROMPT: "0",
     GIT_CONFIG_COUNT: "4",
     GIT_CONFIG_KEY_0: "credential.https://github.com.helper",

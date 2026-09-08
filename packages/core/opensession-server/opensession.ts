@@ -718,13 +718,13 @@ if (!g.__opensessionBooted) {
     }
   }
 
-  // Which credential answers git transport (clone/pull/push) for runs that
-  // carry a GitHub token. API calls always keep the session token.
-  console.log(
-    process.env.OPENSESSION_GITHUB_PUSH_TOKEN
-      ? "[github] git transport uses the dedicated push credential (OPENSESSION_GITHUB_PUSH_TOKEN)"
-      : "[github] git transport uses the session token (no OPENSESSION_GITHUB_PUSH_TOKEN configured)",
-  );
+  // One credential per process does both API calls and git transport. The
+  // retired git-only credential is inert; say so once, so an operator who
+  // still sets it knows to revoke it.
+  if (process.env.OPENSESSION_GITHUB_PUSH_TOKEN)
+    console.warn(
+      "[github] OPENSESSION_GITHUB_PUSH_TOKEN is no longer used: agent runs push with the App installation token. Revoke the token and remove the variable.",
+    );
 
   // Pi's SDK can take over a minute to load cold. Keep the loader import-inert,
   // then warm it explicitly from the process boot owner when Pi is enabled.

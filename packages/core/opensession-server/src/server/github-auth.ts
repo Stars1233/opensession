@@ -51,7 +51,6 @@ import { audit } from "./audit";
 import { configuredIdentity, getConfig } from "./config";
 import { writeJsonAtomic } from "./shared/atomic-write";
 import { fetchWithTimeout } from "./shared/fetch-with-timeout";
-import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../scripts/lib/github-credential";
 import { githubGitCredentialEnv } from "./github-git-credential";
 
 /** Env override is for tests/sandboxes; read per call so it can change. */
@@ -840,19 +839,6 @@ export function githubUserLoginForRun(user?: string | null): string | null {
   return account && tokenUsable(account) ? login : null;
 }
 
-/**
- * Env for a run that should act as its owner on GitHub: GH_TOKEN (gh CLI's
- * highest-precedence credential) + GITHUB_TOKEN (octokit-style tooling).
- * Empty when the feature is off, the user is unknown/unmapped, or they never
- * connected — callers can spread it unconditionally. Callers are responsible
- * for the trust gate (interactive, non-least-privilege runs only).
- */
-export function githubAuthEnv(user?: string | null): Record<string, string> {
-  const credential = githubCredentialForRun(user);
-  const token = credential?.env.GH_TOKEN;
-  return token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {};
-}
-
 /** A remote sandbox cannot read the server's per-user grant store. Its trusted
  * launcher writes only this run's access token to a private file and points the
  * host at it. The token never enters the persisted RunHostSpec or launch command. */
@@ -872,19 +858,7 @@ function projectedGithubAuthEnv(): Record<string, string> {
         : typeof parsed.GITHUB_TOKEN === "string"
           ? parsed.GITHUB_TOKEN
           : "";
-    // The launcher projects the operator's git-transport credential alongside
-    // the run token; a remote host has no ~/.opensession.env to read it from.
-    const pushToken =
-      typeof parsed[GITHUB_PUSH_TOKEN_RUN_ENV] === "string"
-        ? (parsed[GITHUB_PUSH_TOKEN_RUN_ENV] as string)
-        : "";
-    return token
-      ? {
-          GH_TOKEN: token,
-          GITHUB_TOKEN: token,
-          ...(pushToken ? { [GITHUB_PUSH_TOKEN_RUN_ENV]: pushToken } : {}),
-        }
-      : {};
+    return token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {};
   } catch {
     return {};
   }
@@ -894,29 +868,15 @@ function githubProcessEnv(
   auth: Record<string, string>,
 ): Record<string, string> {
   // Empty authority still rewrites GitHub SSH remotes to non-interactive HTTPS.
-  // A missing projected user token must fail closed, never inherit a host key.
-  return githubGitCredentialEnv(
-    auth.GH_TOKEN || "",
-    undefined,
-    auth[GITHUB_PUSH_TOKEN_RUN_ENV] ||
-      process.env.OPENSESSION_GITHUB_PUSH_TOKEN,
-  );
+  // A missing projected token must fail closed, never inherit a host key.
+  return githubGitCredentialEnv(auth.GH_TOKEN || "");
 }
 
 /** Consume only the private run-scoped file projected by a remote launcher.
- * Unlike githubRunEnv(), this can never consult a connected human account. */
+ * This can never consult a connected human account: no agent run holds a
+ * person's token (docs/github-authority.md). */
 export function projectedGithubRunEnv(): Record<string, string> {
   return githubProcessEnv(projectedGithubAuthEnv());
-}
-
-/** GitHub environment for one interactive run. Besides the API variables, set
- * a process-local Git credential helper so HTTPS remotes can push without
- * persisting the short-lived user token in .git/config or ~/.config/gh. */
-export function githubRunEnv(user?: string | null): Record<string, string> {
-  const auth = githubAuthEnv(user);
-  return githubProcessEnv(
-    Object.keys(auth).length ? auth : projectedGithubAuthEnv(),
-  );
 }
 
 export interface GithubCredential {

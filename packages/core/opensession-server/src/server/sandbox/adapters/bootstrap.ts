@@ -101,9 +101,7 @@ import {
   toPiModel,
 } from "../../models";
 import { filterMcpServers } from "../../runner-shared";
-import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../../../scripts/lib/github-credential";
-import { githubCredentialUser } from "../../auto-continue";
-import { GITHUB_RUN_AUTH_FILE_ENV, githubAuthEnv } from "../../github-auth";
+import { GITHUB_RUN_AUTH_FILE_ENV } from "../../github-auth";
 import {
   appendTranscriptEntries,
   recordEngineSessionOwner,
@@ -2165,22 +2163,14 @@ function makeRemoteLauncher(
       secureFiles.push(claudeAccountsPath, REMOTE_MCP_CONFIG);
 
       // GitHub credentials are projected through a private, run-scoped file,
-      // never spec.json, argv, or the persisted origin. Interactive runs prefer
-      // their user's token. GitHub code automations and user-less interactive
-      // runs receive a freshly resolved service credential for this one repo;
-      // GitHub ask automations (the review workflows) receive the read-only
-      // credential; every other automation stays credential-free.
-      let githubAuth = automationProfile
-        ? {}
-        : githubAuthEnv(githubCredentialUser(spec.user, spec.author?.name));
-      const githubKindAutomation =
-        automationProfile && (spec.journalKind || "").startsWith("github-");
-      const githubCodeAutomation = githubKindAutomation && spec.mode === "code";
-      const githubReadAutomation = githubKindAutomation && spec.mode !== "code";
-      if (
-        !githubAuth.GH_TOKEN &&
-        (!automationProfile || githubKindAutomation)
-      ) {
+      // never spec.json, argv, or the persisted origin. Every run, whoever
+      // started it, receives a freshly minted repository-scoped App token:
+      // the code set for code mode, the read set for ask mode (the review
+      // workflows chew on untrusted PR content and can print their
+      // environment). No run ever receives a person's token
+      // (docs/github-authority.md).
+      let githubAuth: Record<string, string> = {};
+      {
         // The sandbox origin is mutable by repository setup code. Bind service
         // authority only to the server-owned repo id recorded at ensure time.
         const repoId = readRemoteState(provider, sandboxId)?.repoId;
@@ -2190,29 +2180,14 @@ function makeRemoteLauncher(
         if (registeredRepo?.host !== "codestorage" && registeredRepo?.ghRepo) {
           const { githubServiceCredentialEnv, githubServiceReadOnlyEnv } =
             await import("../../github-app");
-          githubAuth = githubReadAutomation
-            ? await githubServiceReadOnlyEnv(registeredRepo.ghRepo)
-            : await githubServiceCredentialEnv(registeredRepo.ghRepo);
+          githubAuth =
+            spec.mode === "code"
+              ? await githubServiceCredentialEnv(registeredRepo.ghRepo)
+              : await githubServiceReadOnlyEnv(registeredRepo.ghRepo);
         }
       }
       const githubAuthPath = `${dir}/github-auth.json`;
       if (githubAuth.GH_TOKEN) {
-        // Project the operator's git-transport credential alongside the run
-        // token — the remote host cannot read ~/.opensession.env. It rides
-        // only with a real token, so credential-free runs stay that way —
-        // and never next to a read-only token: ask-mode review runs process
-        // untrusted PR content and can print their environment, so the
-        // write-capable transport credential stays off those hosts entirely.
-        if (
-          !githubReadAutomation &&
-          !githubAuth[GITHUB_PUSH_TOKEN_RUN_ENV] &&
-          process.env.OPENSESSION_GITHUB_PUSH_TOKEN
-        )
-          githubAuth = {
-            ...githubAuth,
-            [GITHUB_PUSH_TOKEN_RUN_ENV]:
-              process.env.OPENSESSION_GITHUB_PUSH_TOKEN,
-          };
         await driver.writeFile(githubAuthPath, JSON.stringify(githubAuth));
         secureFiles.push(githubAuthPath);
       } else {

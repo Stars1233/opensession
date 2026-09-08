@@ -107,7 +107,9 @@ import {
 } from "./auto-continue";
 import {
   bashAskPolicyReply,
+  mergeGuardDenyReason,
   publicationPolicyDenyReason,
+  type MergeGuard,
   type PublicationPolicy,
 } from "./command-policy";
 import {
@@ -121,11 +123,10 @@ import {
 } from "./transcript-persistence";
 import { transcript } from "./actor-transcript";
 import { transcriptForwarder } from "./transcript-forward";
-import { gitIdentityEnv } from "./shared/user-mappings";
-import { providerAccountUser } from "./session-actors";
+import { gitIdentityEnv, type GitIdentity } from "./shared/user-mappings";
+import { isMachineActor, providerAccountUser } from "./session-actors";
 import {
   GITHUB_RUN_AUTH_FILE_ENV,
-  githubRunEnv,
   githubUserLoginForRun,
   projectedGithubRunEnv,
 } from "./github-auth";
@@ -195,6 +196,29 @@ export async function githubReadRunEnv(
   if (!repo || repo.host === "codestorage" || !repo.ghRepo) return {};
   const { githubServiceReadOnlyEnv } = await import("./github-app");
   return githubServiceReadOnlyEnv(repo.ghRepo);
+}
+
+/** Child-env name carrying the `Co-authored-by` trailer an agent run must put
+ * on every commit. The value is `Name <email>`, the person behind the run. */
+export const GIT_COAUTHOR_ENV = "OPENSESSION_GIT_COAUTHOR";
+
+/** Git identity for an agent run: the App's bot user as author and
+ * committer, with the person behind the run as `Co-authored-by`. No run
+ * carries a person's git identity, so nothing an agent commits can be taken
+ * for something the person typed (docs/github-authority.md, "Attribution").
+ * Without a configured App, git's own config decides the author. */
+export async function agentGitIdentityEnv(
+  author?: GitIdentity | null,
+): Promise<Record<string, string>> {
+  const bot = await import("./github-app")
+    .then((m) => m.githubBotGitIdentity())
+    .catch(() => null);
+  const coauthor =
+    author?.name && author.email ? `${author.name} <${author.email}>` : "";
+  return {
+    ...(bot ? gitIdentityEnv(bot) : {}),
+    ...(coauthor ? { [GIT_COAUTHOR_ENV]: coauthor } : {}),
+  };
 }
 
 /** State root: server-owned agentDir, per-unified-session pi session dirs,
@@ -1451,6 +1475,9 @@ export function makePiBashTool(input: {
   sessionId?: string;
   runKind?: string;
   publicationPolicy?: PublicationPolicy;
+  /** Every run: no merge, no approve, no base-branch update
+   *  (mergeGuardDenyReason). */
+  mergeGuard?: MergeGuard;
   /** Immutable Open Session run cancellation. Kept separate from Pi's tool
    * signal because AgentSession.abort() can leave an active tool signal live. */
   runSignal?: AbortSignal;
@@ -1480,6 +1507,10 @@ export function makePiBashTool(input: {
         const reason = askBashDenyReason(command);
         if (reason) throw new Error(reason);
       }
+      const mergeDenial = input.mergeGuard
+        ? mergeGuardDenyReason(command, input.mergeGuard)
+        : undefined;
+      if (mergeDenial) throw new Error(mergeDenial);
       const publicationDenial = input.publicationPolicy
         ? publicationPolicyDenyReason(command, input.publicationPolicy)
         : undefined;
@@ -2028,34 +2059,63 @@ async function* runPiAttempt(
     // the trusted-human loops carry deniedTools but shouldn't trip the gate.
     const bashGated =
       isUnattendedKind(baseJournalKind(journal?.kind)) && !isAsk;
-    const interactiveGithub =
-      !policy.unattended &&
-      INTERACTIVE_KINDS.has(baseJournalKind(journal?.kind));
-    // The sender, unless it is the synthetic auto-continue driver — the
-    // author fallback then names the session owner, whose credential this
-    // turn deserves like any other turn in the session.
+    // The repo owning this run's cwd, or undefined for a repo-less one (a
+    // scratch dir, a repo-less ask session). Dynamic import to avoid a static
+    // module-init cycle through "./worktree".
+    const cwdRepo = await (async () => {
+      try {
+        return (await import("./worktree")).repoForPathOrNull(cwd);
+      } catch {
+        return undefined;
+      }
+    })();
+    // The person this turn acts for, if any: the sender, unless it is the
+    // synthetic auto-continue driver, in which case the author fallback
+    // names the session owner (#322). A machine sender (a review handoff, a
+    // worker report, an automation) is nobody. This decides only whether
+    // the gateway mounts the owner-identity tools and how the session
+    // context describes PR authorship; the shell credential below is the
+    // same for everyone.
     const githubUser = githubCredentialUser(user, author?.name);
-    const githubUserLogin = interactiveGithub
+    const ownerTurn =
+      !policy.unattended &&
+      INTERACTIVE_KINDS.has(baseJournalKind(journal?.kind)) &&
+      !isMachineActor(githubUser);
+    const githubUserLogin = ownerTurn
       ? githubUserLoginForRun(githubUser)
       : null;
-    // Only the dedicated GitHub workflows may inject a service credential
-    // into an unattended run: code mode gets the repository-scoped code set,
-    // ask mode (the review workflows, which chew on untrusted PR content)
-    // gets the repository-scoped read set and ignores any caller-supplied
-    // githubEnv, so a launcher can never hand a review run a writable token.
-    // Other automations remain credential-free even if a caller accidentally
-    // supplies githubEnv.
+    // Every run's shell holds a repository-scoped App installation token and
+    // never a person's: the code set in code mode, the read set in ask mode
+    // (the review workflows chew on untrusted PR content and can print
+    // their environment). What that token may do to the default branch is
+    // GitHub's ruleset decision, not ours (docs/github-authority.md). A
+    // launcher may hand a github-* code run its own token; ask runs ignore
+    // any caller-supplied githubEnv so a launcher can never hand a review
+    // run a writable token.
     const githubKindRun = baseJournalKind(journal?.kind).startsWith("github-");
-    const githubCodeRun = mode === "code" && githubKindRun;
-    const githubEnv = githubCodeRun
-      ? opts.githubEnv?.GH_TOKEN
-        ? opts.githubEnv
-        : await githubCodeRunEnv(cwd)
-      : githubKindRun
-        ? await githubReadRunEnv(cwd)
-        : interactiveGithub
-          ? githubRunEnv(githubUser)
-          : {};
+    const githubEnv =
+      mode === "code"
+        ? githubKindRun && opts.githubEnv?.GH_TOKEN
+          ? opts.githubEnv
+          : await githubCodeRunEnv(cwd)
+        : await githubReadRunEnv(cwd);
+    const agentGitEnv = await agentGitIdentityEnv(author);
+    // A run INSIDE a shared self-development checkout pushes its base branch
+    // by design (AGENTS.md); there the rulesets alone decide, and only merge
+    // and approve are refused. Everywhere else, a worktree of that same
+    // repository included, the base branch is off limits.
+    const inSharedCheckout =
+      !!cwdRepo?.sharedCheckout && resolve(cwd) === resolve(cwdRepo.repo);
+    const mergeGuard: MergeGuard = {
+      ...(inSharedCheckout
+        ? {}
+        : { baseBranch: cwdRepo?.defaultBranch || "main" }),
+      ...(ownerTurn &&
+      opts.inProcessMcp &&
+      "opensession-pull-requests" in opts.inProcessMcp
+        ? { proposeTool: "propose_merge" }
+        : {}),
+    };
 
     const binding = await createPiRuntimeBinding({
       providerID: parsed.providerID,
@@ -2200,7 +2260,7 @@ async function* runPiAttempt(
       ...(opts.scratchDir
         ? { TMPDIR: opts.scratchDir, OPENSESSION_SCRATCH: opts.scratchDir }
         : {}),
-      ...gitIdentityEnv(author),
+      ...agentGitEnv,
       ...githubEnv,
       ...awsEnv,
       ...cliEnv,
@@ -2308,6 +2368,7 @@ async function* runPiAttempt(
               sessionId: journal?.osSessionId,
               runKind: journal?.kind,
               publicationPolicy: opts.publicationPolicy,
+              mergeGuard,
               runSignal: abort.signal,
               onAudit: (event) =>
                 audit({
@@ -2329,16 +2390,6 @@ async function* runPiAttempt(
       () => steeringBoundaryPending,
     );
 
-    // The repo owning this run's cwd, or undefined for a repo-less one (a
-    // scratch dir, a repo-less ask session). Dynamic import to avoid a static
-    // module-init cycle through "./worktree".
-    const cwdRepo = await (async () => {
-      try {
-        return (await import("./worktree")).repoForPathOrNull(cwd);
-      } catch {
-        return undefined;
-      }
-    })();
     const instructions = buildRunInstructions({
       isAsk,
       isScratch,
@@ -2488,6 +2539,7 @@ async function* runPiAttempt(
       user,
       author,
       githubUserLogin,
+      coAuthor: agentGitEnv[GIT_COAUTHOR_ENV],
     });
     await loader.reload();
 

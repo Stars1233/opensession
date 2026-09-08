@@ -14,7 +14,6 @@ import {
   listGithubAppInstallations,
   updateGithubAppWebhook,
 } from "./github-app";
-import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../scripts/lib/github-credential";
 
 const savedConfig = process.env.OPENSESSION_CONFIG;
 const savedClientId = process.env.OPENSESSION_GITHUB_CLIENT_ID;
@@ -361,21 +360,10 @@ describe("repository-scoped App installation identity", () => {
       Object.values(bodies[0].permissions).every((v) => v === "read"),
     ).toBe(true);
 
-    // The env a read-only run receives never carries the operator's
-    // git-transport push credential, even when one is configured: ask-mode
-    // runs can print their environment, so a write-capable token next to the
-    // read token would defeat the ceiling.
-    const savedPush = process.env.OPENSESSION_GITHUB_PUSH_TOKEN;
-    process.env.OPENSESSION_GITHUB_PUSH_TOKEN = "operator-push-token";
-    try {
-      const env = await githubServiceReadOnlyEnv("owner-a/tool");
-      expect(env.GH_TOKEN).toBe("ghs_1_repo:tool");
-      expect(env).not.toHaveProperty(GITHUB_PUSH_TOKEN_RUN_ENV);
-      expect(Object.values(env)).not.toContain("operator-push-token");
-    } finally {
-      if (savedPush === undefined)
-        delete process.env.OPENSESSION_GITHUB_PUSH_TOKEN;
-      else process.env.OPENSESSION_GITHUB_PUSH_TOKEN = savedPush;
-    }
+    // The env a read-only run receives is that token and nothing else that
+    // could write: ask-mode runs can print their environment.
+    const env = await githubServiceReadOnlyEnv("owner-a/tool");
+    expect(env.GH_TOKEN).toBe("ghs_1_repo:tool");
+    expect(Object.keys(env).some((k) => /PUSH_TOKEN/.test(k))).toBe(false);
   });
 });

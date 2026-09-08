@@ -14,8 +14,8 @@ import { join } from "path";
 import {
   connectedGithubAccounts,
   GITHUB_RUN_AUTH_FILE_ENV,
-  githubAuthEnv,
-  githubRunEnv,
+  githubCredentialForRun,
+  projectedGithubRunEnv,
   githubCredentialForLogin,
   githubCredentialForPrincipal,
   githubReconnectRequired,
@@ -32,7 +32,6 @@ import {
   startGithubDeviceFlow,
   validateGithubTokenLogin,
 } from "./github-auth";
-import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../scripts/lib/github-credential";
 import { AUTO_CONTINUE_USER, githubCredentialUser } from "./auto-continue";
 import { botGhToken } from "./github-limit";
 import {
@@ -50,8 +49,6 @@ const ENV_KEYS = [
   "OPENSESSION_GITHUB_CLIENT_ID",
   "OPENSESSION_GITHUB_AUTH_STORE",
   GITHUB_RUN_AUTH_FILE_ENV,
-  "OPENSESSION_GITHUB_PUSH_TOKEN",
-  GITHUB_PUSH_TOKEN_RUN_ENV,
   "OPENSESSION_WEB_SESSIONS_STORE",
   "KEYPAD_TOKEN",
 ] as const;
@@ -177,7 +174,7 @@ describe("token lookups + runner env", () => {
     // resolve through the same identity table as commit attribution.
     for (const ref of ["Alice", "U_ALICE", "alice@example.com", "alice"]) {
       expect(githubUserLoginForRun(ref)).toBe("alice");
-      expect(githubAuthEnv(ref)).toEqual({
+      expect(githubCredentialForRun(ref)?.env).toMatchObject({
         GH_TOKEN: "gho_test123",
         GITHUB_TOKEN: "gho_test123",
       });
@@ -187,34 +184,27 @@ describe("token lookups + runner env", () => {
   test("simple mode uses the sole account; operator mode empty for unknown/unconnected", () => {
     seedToken();
     // Feature off (simple mode): the single connected account is the identity
-    // for every interactive run, regardless of the passed user.
-    expect(githubAuthEnv("Alice")).toEqual({
-      GH_TOKEN: "gho_test123",
-      GITHUB_TOKEN: "gho_test123",
-    });
-    // The caller may pass a null or unmatched user (simple mode has no per-user
-    // login); the sole account is still returned, so an interactive run gets
-    // GH_TOKEN. The pi-runner gate keys on interactivity, not on a non-null
-    // login — see the githubInteractive boolean.
-    expect(githubAuthEnv(null)).toEqual({
-      GH_TOKEN: "gho_test123",
-      GITHUB_TOKEN: "gho_test123",
-    });
-    expect(githubAuthEnv("Some Randomer")).toEqual({
-      GH_TOKEN: "gho_test123",
-      GITHUB_TOKEN: "gho_test123",
-    });
+    // for every server-side call on a person's behalf, whoever is passed.
+    const token = (user: string | null) =>
+      githubCredentialForRun(user)?.env.GH_TOKEN;
+    expect(token("Alice")).toBe("gho_test123");
+    // The caller may pass a null or unmatched user (simple mode has no
+    // per-user login); the sole account is still the identity.
+    expect(token(null)).toBe("gho_test123");
+    expect(token("Some Randomer")).toBe("gho_test123");
     enableFeature();
-    expect(githubAuthEnv("Some Randomer")).toEqual({}); // unknown user
-    expect(githubAuthEnv(null)).toEqual({});
-    expect(githubAuthEnv("Bob")).toEqual({}); // unknown, never connected
+    expect(githubCredentialForRun("Some Randomer")).toBeNull(); // unknown user
+    expect(githubCredentialForRun(null)).toBeNull();
+    expect(githubCredentialForRun("Bob")).toBeNull(); // unknown, never connected
     expect(githubUserLoginForRun("Bob")).toBeNull();
   });
 
-  test("run env gives HTTPS git and gh the connected user's token", () => {
+  test("a person's credential gives server-side git and gh their token", () => {
+    // Server-owned calls only: no agent run receives this env
+    // (docs/github-authority.md).
     enableFeature();
     seedToken();
-    expect(githubRunEnv("Alice")).toMatchObject({
+    expect(githubCredentialForRun("Alice")?.env).toMatchObject({
       GH_TOKEN: "gho_test123",
       GITHUB_TOKEN: "gho_test123",
       GIT_TERMINAL_PROMPT: "0",
@@ -236,61 +226,33 @@ describe("token lookups + runner env", () => {
       }),
     );
     process.env[GITHUB_RUN_AUTH_FILE_ENV] = projected;
-    expect(githubRunEnv("Alice")).toMatchObject({
+    expect(projectedGithubRunEnv()).toMatchObject({
       GH_TOKEN: "ghu_remote123",
       GITHUB_TOKEN: "ghu_remote123",
       GIT_CONFIG_VALUE_2: "git@github.com:",
     });
-    expect(JSON.stringify(githubRunEnv("Alice"))).not.toContain(
+    expect(JSON.stringify(projectedGithubRunEnv())).not.toContain(
       "must-not-be-read",
     );
   });
 
-  test("run env carries the operator push credential only with a session token", () => {
-    process.env.OPENSESSION_GITHUB_PUSH_TOKEN = "github_pat_push_only";
+  test("an auto-continue turn resolves the session owner; automations resolve nobody", () => {
     enableFeature();
     seedToken();
-    expect(githubRunEnv("Alice")).toMatchObject({
-      GH_TOKEN: "gho_test123",
-      [GITHUB_PUSH_TOKEN_RUN_ENV]: "github_pat_push_only",
-    });
-    // An unconnected user resolves no session token; the push credential must
-    // not turn that credential-free run into one that can push.
-    expect(githubRunEnv("Bob")).not.toHaveProperty(GITHUB_PUSH_TOKEN_RUN_ENV);
-  });
-
-  test("an auto-continue turn resolves the session owner's credential; automations still get nothing", () => {
-    enableFeature();
-    seedToken();
-    // A drained nudge/handoff turn is sent by the synthetic auto-continue
-    // driver while the commit author carries the session owner. The
-    // credential follows the owner — the same token every other turn in the
-    // session resolves.
+    // A drained nudge turn is sent by the synthetic auto-continue driver
+    // while the commit author carries the session owner. The owner is who
+    // the gateway's owner-identity tools act as — the same person every
+    // other turn in the session resolves.
     expect(
-      githubRunEnv(githubCredentialUser(AUTO_CONTINUE_USER, "Alice Example")),
-    ).toMatchObject({ GH_TOKEN: "gho_test123" });
-    // An automation-owned turn has no sender and a non-roster owner label, so
-    // it still resolves no token (and unattended journal kinds never reach
-    // the interactive credential path at all).
+      githubCredentialForRun(
+        githubCredentialUser(AUTO_CONTINUE_USER, "Alice Example"),
+      )?.env.GH_TOKEN,
+    ).toBe("gho_test123");
+    // An automation-owned turn has no sender and a non-roster owner label,
+    // so it resolves no person.
     expect(
-      githubRunEnv(githubCredentialUser(undefined, "Nightly sweep")),
-    ).toMatchObject({ GH_TOKEN: "" });
-  });
-
-  test("projected file carries the push credential to the remote run", () => {
-    const projected = join(dir, "run-github-auth.json");
-    writeFileSync(
-      projected,
-      JSON.stringify({
-        GH_TOKEN: "ghu_remote123",
-        [GITHUB_PUSH_TOKEN_RUN_ENV]: "github_pat_push_only",
-      }),
-    );
-    process.env[GITHUB_RUN_AUTH_FILE_ENV] = projected;
-    expect(githubRunEnv("Alice")).toMatchObject({
-      GH_TOKEN: "ghu_remote123",
-      [GITHUB_PUSH_TOKEN_RUN_ENV]: "github_pat_push_only",
-    });
+      githubCredentialForRun(githubCredentialUser(undefined, "Nightly sweep")),
+    ).toBeNull();
   });
 
   test("connectedGithubAccounts never exposes tokens", () => {

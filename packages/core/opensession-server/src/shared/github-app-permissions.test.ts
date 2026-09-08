@@ -10,7 +10,7 @@ import {
   GITHUB_APP_GRANT_PERMISSIONS,
   GITHUB_APP_READ_PERMISSIONS,
   GITHUB_APP_WRITE_PERMISSIONS,
-  githubAppMintPermissions,
+  withReadOnlyContents,
 } from "./github-app-permissions";
 
 /** A mint scope is covered when the grant holds the same key at an access level
@@ -68,40 +68,26 @@ describe("github app permission sets", () => {
     expect(GITHUB_APP_WRITE_PERMISSIONS.statuses).toBeUndefined();
   });
 
-  test("with a git-transport credential, no mint requests contents:write", () => {
-    // Split-credential deployments cap the installation at contents:read.
-    // All-or-nothing minting means one over-requested scope fails the whole
-    // token — reviews and comments included, not just pushes.
-    expect(
-      githubAppMintPermissions(GITHUB_APP_WRITE_PERMISSIONS, true),
-    ).toEqual({
+  test("the contents fallback narrows only that scope", () => {
+    // An installation capped at contents:read would 422 the whole write
+    // token; the retry keeps every other write scope.
+    expect(withReadOnlyContents(GITHUB_APP_WRITE_PERMISSIONS)).toEqual({
       pull_requests: "write",
       issues: "write",
       contents: "read",
       metadata: "read",
     });
-    expect(githubAppMintPermissions(GITHUB_APP_CODE_PERMISSIONS, true)).toEqual(
-      {
-        pull_requests: "write",
-        issues: "write",
-        contents: "read",
-        metadata: "read",
-        actions: "read",
-        checks: "read",
-        statuses: "read",
-      },
-    );
-    expect(githubAppMintPermissions(GITHUB_APP_READ_PERMISSIONS, true)).toEqual(
+    expect(withReadOnlyContents(GITHUB_APP_CODE_PERMISSIONS)).toEqual({
+      pull_requests: "write",
+      issues: "write",
+      contents: "read",
+      metadata: "read",
+      actions: "read",
+      checks: "read",
+      statuses: "read",
+    });
+    expect(withReadOnlyContents(GITHUB_APP_READ_PERMISSIONS)).toBe(
       GITHUB_APP_READ_PERMISSIONS,
-    );
-  });
-
-  test("without a git-transport credential, the mint sets pass through unchanged", () => {
-    expect(githubAppMintPermissions(GITHUB_APP_WRITE_PERMISSIONS, false)).toBe(
-      GITHUB_APP_WRITE_PERMISSIONS,
-    );
-    expect(githubAppMintPermissions(GITHUB_APP_CODE_PERMISSIONS, false)).toBe(
-      GITHUB_APP_CODE_PERMISSIONS,
     );
   });
 });

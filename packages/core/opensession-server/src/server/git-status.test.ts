@@ -10,7 +10,6 @@ import {
   gitPush,
   porcelainPaths,
 } from "./git-status";
-import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../scripts/lib/github-credential";
 import type { WorkspaceExec } from "./sandbox/workspace-exec";
 
 const roots: string[] = [];
@@ -248,7 +247,7 @@ describe("scoped Git credentials", () => {
     }
   });
 
-  test("local Docker git transport prefers the injected push credential", async () => {
+  test("local Docker git transport uses the run's own token", async () => {
     const envs: Array<Record<string, string> | undefined> = [];
     const exec = Object.assign(
       async (_cmd: string[], opts?: { env?: Record<string, string> }) => {
@@ -260,17 +259,15 @@ describe("scoped Git credentials", () => {
     const hostEnv = {
       GH_TOKEN: "session-token",
       GITHUB_TOKEN: "session-token",
-      [GITHUB_PUSH_TOKEN_RUN_ENV]: "github_pat_push_only",
     };
 
     expect(await gitPush("/repo", "feature", exec, hostEnv)).toEqual({
       ok: true,
     });
-    // `gh auth git-credential` answers from GH_TOKEN, so the transport token
-    // must land there — the session token can be read-only for contents.
+    // `gh auth git-credential` answers from GH_TOKEN.
     expect(envs[0]).toMatchObject({
-      GH_TOKEN: "github_pat_push_only",
-      GITHUB_TOKEN: "github_pat_push_only",
+      GH_TOKEN: "session-token",
+      GITHUB_TOKEN: "session-token",
       GIT_CONFIG_VALUE_1: "!gh auth git-credential",
     });
   });

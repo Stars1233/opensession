@@ -128,10 +128,10 @@ export async function handleGithubPrEvent(
       !ghRepo || ghRepo.toLowerCase() === defaultRepo().ghRepo.toLowerCase();
 
     // Our bot account shows up as `sender` when we comment/review, when a code
-    // loop (auto-fix/simplify/adversarial/mention) pushes, AND — with a split push
-    // token (`OPENSESSION_GITHUB_PUSH_TOKEN`) — on EVERY session `git push`, since
-    // git transport then authenticates as the bot regardless of who runs the
-    // session. So a bot `sender` on `synchronize` does not mean "our own work";
+    // loop (auto-fix/simplify/adversarial/mention) pushes, AND on EVERY session
+    // `git push`, since every agent run pushes with the App installation token
+    // regardless of who runs the session (docs/github-authority.md). So a bot
+    // `sender` on `synchronize` does not mean "our own work";
     // it usually means a human-driven session pushed. We must not react to real
     // self-triggers (our comments, a loop's own push) — but we DO want to review
     // PRs the bot *opens* (e.g. automated security fixes) and session pushes. So

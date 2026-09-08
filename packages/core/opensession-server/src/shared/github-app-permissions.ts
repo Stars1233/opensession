@@ -12,13 +12,12 @@
  * subset of what the installation holds. So each mint set below is a strict
  * subset of the grant set, and the grant set is what the create URL requests.
  *
- * Split-credential deployments (docs/setup/github.md, "Separate git-transport
- * credential") cap the installation itself at contents:read: git transport
- * rides the dedicated push credential, so App tokens never push. Because
- * mints are all-or-nothing, a write mint still requesting contents:write
- * against that capped installation would 422 and take every App write
- * operation down with it — githubAppMintPermissions() below narrows the
- * request instead.
+ * The installation is expected to hold contents:write: agent runs push their
+ * branches with a repository-scoped installation token, and what that token
+ * may push is a ruleset decision on GitHub (docs/github-authority.md), not a
+ * permission cap. An installation an operator has capped at contents:read is
+ * handled at mint time by falling back to the read set for contents, so
+ * reviews and comments keep working while pushes fail loudly.
  */
 
 /** The full set the App is granted at creation — the create-URL permission
@@ -79,17 +78,12 @@ export const GITHUB_APP_CODE_PERMISSIONS: Record<string, string> = {
   statuses: "read",
 };
 
-/** The set a mint actually requests. With a dedicated git-transport
- * credential configured, git pushes never ride App tokens, so no mint asks
- * for contents:write — which also keeps write mints viable against an
- * installation the operator capped at contents:read (all-or-nothing: the
- * over-request would fail the whole token, reviews and comments included).
- * Without the split, the sets pass through unchanged and code workflows keep
- * pushing with the App token. */
-export function githubAppMintPermissions(
+/** The same set with `contents` narrowed to read: the fallback a mint
+ * retries with when the installation turns out not to hold contents:write.
+ * Unchanged (same object) when the set never asked for write. */
+export function withReadOnlyContents(
   set: Record<string, string>,
-  pushCredentialConfigured = Boolean(process.env.OPENSESSION_GITHUB_PUSH_TOKEN),
 ): Record<string, string> {
-  if (!pushCredentialConfigured || set.contents !== "write") return set;
+  if (set.contents !== "write") return set;
   return { ...set, contents: "read" };
 }

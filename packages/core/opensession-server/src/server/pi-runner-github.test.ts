@@ -93,3 +93,44 @@ describe("recovered GitHub code-run credentials", () => {
     }
   });
 });
+
+describe("agent git identity", () => {
+  const savedSlug = process.env.OPENSESSION_GITHUB_APP_SLUG;
+  const savedFetch = globalThis.fetch;
+  afterEach(() => {
+    if (savedSlug === undefined) delete process.env.OPENSESSION_GITHUB_APP_SLUG;
+    else process.env.OPENSESSION_GITHUB_APP_SLUG = savedSlug;
+    globalThis.fetch = savedFetch;
+  });
+
+  test("never carries a person's git identity; the person is the co-author", async () => {
+    const { agentGitIdentityEnv, GIT_COAUTHOR_ENV } =
+      await import("./pi-runner");
+    process.env.OPENSESSION_GITHUB_APP_SLUG = "example-app";
+    globalThis.fetch = (async () => {
+      throw new Error("offline");
+    }) as typeof fetch;
+    const env = await agentGitIdentityEnv({
+      name: "Alice Example",
+      email: "alice@example.com",
+    });
+    expect(env.GIT_AUTHOR_NAME).toBe("example-app[bot]");
+    expect(env.GIT_COMMITTER_NAME).toBe("example-app[bot]");
+    expect(env.GIT_AUTHOR_EMAIL).toBe(
+      "example-app[bot]@users.noreply.github.com",
+    );
+    expect(env[GIT_COAUTHOR_ENV]).toBe("Alice Example <alice@example.com>");
+    expect(JSON.stringify(env)).not.toContain('GIT_AUTHOR_NAME":"Alice');
+  });
+
+  test("without an App the bot identity is absent and git's own config decides", async () => {
+    const { agentGitIdentityEnv, GIT_COAUTHOR_ENV } =
+      await import("./pi-runner");
+    delete process.env.OPENSESSION_GITHUB_APP_SLUG;
+    process.env.OPENSESSION_CONFIG = "/nonexistent/config.json";
+    const env = await agentGitIdentityEnv({ name: "Nightly sweep" });
+    expect(env.GIT_AUTHOR_NAME).toBeUndefined();
+    // A label identity has no email and gets no trailer.
+    expect(env[GIT_COAUTHOR_ENV]).toBeUndefined();
+  });
+});

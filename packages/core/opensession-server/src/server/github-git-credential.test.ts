@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { GITHUB_PUSH_TOKEN_RUN_ENV } from "../../../../../scripts/lib/github-credential";
 import {
   githubCredentialHelperCommand,
   githubGitCredentialEnv,
@@ -27,33 +26,19 @@ describe("GitHub Git credential environment", () => {
     expect(env.GIT_TERMINAL_PROMPT).toBe("0");
   });
 
-  test("carries the configured push credential next to a session token", () => {
-    const env = githubGitCredentialEnv(
-      "projected-token",
-      "!credential-helper",
-      "github_pat_push_only",
-    );
-    expect(env[GITHUB_PUSH_TOKEN_RUN_ENV]).toBe("github_pat_push_only");
-    expect(env.GH_TOKEN).toBe("projected-token");
-  });
-
-  test("omits the push credential when none is configured", () => {
-    const env = githubGitCredentialEnv(
-      "projected-token",
-      "!credential-helper",
-      undefined,
-    );
-    expect(env).not.toHaveProperty(GITHUB_PUSH_TOKEN_RUN_ENV);
-  });
-
-  test("keeps a credential-free run credential-free despite a push token", () => {
-    const env = githubGitCredentialEnv(
-      "",
-      "!credential-helper",
-      "github_pat_push_only",
-    );
-    expect(env).not.toHaveProperty(GITHUB_PUSH_TOKEN_RUN_ENV);
-    expect(env.GH_TOKEN).toBe("");
+  test("never carries a second, git-only credential", () => {
+    // One token for API and transport. An operator variable that used to
+    // name a separate push credential must stay inert.
+    const saved = process.env.OPENSESSION_GITHUB_PUSH_TOKEN;
+    process.env.OPENSESSION_GITHUB_PUSH_TOKEN = "github_pat_push_only";
+    try {
+      const env = githubGitCredentialEnv("projected-token", "!helper");
+      expect(Object.values(env)).not.toContain("github_pat_push_only");
+      expect(Object.keys(env).some((k) => /PUSH_TOKEN/.test(k))).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.OPENSESSION_GITHUB_PUSH_TOKEN;
+      else process.env.OPENSESSION_GITHUB_PUSH_TOKEN = saved;
+    }
   });
 });
 

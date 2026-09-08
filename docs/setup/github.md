@@ -10,10 +10,15 @@ the only GitHub credentials Open Session accepts.
 For a team install, create one organization-owned GitHub App. A single-user
 simple-mode install may instead use a personal App. The same App provides:
 
-- short-lived installation tokens for reviews, comments, merges, clones,
-  pushes, previews, sandboxes, and trusted GitHub automations;
-- device-flow user tokens so interactive sessions act as the signed-in person;
-- the bot identity `<app-slug>[bot]` for self-trigger protection and attribution.
+- short-lived, repository-scoped installation tokens for every agent run
+  (branch pushes, comments, replies, resolved threads), for reviews, clones,
+  previews, sandboxes, and trusted GitHub automations;
+- device-flow user tokens so the buttons in the UI (merge, close, review) and
+  the gateway's `open_pull_request` tool act as the signed-in person. These
+  tokens never enter an agent run;
+- the bot identity `<app-slug>[bot]` for self-trigger protection and
+  attribution: agent commits are authored by it, with the person as
+  `Co-authored-by`.
 
 Configure it from Settings → Integrations, or under
 `integrations.github` in `~/.opensession/config.json`:
@@ -90,40 +95,44 @@ calls receive a short-lived App token in their process environment. HTTPS Git
 operations use a process-local credential helper, and SSH GitHub remotes are
 rewritten to HTTPS for that process so host keys cannot bypass the App.
 
-## Separate git-transport credential
+## Who holds which credential
 
-By default, one credential does everything a session needs on GitHub. If you
-prefer that the identity-bearing session token never be able to write
-repository contents, you can split the roles: keep the session token for PR,
-review, and comment operations, and give git transport (push) its own
-narrower credential. Combined with branch rulesets, this makes merging
-something no credential on the host can do alone.
+No agent run ever holds a person's token. Every run, whoever started it,
+receives a short-lived installation token scoped to its repository: the code
+permission set in code mode (push a branch, comment, reply, resolve threads,
+read checks and Actions logs), the read set in ask mode. A person's token is
+used only by the gateway itself: the UI buttons (merge, close, review,
+comment) and the `open_pull_request` / `edit_pull_request` tools a turn gets
+when a connected person started it. The design and its reasoning are in
+[github-authority.md](../github-authority.md).
 
-Opt-in: set `OPENSESSION_GITHUB_PUSH_TOKEN` (in `~/.opensession.env`) and the
-credential helper answers git transport — clone, pull, push — with it instead
-of the run's session token, on every run that already carries a GitHub
-credential. API calls (`gh`, octokit tooling) keep `GH_TOKEN` unchanged, and a
-run that carries no GitHub credential still receives nothing. Unset, git
-transport uses the run's session token.
+Every session push therefore reaches GitHub as the bot account, and the PR
+webhook sees the bot as the `synchronize` sender. The review automation
+treats those pushes like human pushes; it only skips a bot-sender push while
+one of its own code loops (auto-fix, simplify, adversarial, or an @mention
+reply) is in flight on that PR.
 
-With the push token set, every session push reaches GitHub as the bot account,
-so the PR webhook sees the bot as the `synchronize` sender. The review
-automation treats those pushes like human pushes; it only skips a bot-sender
-push while one of its own code loops (auto-fix, simplify, adversarial, or an
-@mention reply) is in flight on that PR.
+Keep the App's **Contents** permission at **read and write**: that is what
+lets runs push their branches. What the bot may do to the default branch is
+decided by rulesets, not by the token. On every protected repository add a
+ruleset on the default branch with the single rule **restrict updates**, and
+list only the people who may merge as its bypass actors. A merge is an update
+of the branch, so with that rule in place no installation token, and no
+leaked one, can merge or push `main`, whatever permissions it holds. A
+ruleset that requires pull requests and status checks should already exist;
+leave it as it is.
 
-The hardened deployment this enables: cap the GitHub App at **Contents: read**
-so no App or user-to-server token can write repository contents, then mint a
-fine-grained PAT on the bot account with **Contents: read and write** — plus
-**Workflows: read and write** if sessions push workflow files — restricted to
-the repositories this instance should push to, and set it as
-`OPENSESSION_GITHUB_PUSH_TOKEN`. Add branch rulesets so the bot identity can
-push branches but never merge to protected ones.
+The command policy refuses `gh pr merge`, approving reviews, and pushes to
+the default branch in every run, whoever started it. That is a tripwire in
+front of the rulesets so a confused agent gets a clear message instead of a
+403, not the boundary itself.
 
 Threat model: agent bash shares the server's uid, so every credential present
 on an Open Session host should be scoped as if the agent will read and use it
-directly. The split does not hide the push token from the agent — it bounds
-what any token on the box can do on GitHub.
+directly. No PAT, SSH key, or `gh` login belongs on the host: the App
+installation token is the only credential in any run's reach, and the
+rulesets bind it. `OPENSESSION_GITHUB_PUSH_TOKEN`, the earlier git-only
+credential, is no longer read; revoke it and remove the variable.
 
 ## Webhook intake
 

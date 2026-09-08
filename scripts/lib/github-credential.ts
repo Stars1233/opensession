@@ -3,20 +3,12 @@
  *
  * Registered per checkout by setup-repos.ts and reached through the stable
  * `opensession github-credential` command. It answers only from this
- * process's environment: the run-scoped git-transport credential when one was
- * injected, otherwise GH_TOKEN. The split lets git clone/pull/push run as a
- * push-scoped identity while API calls (gh, octokit) keep GH_TOKEN. Trusted
- * interactive runs and explicit server-side Git calls inject those values;
- * unattended runs receive neither a token nor a way to resolve one from the
- * server-side account store.
+ * process's environment: GH_TOKEN, the one credential a run or a server-owned
+ * Git call was explicitly handed. Agent runs carry a repository-scoped App
+ * installation token there; server-side calls on a person's behalf carry that
+ * person's token. A process with no GH_TOKEN gets no answer and no way to
+ * resolve one from the server-side account store.
  */
-
-/** Child-env name for the injected git-transport credential. Deliberately not
- * the operator's OPENSESSION_GITHUB_PUSH_TOKEN: children inherit the server's
- * environment wholesale, so the operator's variable must stay inert in a run
- * that was never explicitly handed a credential. Only githubGitCredentialEnv
- * and the remote launcher's projected auth file set this name. */
-export const GITHUB_PUSH_TOKEN_RUN_ENV = "OPENSESSION_GITHUB_RUN_PUSH_TOKEN";
 
 export function githubCredentialResponse(
   action: string | undefined,
@@ -32,7 +24,7 @@ export function githubCredentialResponse(
   }
   if (attrs.protocol !== "https" || attrs.host !== "github.com") return "";
 
-  const token = process.env[GITHUB_PUSH_TOKEN_RUN_ENV] || process.env.GH_TOKEN;
+  const token = process.env.GH_TOKEN;
   return token ? `username=x-access-token\npassword=${token}\n` : "";
 }
 
