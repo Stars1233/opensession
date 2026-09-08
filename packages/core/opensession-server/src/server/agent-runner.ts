@@ -1464,7 +1464,10 @@ export async function resumeInterruptedRuns(
   inProcessMcpFor?: (
     osSessionId: string,
     user?: string,
-  ) => Record<string, unknown> | undefined,
+  ) =>
+    | Record<string, unknown>
+    | Promise<Record<string, unknown> | undefined>
+    | undefined,
   reposNoteFor?: (osSessionId: string) => string | undefined,
   onEvent?: (osSessionId: string, event: StreamEvent) => void | Promise<void>,
   snapshotLocalHostRuns: ActiveRunRecord[] = [],
@@ -2043,7 +2046,7 @@ export async function resumeInterruptedRuns(
                 fastMode: run.fastMode,
                 mcpServers: run.mcpServers ?? "all",
                 inProcessMcp: run.osSessionId
-                  ? inProcessMcpFor?.(run.osSessionId, run.user)
+                  ? await inProcessMcpFor?.(run.osSessionId, run.user)
                   : undefined,
                 reposNote: run.osSessionId
                   ? reposNoteFor?.(run.osSessionId)
@@ -2151,7 +2154,7 @@ export async function resumeInterruptedRuns(
               fastMode: run.fastMode,
               mcpServers: run.mcpServers ?? "all",
               inProcessMcp: run.osSessionId
-                ? inProcessMcpFor?.(run.osSessionId, run.user)
+                ? await inProcessMcpFor?.(run.osSessionId, run.user)
                 : undefined,
               reposNote: run.osSessionId
                 ? reposNoteFor?.(run.osSessionId)
@@ -2249,7 +2252,7 @@ export async function resumeInterruptedRuns(
             fastMode: run.fastMode,
             mcpServers: run.mcpServers ?? "all",
             inProcessMcp: run.osSessionId
-              ? inProcessMcpFor?.(run.osSessionId, run.user)
+              ? await inProcessMcpFor?.(run.osSessionId, run.user)
               : undefined,
             reposNote: run.osSessionId
               ? reposNoteFor?.(run.osSessionId)

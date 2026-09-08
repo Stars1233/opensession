@@ -107,9 +107,12 @@ describe("agent git identity", () => {
     const { agentGitIdentityEnv, GIT_COAUTHOR_ENV } =
       await import("./pi-runner");
     process.env.OPENSESSION_GITHUB_APP_SLUG = "example-app";
-    globalThis.fetch = (async () => {
-      throw new Error("offline");
-    }) as typeof fetch;
+    globalThis.fetch = Object.assign(
+      async () => {
+        throw new Error("offline");
+      },
+      { preconnect: savedFetch.preconnect },
+    );
     const env = await agentGitIdentityEnv({
       name: "Alice Example",
       email: "alice@example.com",
@@ -128,7 +131,7 @@ describe("agent git identity", () => {
       await import("./pi-runner");
     delete process.env.OPENSESSION_GITHUB_APP_SLUG;
     process.env.OPENSESSION_CONFIG = "/nonexistent/config.json";
-    const env = await agentGitIdentityEnv({ name: "Nightly sweep" });
+    const env = await agentGitIdentityEnv({ name: "Nightly sweep", email: "" });
     expect(env.GIT_AUTHOR_NAME).toBeUndefined();
     // A label identity has no email and gets no trailer.
     expect(env[GIT_COAUTHOR_ENV]).toBeUndefined();

@@ -27,8 +27,8 @@ export async function unarchiveForHumanTurn(
   const ids = new Set([session.id, ...(session.aliasIds || [])]);
   if (!session.archived && ![...ids].some(deps.isArchivedId)) return false;
 
-  for (const id of ids) deps.setArchived(id, false);
+  for (const id of ids) await deps.setArchived(id, false);
   await deps.clearSessionFileArchive(session.id);
-  deps.publishSessionChange(session.id);
+  await deps.publishSessionChange(session.id);
   return true;
 }

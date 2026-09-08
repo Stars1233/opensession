@@ -483,22 +483,22 @@ function pullRequestServerFor(
   };
 }
 
-export function automationSessionMcp(
+export async function automationSessionMcp(
   session: { automation?: string; worktreeDir?: string | null },
   sessionId: string,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   return {
     ...papercutsServerFor(
       sessionId,
       "automation",
       `${session.automation} (automation)`,
     ),
-    ...(automationRunMcpForSession(session, sessionId) || {}),
-    ...(selfImproveMcpForSession(session, sessionId) || {}),
+    ...((await automationRunMcpForSession(session, sessionId)) || {}),
+    ...((await selfImproveMcpForSession(session, sessionId)) || {}),
   };
 }
 
-registerInteractiveMcpBuilder((sessionId, user) => {
+registerInteractiveMcpBuilder(async (sessionId, user) => {
   // Automation-owned sessions run on untrusted event/ticket text. Their runs
   // only ever carry the automation-bar set (automationSessionMcp above), but
   // this builder is also run-rpc's FALLBACK resolver for any registered run

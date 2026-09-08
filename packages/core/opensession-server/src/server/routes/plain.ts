@@ -43,7 +43,7 @@ async function resolvePlainTriageSession(
   const existing = await existingPlainTriageSession(threadId);
   if (existing) return existing;
 
-  const automation = listAutomations().find(
+  const automation = (await listAutomations()).find(
     (a) => a.eventKey === "plain:thread_created",
   );
   if (!automation) return null;

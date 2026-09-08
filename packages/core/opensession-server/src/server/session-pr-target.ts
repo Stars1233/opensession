@@ -1,7 +1,7 @@
 import type { SessionPrRef, UnifiedSession } from "./types";
 import { defaultRepo } from "./config";
 import type { PrInfo } from "./pr-cache";
-import { getWorkspace, type Workspace } from "./workspaces";
+import { peekWorkspace, type Workspace } from "./workspaces";
 
 /** The PR branch `session` can take from `workspace`, or null. Never across
  *  repos: a session in another repo would resolve to a branch absent there. */
@@ -51,7 +51,7 @@ export function sessionPrBranch(
 ): string | null {
   const parent =
     workspace === undefined && session.workspaceId
-      ? getWorkspace(session.workspaceId)
+      ? peekWorkspace(session.workspaceId)
       : workspace;
   const prHead = parent ? workspacePrHead(parent) : null;
   const reviewCheckout =
@@ -63,10 +63,11 @@ export function sessionPrBranch(
 
 /**
  * A memoized workspace reader for callers that resolve many sessions at once
- * (the `getAllSessions` PR enrichment). `getWorkspace` reads a file per call
- * and one workspace holds many sessions, so the memo turns thousands of reads into
- * one per workspace. Sessions that can't inherit a branch skip the read entirely —
- * {@link sessionPrBranch} never consults the workspace for those.
+ * (the `getAllSessions` PR enrichment). Reads the memory projection, which the
+ * list path warms before assembling; one workspace holds many sessions, so the
+ * memo keeps the lookups to one per workspace. Sessions that can't inherit a
+ * branch skip the read entirely — {@link sessionPrBranch} never consults the
+ * workspace for those.
  */
 export function prWorkspaceReader(): (s: UnifiedSession) => Workspace | null {
   const cache = new Map<string, Workspace | null>();
@@ -82,7 +83,7 @@ export function prWorkspaceReader(): (s: UnifiedSession) => Workspace | null {
     if (workspace === undefined)
       cache.set(
         session.workspaceId,
-        (workspace = getWorkspace(session.workspaceId)),
+        (workspace = peekWorkspace(session.workspaceId)),
       );
     return workspace;
   };

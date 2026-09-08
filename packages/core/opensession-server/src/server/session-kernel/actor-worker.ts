@@ -18,6 +18,7 @@ import { isReadReducer, sessionActorReducerRoute } from "./actor-routing";
 import { READ_METHODS, sessionKernelStoreRoute } from "./store-routing";
 import { assertTranscriptActorRequest } from "./transcript-protocol";
 import { assertMetadataActorRequest } from "./metadata-protocol";
+import { assertCatalogDocumentRequest } from "./catalog-document-protocol";
 
 class SessionQuarantinedError extends Error {
   readonly code = "session_quarantined";
@@ -302,6 +303,45 @@ export function startSessionKernelActorWorker(): void {
           else
             throw new Error(
               `Unknown session metadata op ${String((metadata as { op?: unknown }).op)}`,
+            );
+        } else if (command.kind === "catalog_document") {
+          // Session-less rows: served from the central database only, never
+          // from a per-session actor store.
+          const document = command.request;
+          assertCatalogDocumentRequest(document);
+          const central = host.central;
+          if (document.op === "get")
+            result = central.catalogDocumentGet(
+              document.namespace,
+              document.key,
+            );
+          else if (document.op === "get_many")
+            result = central.catalogDocumentGetMany(
+              document.namespace,
+              document.keys,
+            );
+          else if (document.op === "page")
+            result = central.catalogDocumentPage(
+              document.namespace,
+              document.afterKey,
+              document.limit,
+            );
+          else if (document.op === "put")
+            result = central.putCatalogDocument(document);
+          else if (document.op === "seed")
+            result = central.seedCatalogDocuments(
+              document.namespace,
+              document.rows,
+            );
+          else if (document.op === "import_complete")
+            result = central.catalogDocumentImportComplete(document.namespace);
+          else if (document.op === "mark_import_complete")
+            result = central.markCatalogDocumentImportComplete(
+              document.namespace,
+            );
+          else
+            throw new Error(
+              `Unknown catalog document op ${String((document as { op?: unknown }).op)}`,
             );
         } else if (command.kind === "turn") {
           const turn = command.request;

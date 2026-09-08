@@ -164,7 +164,7 @@ import {
 import { markRecapPendingIfUnwatched } from "./recap";
 import { scheduleSessionHistoryIndex } from "./session-index";
 import { broadcastToSession, sessionWatchers } from "./ws-hub";
-import { getWorkspace } from "./workspaces";
+import { peekWorkspace } from "./workspaces";
 import {
   broadcastQueue,
   beginNextPromptDispatch,
@@ -1918,7 +1918,7 @@ export async function maybeLaunchSandboxedRun(
     opts.isAutomationSession && !session.automationDescendantPolicy;
   const owningAutomation = disposableAutomationResume
     ? session.automationId
-      ? getAutomation(session.automationId)
+      ? await getAutomation(session.automationId)
       : null
     : null;
   if (disposableAutomationResume) {
@@ -3089,6 +3089,12 @@ async function runSessionPromptInner(
   // scoping intact: proxy names come from the same fail-closed automation
   // set the run-rpc fallback builder serves, while the repos note and MCP
   // grant identity are withheld.
+  // Resolved once: the automation-bar server set is a catalog read, and the
+  // proxy name list, the run-rpc fallback and the in-process mount below must
+  // all describe the same set.
+  const automationMcp = isAutomationSession
+    ? await automationSessionMcp(session, sessionId)
+    : {};
   const hostedRun =
     !runnerRun && !sandboxRun && routedEngine === "pi"
       ? runAgentHosted({
@@ -3112,7 +3118,7 @@ async function runSessionPromptInner(
           proxyMcpServers: session.automationDescendantPolicy
             ? []
             : isAutomationSession
-              ? Object.keys(automationSessionMcp(session, sessionId))
+              ? Object.keys(automationMcp)
               : [
                   ...Object.keys(interactiveMcpServers(user, sessionId)),
                   ...(session.goalId ? ["opensession-goal-self"] : []),
@@ -3142,7 +3148,7 @@ async function runSessionPromptInner(
           onSteerFailed: (text) => requeueFailedSteer(session.id, text, user),
           fallbackInProcessMcp: () =>
             isAutomationSession
-              ? automationSessionMcp(session, sessionId)
+              ? automationMcp
               : session.goalId
                 ? {
                     ...interactiveMcpServers(user, sessionId),
@@ -3219,7 +3225,7 @@ async function runSessionPromptInner(
       inProcessMcp: session.automationDescendantPolicy
         ? {}
         : isAutomationSession
-          ? automationSessionMcp(session, sessionId)
+          ? automationMcp
           : session.goalId
             ? {
                 ...interactiveMcpServers(user, sessionId),
@@ -3733,7 +3739,8 @@ export function sessionMentionsNote(
   if (workspaceIds.length) {
     const sessions = getCachedSessions();
     const lines = workspaceIds.map((id) => {
-      const workspace = getWorkspace(id);
+      // Memory projection: the note is assembled synchronously per prompt.
+      const workspace = peekWorkspace(id);
       if (!workspace) return `- @workspace:${id} · no workspace with this id`;
       const members = sessions.filter(
         (session) => session.workspaceId === id && !session.archived,

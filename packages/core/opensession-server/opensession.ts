@@ -269,6 +269,16 @@ const g = globalThis as any;
 
 // The actor owns the writable kernel store before any gateway projection hydrates.
 if (!g.__opensessionBooted) await startSessionKernelActor();
+// Import legacy application documents before any sidebar or scheduler reads.
+// After cutover, their catalog is authoritative; requests never read the files.
+if (!g.__opensessionBooted) {
+  const { importApplicationCatalog } =
+    await import("./src/server/catalog-documents");
+  await importApplicationCatalog();
+  // Pure synchronous readers use this even when the list index has coverage.
+  const { warmWorkspacesAsync } = await import("./src/server/workspaces");
+  await warmWorkspacesAsync();
+}
 // The first list read fills the list index. With the actor up it can come
 // from the metadata catalog; before this point it would have to read every
 // session file. Prime it here so no later boot step or route pays that scan,
@@ -789,7 +799,7 @@ if (!g.__opensessionBooted) {
     // records and anything created through the UI are unaffected.
     if (configuredIntegration("seeds").enabled === true) {
       try {
-        ensureConfiguredAutomations();
+        await ensureConfiguredAutomations();
       } catch (e) {
         console.error("[seeds] Failed to seed instance automations:", e);
       }
@@ -810,7 +820,7 @@ if (!g.__opensessionBooted) {
       publishSessionChange(sessionId);
     setEventSessionCallback(onAutomationSession);
     const resumedAutomationIntents =
-      resumePendingAutomationRuns(onAutomationSession);
+      await resumePendingAutomationRuns(onAutomationSession);
     if (resumedAutomationIntents)
       console.log(
         `[automations] Resumed ${resumedAutomationIntents} pre-launch intent(s)`,
@@ -985,7 +995,7 @@ if (!g.__opensessionBooted) {
                 }
                 // The in-process settleRun died with the restart — close the
                 // automation ledger entry here or it stays "running" forever.
-                settleResumedAutomationRun(
+                await settleResumedAutomationRun(
                   bksSessionId,
                   failed
                     ? terminalEvent.content ||
@@ -1014,7 +1024,7 @@ if (!g.__opensessionBooted) {
                 return undefined;
               return makeAskHandler(bksSessionId);
             },
-            (bksSessionId, user) => {
+            async (bksSessionId, user) => {
               // Fail-soft: a broken rebuild must degrade the resumed run to
               // tool-less, never wedge the boot-resume sweep.
               try {
@@ -1029,7 +1039,10 @@ if (!g.__opensessionBooted) {
                 // pi — its rebuilt proxies resolve through run-rpc's
                 // fail-closed automation fallback either way.
                 if (session.automation)
-                  return automationResumeMcpForSession(session, bksSessionId);
+                  return await automationResumeMcpForSession(
+                    session,
+                    bksSessionId,
+                  );
                 const servers: Record<string, unknown> = session.goalId
                   ? {
                       ...interactiveMcpServers(user, bksSessionId),

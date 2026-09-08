@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionListStore } from "./session-list-store";
+import { SessionListStore } from "./session-list-sqlite";
 import type { UnifiedSession } from "./types";
 
 const stores: SessionListStore[] = [];

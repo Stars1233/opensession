@@ -31,6 +31,10 @@ import type {
   MetadataActorResult,
 } from "./metadata-protocol";
 import type {
+  CatalogDocumentRequest,
+  CatalogDocumentResult,
+} from "./catalog-document-protocol";
+import type {
   TranscriptActorRequest,
   TranscriptActorResult,
 } from "./transcript-protocol";
@@ -89,6 +93,7 @@ function compatibilityStoreForTest(
     | "delivery"
     | "gateway command"
     | "metadata"
+    | "catalog document"
     | "turn",
 ) {
   if (process.env.NODE_ENV !== "test")
@@ -236,6 +241,37 @@ export async function sessionMetadata<T extends MetadataActorRequest>(
     return store.markSessionMetadataCatalogComplete() as R;
   throw new Error(
     `Unknown session metadata op ${String((request as { op?: unknown }).op)}`,
+  );
+}
+
+/** Central catalog documents: namespaced, session-less rows in the central
+ * kernel database. Never opens a per-session actor database and never falls
+ * back to gateway file I/O. */
+export async function sessionCatalogDocument<T extends CatalogDocumentRequest>(
+  request: T,
+): Promise<CatalogDocumentResult<T>> {
+  if (state.actor) return state.actor.decideCatalogDocumentAsync(request);
+  const store = compatibilityStoreForTest("catalog document");
+  type R = CatalogDocumentResult<T>;
+  if (request.op === "get")
+    return store.catalogDocumentGet(request.namespace, request.key) as R;
+  if (request.op === "get_many")
+    return store.catalogDocumentGetMany(request.namespace, request.keys) as R;
+  if (request.op === "page")
+    return store.catalogDocumentPage(
+      request.namespace,
+      request.afterKey,
+      request.limit,
+    ) as R;
+  if (request.op === "put") return store.putCatalogDocument(request) as R;
+  if (request.op === "seed")
+    return store.seedCatalogDocuments(request.namespace, request.rows) as R;
+  if (request.op === "import_complete")
+    return store.catalogDocumentImportComplete(request.namespace) as R;
+  if (request.op === "mark_import_complete")
+    return store.markCatalogDocumentImportComplete(request.namespace) as R;
+  throw new Error(
+    `Unknown catalog document op ${String((request as { op?: unknown }).op)}`,
   );
 }
 

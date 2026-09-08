@@ -1227,6 +1227,112 @@ describe("session kernel actor service", () => {
     }
   });
 
+  test("a central catalog write never waits on a wedged session mailbox", async () => {
+    const sessionId = "central-write-session";
+    await rpc({
+      t: "call",
+      rpcId: "central-write-seed",
+      outputBytes: 256 * 1024,
+      request: {
+        t: "store",
+        method: "setRunState",
+        args: [{ sessionId, state: "idle", event: "seed" }],
+      },
+    });
+    const isolatedRoot = join(stateDir, "sessions", "session-kernel-sessions");
+    const lock = new Database(
+      sessionKernelSessionDbPath(sessionId, isolatedRoot),
+    );
+    lock.exec("PRAGMA busy_timeout = 50; BEGIN IMMEDIATE;");
+    try {
+      // An unrelated session mutation that holds its mailbox well past the
+      // 100ms global barrier.
+      const active = rpc({
+        t: "call",
+        rpcId: "central-write-active",
+        outputBytes: 256 * 1024,
+        request: {
+          t: "store",
+          method: "setRunState",
+          args: [{ sessionId, state: "idle", event: "active" }],
+        },
+      });
+      await Bun.sleep(25);
+
+      const namespace = `central-${crypto.randomUUID()}`;
+      const putStartedAt = Date.now();
+      const put = await rpc({
+        t: "call",
+        rpcId: "central-write-put",
+        outputBytes: 256 * 1024,
+        request: {
+          t: "reduce",
+          command: {
+            kind: "catalog_document",
+            commandId: "central-write-put-command",
+            request: {
+              op: "put",
+              namespace,
+              key: "a",
+              expectedRev: null,
+              value: "v1",
+              requestId: "central-write-put-request",
+            },
+          },
+        },
+      });
+      expect(put).toMatchObject({ t: "call_result", status: 1 });
+      expect(JSON.parse(put.body)).toMatchObject({
+        result: { status: "committed", rev: 1 },
+      });
+      expect(Date.now() - putStartedAt).toBeLessThan(400);
+      const read = await rpc({
+        t: "call",
+        rpcId: "central-write-get",
+        outputBytes: 256 * 1024,
+        request: {
+          t: "reduce",
+          command: {
+            kind: "catalog_document",
+            commandId: "central-write-get-command",
+            request: { op: "get", namespace, key: "a" },
+          },
+        },
+      });
+      expect(JSON.parse(read.body)).toMatchObject({
+        result: { key: "a", value: "v1", rev: 1 },
+      });
+
+      // A true global request still takes the barrier and reports the wedge.
+      const global = await fetch(`${service.url}/rpc`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          version: SESSION_KERNEL_TRANSPORT_VERSION,
+          actorVersion: SESSION_KERNEL_ACTOR_VERSION,
+          serviceEpoch,
+          request: { t: "stats", rpcId: "central-write-global" },
+        }),
+      });
+      expect(global.status).toBe(429);
+      expect(await global.json()).toMatchObject({
+        error: expect.stringContaining("global barrier timed out"),
+      });
+      lock.exec("COMMIT;");
+      // The wedged mutation completes once the lock clears; whether it wins or
+      // gives up depends only on its own busy timeout.
+      expect(await active).toMatchObject({ t: "call_result" });
+    } finally {
+      try {
+        lock.exec("ROLLBACK;");
+      } catch {}
+      lock.close();
+    }
+  });
+
   test("priority bursts yield to an ordinary turn", async () => {
     const sessionId = "priority-fairness-session";
     await rpc({

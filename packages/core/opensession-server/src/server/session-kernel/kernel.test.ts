@@ -3482,3 +3482,47 @@ describe("SessionKernel runtime wakes", () => {
     }
   });
 });
+
+test("catalog documents serve the in-process store when no actor is attached", async () => {
+  const { sessionCatalogDocument } = await import(".");
+  const namespace = `facade-${crypto.randomUUID()}`;
+  expect(
+    await sessionCatalogDocument({ op: "get", namespace, key: "a" }),
+  ).toBeNull();
+  expect(
+    await sessionCatalogDocument({
+      op: "put",
+      namespace,
+      key: "a",
+      expectedRev: null,
+      value: "v1",
+      requestId: "r1",
+    }),
+  ).toEqual({ status: "committed", rev: 1 });
+  expect(
+    await sessionCatalogDocument({ op: "get", namespace, key: "a" }),
+  ).toEqual({ key: "a", value: "v1", rev: 1 });
+  await sessionCatalogDocument({
+    op: "seed",
+    namespace,
+    rows: [{ key: "b", value: "seeded" }],
+  });
+  expect(
+    await sessionCatalogDocument({
+      op: "page",
+      namespace,
+      afterKey: "",
+      limit: 10,
+    }),
+  ).toEqual([
+    { key: "a", value: "v1", rev: 1 },
+    { key: "b", value: "seeded", rev: 1 },
+  ]);
+  expect(
+    await sessionCatalogDocument({ op: "import_complete", namespace }),
+  ).toBe(false);
+  await sessionCatalogDocument({ op: "mark_import_complete", namespace });
+  expect(
+    await sessionCatalogDocument({ op: "import_complete", namespace }),
+  ).toBe(true);
+});

@@ -19,6 +19,7 @@ import {
 } from "./sessions";
 import {
   indexedActiveWorkspaceIds,
+  indexedCoverage,
   indexedLiveSessionsByBranch,
   indexedSessions,
   indexedWorkspaceMembers,
@@ -99,6 +100,16 @@ const sessionsCacheGenerations: Record<SessionArchiveSlice, number> = {
   exclude: 0,
   only: 0,
 };
+// One in-flight index read per slice. A refresh wave of concurrent readers
+// must not ask the index worker for the same multi-thousand-row list N times.
+const indexedRefreshes: Record<
+  SessionArchiveSlice,
+  Promise<UnifiedSession[] | null> | null
+> = {
+  include: null,
+  exclude: null,
+  only: null,
+};
 // The UI refreshes on WebSocket invalidations, with a slow fallback poll. Keep
 // the expensive multi-thousand-file fallback scan out of every refresh wave;
 // in-process mutations invalidate this cache immediately.
@@ -122,14 +133,41 @@ export function invalidateSessionsCache(): void {
  * its index row from the current document and overlays, mark the list caches
  * stale and publish the row. Nothing tells every client to refetch.
  */
-export function publishSessionChange(sessionId: string): void {
-  const indexed = readNativeSessionListRow(sessionId);
+export function publishSessionChange(sessionId: string): Promise<void> {
+  const indexed = targetedSessionListRow(sessionId);
+  let written: Promise<void> = Promise.resolve();
   if (indexed) {
     enrichSessionRuntime([indexed]);
-    upsertIndexedSession(indexed);
+    // Posted before the row publish below, so the coalesced flush reads the
+    // row this write produced: the index answers requests in order. Callers
+    // that need the row durable in the index await the returned promise.
+    written = upsertIndexedSession(indexed).catch((error) => {
+      console.warn(
+        `[session-cache] index write failed for ${sessionId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    });
   }
   markSessionListStale();
-  publishSessionRow(sessionId);
+  publishSessionRow(indexed?.id ?? sessionId);
+  return written;
+}
+
+/**
+ * The list row a targeted publish writes for `sessionId`, or undefined when
+ * it names no native session. The id may be a historical Slack/Linear alias
+ * (a rename or review request can be stored under one): the row is then the
+ * canonical session the last list assembly merged it into. The aliases come
+ * from the memory snapshot because only the full assembly discovers them; a
+ * single document read would otherwise drop them and the overlays keyed
+ * under them from the index until the next rebuild.
+ */
+function targetedSessionListRow(sessionId: string): UnifiedSession | undefined {
+  const known = peekCachedSessions().find(
+    (session) =>
+      session.id === sessionId || session.aliasIds?.includes(sessionId),
+  );
+  return readNativeSessionListRow(known?.id ?? sessionId, known?.aliasIds);
 }
 
 /**
@@ -139,23 +177,38 @@ export function publishSessionChange(sessionId: string): void {
  * every other client's list is unaffected. Falls back to the whole-list
  * invalidation only while the live index has no coverage to query.
  */
-export function publishSessionRowsForBranch(branch: string): void {
+export async function publishSessionRowsForBranch(
+  branch: string,
+): Promise<void> {
   if (!branch) return;
-  const rows = indexedLiveSessionsByBranch([branch, `${branch}-os-review`]);
-  if (rows === null) {
+  try {
+    const rows = await indexedLiveSessionsByBranch([
+      branch,
+      `${branch}-os-review`,
+    ]);
+    if (rows === null) {
+      invalidateSessionsCache();
+      return;
+    }
+    const ids = new Set(rows.map((session) => session.id));
+    for (const workspaceId of (await indexedActiveWorkspaceIds()) ?? []) {
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace || workspacePrHead(workspace) !== branch) continue;
+      for (const member of await indexedWorkspaceMembers(workspaceId))
+        if (!member.archived) ids.add(member.id);
+    }
+    if (ids.size === 0) return;
+    markSessionListStale();
+    for (const id of ids) publishSessionRow(id);
+  } catch (error) {
+    // The index is a derived projection; a failed lookup must not leave the
+    // list stale, so fall back to the whole-list invalidation.
+    console.warn(
+      `[session-cache] branch row publish failed for ${branch}:`,
+      error instanceof Error ? error.message : error,
+    );
     invalidateSessionsCache();
-    return;
   }
-  const ids = new Set(rows.map((session) => session.id));
-  for (const workspaceId of indexedActiveWorkspaceIds() ?? []) {
-    const workspace = getWorkspace(workspaceId);
-    if (!workspace || workspacePrHead(workspace) !== branch) continue;
-    for (const member of indexedWorkspaceMembers(workspaceId))
-      if (!member.archived) ids.add(member.id);
-  }
-  if (ids.size === 0) return;
-  markSessionListStale();
-  for (const id of ids) publishSessionRow(id);
 }
 
 /** Mark every list cache stale without telling clients to refetch. Row-level
@@ -306,12 +359,38 @@ export function getCachedSessions(): UnifiedSession[] {
   if (cached && Date.now() - cached.ts < CACHE_TTL) {
     return cached.data;
   }
-  const indexed = indexedSessions("include");
-  if (indexed) return enrichCachedSessions("include", indexed);
-  // Supersede any cooperative scan already in flight. Its generation check
-  // prevents the older snapshot from replacing this synchronous result.
-  sessionsCacheGenerations.include++;
-  return enrichCachedSessions("include", getAllSessions());
+  if (cached) {
+    // The index lives on a worker thread, so a synchronous reader cannot
+    // wait for it. Serve the last complete snapshot and refresh it in the
+    // background; the next call inside the TTL sees the fresh one.
+    void getCachedSessionsAsync("include").catch((error) =>
+      console.warn(
+        "[session-cache] background include refresh failed:",
+        error instanceof Error ? error.message : error,
+      ),
+    );
+    return cached.data;
+  }
+  // Legacy unit fixtures can still construct a synchronous source. The live
+  // gateway must finish async priming; a cold reader cannot scan files here.
+  if (process.env.NODE_ENV === "test") {
+    sessionsCacheGenerations.include++;
+    return enrichCachedSessions("include", getAllSessions());
+  }
+  throw new Error("Session list is not primed; use getCachedSessionsAsync");
+}
+
+/** The materialized list for `slice`, enriched and installed as the cache
+ * snapshot, or null while the slice has no coverage. Concurrent callers share
+ * one worker round trip and one enrichment pass. */
+function refreshFromIndex(
+  slice: SessionArchiveSlice,
+): Promise<UnifiedSession[] | null> {
+  return (indexedRefreshes[slice] ??= indexedSessions(slice)
+    .then((indexed) => (indexed ? enrichCachedSessions(slice, indexed) : null))
+    .finally(() => {
+      indexedRefreshes[slice] = null;
+    }));
 }
 
 /**
@@ -340,8 +419,8 @@ export async function getCachedSessionsAsync(
   // whole-list deserializations.
   const needsRefresh = !cached || Date.now() - cached.ts >= CACHE_TTL;
   if (cached && !needsRefresh) return cached.data;
-  const indexed = indexedSessions(slice);
-  if (indexed) return enrichCachedSessions(slice, indexed);
+  const indexed = await refreshFromIndex(slice);
+  if (indexed) return indexed;
 
   if (!sessionsRefreshes[slice]) {
     const generation = ++sessionsCacheGenerations[slice];
@@ -350,8 +429,8 @@ export async function getCachedSessionsAsync(
       slice,
       catalogNativeSessionRows,
     )
-      .then((data) => {
-        upsertIndexedSessions(data, slice);
+      .then(async (data) => {
+        await upsertIndexedSessions(data, slice);
         const current = sessionsCaches[slice];
         if (
           sessionsCacheGenerations[slice] === generation ||
@@ -391,7 +470,7 @@ export async function getSessionListSnapshotAsync(
   // Share the cache's cooperative fallback instead of starting an independent
   // full scan. This also persists coverage in the list projection, so boot
   // maintenance cannot rescan every historical session again 90 seconds later.
-  return indexedSessions(slice) ?? getCachedSessionsAsync(slice);
+  return (await indexedSessions(slice)) ?? getCachedSessionsAsync(slice);
 }
 
 /**
@@ -595,7 +674,9 @@ export function findSession(sessionId: string): UnifiedSession | undefined {
   // newly created session, and they should never scan the list to open one.
   const direct = readNativeSession(sessionId) ?? readSlackSession(sessionId);
   if (direct) return enrichSessionRuntime([direct])[0];
-  return getCachedSessions().find(
+  // A synchronous alias lookup can only use the already-primed snapshot.
+  // Callers needing a cold authoritative lookup must await findSessionAsync.
+  return peekCachedSessions().find(
     (s) => s.id === sessionId || s.aliasIds?.includes(sessionId),
   );
 }
@@ -753,14 +834,14 @@ export function updateSessionFile(
 
 /** The file changed: refresh the list projection, publish the row, and tell
  * the catalog which revision the export now carries. */
-function afterSessionMetadataExport(
+async function afterSessionMetadataExport(
   sessionId: string,
   rev: number,
 ): Promise<void> {
-  const indexed = readNativeSessionListRow(sessionId);
+  const indexed = targetedSessionListRow(sessionId);
   if (indexed) {
     enrichSessionRuntime([indexed]);
-    upsertIndexedSession(indexed);
+    await upsertIndexedSession(indexed);
   }
   markSessionListStale();
   publishSessionRow(sessionId);
@@ -837,13 +918,18 @@ async function catalogNativeSessionRows(): Promise<
  * `getCachedSessions()` reader would fill it by reading every session file.
  */
 export async function primeSessionListIndex(): Promise<void> {
-  if (indexedSessions("include")) return;
+  if (await indexedCoverage("include")) {
+    // Coverage persists across restarts, but the gateway's memory snapshot
+    // does not. Populate it before synchronous memory-only readers run.
+    await getCachedSessionsAsync("include");
+    return;
+  }
   const startedAt = performance.now();
   const sessions = await getAllSessionsAsync(
     "include",
     catalogNativeSessionRows,
   );
-  upsertIndexedSessions(sessions, "include");
+  await upsertIndexedSessions(sessions, "include");
   enrichCachedSessions("include", sessions);
   console.log(
     `[session-cache] primed the list index with ${sessions.length} session(s) in ${Math.round(performance.now() - startedAt)}ms`,

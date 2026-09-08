@@ -954,6 +954,11 @@ export async function startSessionKernelService(
         route.mutation,
       );
     if (route.scope === "catalog_read") return sendToSlot(slots[0], request);
+    // Central-only writes serialize on slot zero (one turn in flight) and
+    // never wait on session mailboxes: nothing a session lane commits can
+    // overlap the rows they touch, so the global barrier would only add the
+    // failure mode of an unrelated busy session.
+    if (route.scope === "central_write") return sendToSlot(slots[0], request);
 
     if (request.t === "hello") return sendToSlot(slots[0], request);
     if (queuedGlobalTurns >= MAX_GLOBAL_TURNS)

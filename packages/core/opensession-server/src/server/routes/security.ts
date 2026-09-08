@@ -84,7 +84,7 @@ export async function handleSecurityRoutes(
           { error: "Recurring scans support one repository at a time" },
           { status: 400 },
         );
-      const result = createAutomation({
+      const result = await createAutomation({
         name: `deepsec ${recurrence} scan — ${profile?.name || "custom"}`,
         prompt: buildScanPrompt(getRepo(repos[0]), profile, instructions),
         schedule: recurrence === "daily" ? "0 13 * * *" : "0 8 * * 0",

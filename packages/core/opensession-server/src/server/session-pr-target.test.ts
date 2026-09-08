@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { PrInfo } from "./pr-cache";
@@ -10,7 +10,15 @@ import {
   shareWorkspacePrRefs,
 } from "./session-pr-target";
 import type { UnifiedSession } from "./types";
-import type { Workspace } from "./workspaces";
+import {
+  SessionKernelStore,
+  __setSessionKernelStoreForTest,
+} from "./session-kernel";
+import {
+  __resetWorkspaceProjectionForTest,
+  createWorkspace,
+  type Workspace,
+} from "./workspaces";
 
 const session = {
   id: "bks-ghpr-5286-review",
@@ -365,17 +373,33 @@ describe("sessionPrBranch", () => {
 });
 
 describe("flat PR fields on a review checkout", () => {
-  // The workspace has to come from disk here: shareWorkspacePrRefs reads it
-  // through the default reader, the same way the list and detail routes do.
+  // The workspace has to come from the store here: shareWorkspacePrRefs reads
+  // it through the default reader (the memory projection), the same way the
+  // list assembly does. A fresh in-memory kernel store holds it, and the
+  // legacy export lands under a scratch state root.
   const stateDir = mkdtempSync(join(tmpdir(), "pr-target-"));
   const previous = process.env.OPENSESSION_STATE_DIR;
-  process.env.OPENSESSION_STATE_DIR = stateDir;
-  mkdirSync(join(stateDir, ".opensession-workspaces"), { recursive: true });
-  writeFileSync(
-    join(stateDir, ".opensession-workspaces", `${workspace.id}.json`),
-    JSON.stringify({ ...workspace, repo: "tella-fusion" }),
-  );
+  let store: SessionKernelStore;
+  let previousStore: SessionKernelStore | undefined;
+  beforeEach(async () => {
+    process.env.OPENSESSION_STATE_DIR = stateDir;
+    store = new SessionKernelStore(":memory:");
+    previousStore = __setSessionKernelStoreForTest(store);
+    __resetWorkspaceProjectionForTest();
+    await createWorkspace({
+      id: workspace.id,
+      name: workspace.name,
+      createdBy: workspace.createdBy,
+      createdAt: workspace.createdAt,
+      prNumber: workspace.prNumber,
+      branch: workspace.branch,
+      repo: "tella-fusion",
+    });
+  });
   afterEach(() => {
+    __setSessionKernelStoreForTest(previousStore);
+    store.close();
+    __resetWorkspaceProjectionForTest();
     process.env.OPENSESSION_STATE_DIR = previous;
     rmSync(stateDir, { recursive: true, force: true });
   });

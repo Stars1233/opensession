@@ -10,7 +10,9 @@ describe("installUnhandledRejectionGuard", () => {
     expect(installUnhandledRejectionGuard(log)).toBe(true);
     expect(installUnhandledRejectionGuard(log)).toBe(false);
 
-    const reason = new Error("Session kernel actor timed out handling delivery snapshot");
+    const reason = new Error(
+      "Session kernel actor timed out handling delivery snapshot",
+    );
     process.emit("unhandledRejection", reason, Promise.resolve());
 
     expect(logged).toEqual([

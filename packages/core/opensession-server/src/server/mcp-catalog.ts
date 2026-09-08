@@ -505,8 +505,8 @@ export const MCP_SERVER_CATALOG: McpServerCatalogEntry[] = [
     build: () =>
       createSelfImproveMcpServer({
         automationName: AUTOMATION,
-        getOwn: () => null,
-        updateOwnPrompt: () => unused("updateOwnPrompt"),
+        getOwn: async () => null,
+        updateOwnPrompt: async () => unused("updateOwnPrompt"),
       }),
   },
   {

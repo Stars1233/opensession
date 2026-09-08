@@ -33,11 +33,7 @@ export function scaledLaneBudgetMs(
   maxMs = LANE_BUDGET_MAX_MS,
 ): number {
   const cap = Math.max(baseMs, maxMs);
-  if (
-    ioSomeAvg10 === null ||
-    !Number.isFinite(ioSomeAvg10) ||
-    ioSomeAvg10 <= 0
-  )
+  if (ioSomeAvg10 === null || !Number.isFinite(ioSomeAvg10) || ioSomeAvg10 <= 0)
     return baseMs;
   const scale = Math.min(1, ioSomeAvg10 / IO_PRESSURE_FULL_SCALE);
   return Math.round(baseMs + (cap - baseMs) * scale);

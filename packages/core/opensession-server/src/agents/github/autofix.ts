@@ -321,7 +321,7 @@ export async function runAutoFix(
       };
       const rr = await runReview(
         ref,
-        resolveReviewConfig().config,
+        (await resolveReviewConfig()).config,
         onSessionCreated,
         /*force*/ true,
       ).catch((e) => {

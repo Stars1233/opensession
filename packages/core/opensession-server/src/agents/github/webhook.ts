@@ -98,11 +98,13 @@ function prRef(pr: PrPayload, ghRepo?: string): PrRef | null {
 }
 
 /** Resolve review config from the seeded automation (its enabled flag + prompt/model). */
-export function resolveReviewConfig(): {
+export async function resolveReviewConfig(): Promise<{
   autoEnabled: boolean;
   config: ReviewConfig;
-} {
-  const automation = listAutomations().find((a) => a.eventKey === PR_EVENT_KEY);
+}> {
+  const automation = (await listAutomations()).find(
+    (a) => a.eventKey === PR_EVENT_KEY,
+  );
   return {
     autoEnabled: !!automation?.enabled,
     config: {
@@ -304,7 +306,10 @@ export async function handleGithubPrEvent(
           headRef,
           author: pr.user?.login || "",
         });
-        const fired = fireAutomationsForEvent(PR_MERGED_EVENT_KEY, payload);
+        const fired = await fireAutomationsForEvent(
+          PR_MERGED_EVENT_KEY,
+          payload,
+        );
         if (fired)
           console.log(
             `[github] PR #${pr.number} merged → fired ${fired} docs-sync automation(s)`,
@@ -368,7 +373,7 @@ export async function handleGithubPrEvent(
       const labeled = (pr.labels || []).some((l) =>
         labelMatches(l.name, LABEL_REVIEW),
       );
-      const { autoEnabled } = resolveReviewConfig();
+      const { autoEnabled } = await resolveReviewConfig();
       if (labeled || autoEnabled) {
         // Pushes debounce (hot PRs got one review per push — #4913: 20 pushes
         // ≈ $131/day of review spend on 2026-07-17); first reviews of a PR
@@ -411,7 +416,7 @@ export async function fireReview(
   _byLabel: boolean,
   preflightDetails?: PrAutomationDetails,
 ): Promise<ReviewResult | null> {
-  const { config } = resolveReviewConfig();
+  const { config } = await resolveReviewConfig();
   const result = await runReview(
     ref,
     config,

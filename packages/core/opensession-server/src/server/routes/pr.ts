@@ -113,7 +113,7 @@ async function findPrSessionAsync(sessionId: string) {
   if (!session.workspaceId) return session;
   return projectWorkspacePrRefs(
     session,
-    indexedWorkspaceMemberSessions(session.workspaceId).map(enrich),
+    (await indexedWorkspaceMemberSessions(session.workspaceId)).map(enrich),
   );
 }
 

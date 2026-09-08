@@ -79,7 +79,7 @@ describe("catalog-backed list rebuild", () => {
     });
 
     // Not complete yet: the rebuild still scans the directory.
-    expect(indexedSessions("include")).toBeNull();
+    expect(await indexedSessions("include")).toBeNull();
     const scanned = await getCachedSessionsAsync("include");
     expect(scanned.map((s) => s.id)).toEqual(["file-only"]);
 
@@ -90,10 +90,10 @@ describe("catalog-backed list rebuild", () => {
     const { invalidateSessionsCache } = await import("./session-cache");
     invalidateSessionsCache();
     await sessionMetadata({ op: "mark_catalog_complete" });
-    expect(indexedSessions("include")).toBeNull();
+    expect(await indexedSessions("include")).toBeNull();
 
     await primeSessionListIndex();
-    const primed = indexedSessions("include");
+    const primed = await indexedSessions("include");
     expect(primed?.map((s) => s.id)).toEqual(["catalog-only"]);
     expect(primed?.[0]).toMatchObject({
       title: "Only in the catalog",
@@ -102,7 +102,7 @@ describe("catalog-backed list rebuild", () => {
 
     // Priming an index that already has coverage is a no-op.
     await primeSessionListIndex();
-    expect(indexedSessions("include")?.map((s) => s.id)).toEqual([
+    expect((await indexedSessions("include"))?.map((s) => s.id)).toEqual([
       "catalog-only",
     ]);
   });
@@ -170,7 +170,7 @@ describe("catalog-backed list rebuild", () => {
         worktreeDir: null,
         transcriptPath: null,
       }) as unknown as import("./types").UnifiedSession;
-    upsertIndexedSessions(
+    await upsertIndexedSessions(
       [
         row("pr-a", "feat-x"),
         row("pr-review", "feat-x-os-review"),
@@ -182,13 +182,13 @@ describe("catalog-backed list rebuild", () => {
     const socket = { data: { sidebarScope: null }, send() {} };
     allClients.add(socket as never);
     try {
-      publishSessionRowsForBranch("feat-x");
+      await publishSessionRowsForBranch("feat-x");
       expect(__scheduledSessionRowsForTest().sort()).toEqual([
         "pr-a",
         "pr-review",
       ]);
       __resetSessionRowPublishesForTest();
-      publishSessionRowsForBranch("nobody");
+      await publishSessionRowsForBranch("nobody");
       expect(__scheduledSessionRowsForTest()).toEqual([]);
     } finally {
       allClients.delete(socket as never);

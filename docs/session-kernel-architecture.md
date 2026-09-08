@@ -434,6 +434,53 @@ list, and only then builds the Slack thread index from that snapshot
 (`ensureSlackLinkIndex`). A seeded session's first real write commits the
 next revision from the file and supersedes the seeded row.
 
+### Central catalog documents
+
+Gateway state that belongs to no session (workspace and automation
+definitions, per-user overlays) is a namespaced document set in the central
+kernel database: `session_kernel_catalog_documents`, keyed by
+`(namespace, key)`, schema 34. `sessionCatalogDocument` in
+`session-kernel/kernel.ts` is the only entry point and speaks the
+`catalog_document` reducer (`catalog-document-protocol.ts`,
+`catalog-document-store.ts`). Reads (`get`, `get_many`, `page`,
+`import_complete`) ride the catalog lane; mutations (`put`, `seed`,
+`mark_import_complete`) take the `central_write` route: they serialize on
+the catalog slot, which runs one turn at a time, but skip the global barrier,
+because no session mailbox can overlap rows that belong to no session. A
+busy unrelated session therefore never fails a preference or automation
+write, while true global requests still wait for every mailbox. No request opens a per-session actor database, and the kernel
+never falls back to a file: with the actor attached the gateway has no
+synchronous path to these rows, and the in-process compatibility store is
+test-only, as for session metadata.
+
+`put` is a compare-and-set on `rev` with request-id replay. The kernel assigns
+the revision; the caller passes the revision it read (`null` for "no row") and
+gets `committed`, `duplicate` (the same request id already committed the
+current revision), or `conflict` with the stored truth to re-apply on top of.
+A delete writes a tombstone (`value: null`) that keeps its revision, so a
+writer that read the live row conflicts instead of resurrecting it; `get`
+returns tombstones and `page` includes them so importers and cache rebuilds
+see deletions. A page is bounded by rows and by bytes: SQLite takes at most
+`limit` rows first, then stops the page once the rows it carries reach 8 MiB
+of keys and values, but always returns the first row, so a page is never
+empty while rows remain and costs O(limit) however large the namespace. Callers therefore
+continue from the last key until they receive an empty page; a short page
+does not mean the end. `get_many` answers a bounded key set in one indexed
+`IN` lookup, omitting missing keys and keeping tombstones, so a list-shaped
+lookup (sidebar workspace audiences) is one actor request instead of one per
+key. Because a trimmed answer would read as missing keys, `get_many` refuses
+a set whose rows exceed 32 MiB instead of truncating it; callers narrow the
+batch (seven full-size documents always fit). `seed` is the one-time file import: it inserts revision-1 rows
+for keys with no row at all and never overwrites a live row or a tombstone.
+Seeded rows carry the reserved request id `seed`, which a `put` may not use,
+so a replay check never mistakes a seeded row for its own receipt.
+Each namespace has its own import-complete flag in
+`session_kernel_migrations`. Namespaces are printable ASCII up to 128 bytes,
+keys up to 512 bytes, documents up to 4 MiB, pages, key batches, and seed
+batches up to 1,000 rows, one key batch at most 256 KiB of keys, one
+`get_many` answer at most 32 MiB, one page at most 8 MiB, and one seed batch
+at most 32 MiB.
+
 The transcript database keeps its own `changeSeq`, which is the client replay
 cursor. SessionKernel also records lifecycle and metadata changes in its own
 change stream. Token deltas remain ephemeral.
