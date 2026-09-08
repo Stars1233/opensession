@@ -11,6 +11,7 @@ import {
 import { startAccountHealthMonitor } from "./src/server/account-health";
 import { startAnalyticsPrewarm } from "./src/server/analytics";
 import { startDiskGc } from "./src/server/disk-gc";
+import { installUnhandledRejectionGuard } from "./src/server/process-guards";
 import { startWorktreeReaper } from "./src/server/worktree-reaper";
 import { startPortalReaper } from "./src/server/portal-supervisor";
 import { startRunnerPortalReaper } from "./src/server/runner-portals";
@@ -194,6 +195,9 @@ function isLoopbackHostname(hostname: string): boolean {
 // peers because those peers start only after the old gateway is fenced.
 const precheckRuntimePeers =
   process.env.OPENSESSION_GATEWAY_PRECHECK_PEERS === "1";
+// Before any effect: an unawaited kernel RPC rejecting during boot or serving
+// must log, not exit the gateway (see process-guards.ts).
+installUnhandledRejectionGuard();
 if (process.env.OPENSESSION_GATEWAY_ROLE === "standby")
   preloadPreparedFrontend();
 if (precheckRuntimePeers)

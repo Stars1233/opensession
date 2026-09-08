@@ -16,6 +16,7 @@ import {
   startGatewayTcpProxy,
   type GatewayTcpProxyMetrics,
 } from "./gateway-tcp-proxy";
+import { installUnhandledRejectionGuard } from "./process-guards";
 import { createStableFrontendResponder } from "./stable-frontend";
 import { publishGatewayBackendPort } from "./gateway-routing";
 
@@ -800,7 +801,11 @@ export async function discoverRuntimePeerGenerations(
         "utf8",
       ));
   const sleep = options.sleep ?? Bun.sleep;
-  for (let attempt = 0; attempt < (options.attempts ?? 30); attempt += 1) {
+  // A fail-stopped session kernel takes 5 to 8 s to exit and come back under
+  // systemd. Waiting only 3 s made every kernel restart cost two or three
+  // extra gateway boots that died on "runtime peer generations are
+  // unavailable" (2026-09-08), so wait long enough to ride one kernel restart.
+  for (let attempt = 0; attempt < (options.attempts ?? 150); attempt += 1) {
     try {
       const [kernelResponse, executorText] = await Promise.all([
         fetchReady(),
@@ -1264,6 +1269,7 @@ async function runSupervisor(): Promise<void> {
 }
 
 if (import.meta.main) {
+  installUnhandledRejectionGuard();
   if (
     [
       "handoff",

@@ -35,12 +35,20 @@ messages. The service owns one serial promise mailbox per canonical session ID
 and gives that actor stable lane affinity, so process-local reducer caches remain
 coherent and two turns for one session cannot overlap. Many actors share each
 lane, while the short isolated SQLite wait bound leaves unrelated lanes
-available. A failed lane is restarted without stopping healthy lanes;
-system-catalog ambiguity still fail-stops the service. A fail-stop withdraws
+available. Each actor turn has a 5 s response budget that stretches linearly
+with host IO pressure (`/proc/pressure/io` `some avg10`, capped at 12 s, below
+the gateway's 15 s RPC deadline) so a host thrashing on swap or a throttled
+volume finishes slow turns instead of restarting healthy lanes
+(`lane-budget.ts`; `/ready` reports the current `laneBudgetMs`). A failed lane
+is restarted without stopping healthy lanes; system-catalog ambiguity still
+fail-stops the service. A fail-stop withdraws
 the listener and, under systemd, exits the process so `Restart=always` brings a
 fresh service up: a live process with no listener is a wedge that every gateway
 boot fails against ("runtime peer generations are unavailable") until an
-operator restarts the unit. After startup ownership
+operator restarts the unit. The gateway supervisor waits about 15 s for the
+peer generations, long enough to ride out one kernel restart, and an unhandled
+promise rejection in the gateway is logged rather than allowed to exit the
+process (`process-guards.ts`). After startup ownership
 checks, actor turns perform bounded SQLite
 reductions only. They do not bind sockets, perform filesystem or process work,
 invoke models, or execute outbox effects. Physical filesystem, network,

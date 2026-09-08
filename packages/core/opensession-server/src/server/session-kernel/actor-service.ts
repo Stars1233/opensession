@@ -20,14 +20,17 @@ import {
 import { READ_METHODS } from "./store-routing";
 import { workerEntry } from "../../runner-host/exe";
 import { chooseSessionLane, type LaneLoad } from "./lane-placement";
+import { createLaneBudget, LANE_BUDGET_MAX_MS } from "./lane-budget";
 import type { SessionKernelStoreHostMetrics } from "./store-host";
 import { runtimeGeneration } from "../runtime-generation";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3849;
 const RUNTIME_GENERATION = runtimeGeneration();
-// Must remain below the gateway transport's 8s fail-stop budget, including
-// quarantine/restart bookkeeping after an ambiguous lane turn.
+// Base budget for one actor turn. Under host IO pressure it stretches up to
+// LANE_BUDGET_MAX_MS (lane-budget.ts), which stays below the gateway RPC
+// client's 15 s deadline with room for quarantine/restart bookkeeping after an
+// ambiguous lane turn.
 const ACTOR_RESPONSE_TIMEOUT_MS = 5_000;
 // Starting a fresh Worker includes module loading and SQLite initialization.
 // It has no in-flight actor mutation, so it can wait longer than an actor turn
@@ -161,6 +164,14 @@ export type SessionKernelServiceOptions = {
   /** Bounded session execution lanes. A separate catalog lane is always kept. */
   workerCount?: number;
   responseTimeoutMs?: number;
+  /**
+   * Upper bound for the IO-pressure-scaled turn budget. Defaults to
+   * LANE_BUDGET_MAX_MS for the production budget; an explicit
+   * `responseTimeoutMs` disables scaling unless this is also set.
+   */
+  responseTimeoutMaxMs?: number;
+  /** Host IO pressure source (`/proc/pressure/io` some avg10) for tests. */
+  ioPressure?: () => number | null;
   /** Explicit isolated/dev database path inherited by Worker isolates. */
   databasePath?: string;
   mutationMailboxLimit?: number;
@@ -271,6 +282,15 @@ export async function startSessionKernelService(
     options.responseTimeoutMs ?? ACTOR_RESPONSE_TIMEOUT_MS;
   if (!Number.isFinite(responseTimeoutMs) || responseTimeoutMs < 100)
     throw new Error("Invalid session kernel worker timeout");
+  const laneBudgetMs = createLaneBudget({
+    baseMs: responseTimeoutMs,
+    maxMs:
+      options.responseTimeoutMaxMs ??
+      (options.responseTimeoutMs === undefined
+        ? LANE_BUDGET_MAX_MS
+        : responseTimeoutMs),
+    readIoPressure: options.ioPressure,
+  });
   const mutationMailboxLimit = mailboxLimit(
     options.mutationMailboxLimit,
     "OPENSESSION_SESSION_KERNEL_MUTATION_MAILBOX",
@@ -544,7 +564,7 @@ export async function startSessionKernelService(
     const timeoutMs =
       turn.request.t === "hello"
         ? Math.max(responseTimeoutMs, ACTOR_HANDSHAKE_TIMEOUT_MS)
-        : responseTimeoutMs;
+        : laneBudgetMs();
     const timer = setTimeout(() => {
       slot.metrics.timeouts += 1;
       const error = new Error(
@@ -1025,6 +1045,8 @@ export async function startSessionKernelService(
               ready: sessionSlots.filter((slot) => slot.ready).length,
               capacity: sessionSlots.length,
             },
+            // Current per-turn budget after host IO pressure scaling.
+            laneBudgetMs: laneBudgetMs(),
             // Per-lane occupancy and cumulative counters. Index 0 is the
             // catalog lane; the rest are session execution lanes. Counters are
             // monotonic for the service lifetime so operators can compute
