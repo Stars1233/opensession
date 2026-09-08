@@ -134,6 +134,26 @@ describe("per-session session kernel storage", () => {
     host.close();
   });
 
+  test("bounds each lane's default SQLite caches", () => {
+    const path = paths();
+    const host = new SessionKernelStoreHost(path.central, path.isolated);
+    for (let index = 0; index < 17; index += 1) {
+      const sessionId = `bounded-cache-${index}`;
+      host.call("setRunState", [
+        { sessionId, state: "idle", event: "cache-bound" },
+      ]);
+      host.transcript({ op: "tail", sessionId, limit: 1 });
+    }
+
+    expect(host.metrics()).toMatchObject({
+      kernelStoreCacheMisses: 17,
+      kernelStoreCacheEvictions: 1,
+      transcriptStoreCacheMisses: 17,
+      transcriptStoreCacheEvictions: 1,
+    });
+    host.close();
+  });
+
   test("rejects an oversized transcript before claiming placement", () => {
     const path = paths();
     const sessionId = "oversized-transcript";

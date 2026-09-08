@@ -18,6 +18,9 @@ import {
 import { envCapacity } from "../shared/env-capacity";
 
 const CENTRAL_STORE_FAILURE = "SESSION_KERNEL_CENTRAL_STORE_FAILURE";
+// A lane executes one session at a time. Keep a small LRU for locality without
+// multiplying hundreds of live SQLite connections across the worker pool.
+const DEFAULT_ACTIVE_SESSION_STORES = 16;
 // Catalog discovery returns ids only. Each candidate then claims work on its
 // own session lane, in parallel across lanes, and this bound keeps crash
 // recovery from flooding those latency-sensitive mailboxes in one pass. It is
@@ -119,7 +122,10 @@ export class SessionKernelStoreHost {
     private readonly isolatedRoot = `${dirname(centralPath)}/session-kernel-sessions`,
     private readonly maxOpenSessionStores = Math.max(
       1,
-      Number(process.env.OPENSESSION_SESSION_KERNEL_ACTIVE_STORES ?? 64),
+      Number(
+        process.env.OPENSESSION_SESSION_KERNEL_ACTIVE_STORES ??
+          DEFAULT_ACTIVE_SESSION_STORES,
+      ),
     ),
   ) {
     if (!Number.isInteger(maxOpenSessionStores) || maxOpenSessionStores > 1_024)

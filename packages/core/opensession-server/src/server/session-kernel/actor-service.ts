@@ -29,6 +29,10 @@ const RUNTIME_GENERATION = runtimeGeneration();
 // Must remain below the gateway transport's 8s fail-stop budget, including
 // quarantine/restart bookkeeping after an ambiguous lane turn.
 const ACTOR_RESPONSE_TIMEOUT_MS = 5_000;
+// Starting a fresh Worker includes module loading and SQLite initialization.
+// It has no in-flight actor mutation, so it can wait longer than an actor turn
+// without weakening the gateway's ambiguity fence.
+const ACTOR_HANDSHAKE_TIMEOUT_MS = 30_000;
 const DEFAULT_SESSION_WORKERS = Math.min(
   32,
   Math.max(4, availableParallelism()),
@@ -537,13 +541,17 @@ export async function startSessionKernelService(
     const generation = slot.generation;
     const startedAt = Date.now();
     slot.metrics.queueWaitMsTotal += Math.max(0, startedAt - turn.enqueuedAt);
+    const timeoutMs =
+      turn.request.t === "hello"
+        ? Math.max(responseTimeoutMs, ACTOR_HANDSHAKE_TIMEOUT_MS)
+        : responseTimeoutMs;
     const timer = setTimeout(() => {
       slot.metrics.timeouts += 1;
       const error = new Error(
         `Session actor lane ${slot.index} response timed out`,
       );
       restartSessionSlot(slot, error, generation);
-    }, responseTimeoutMs);
+    }, timeoutMs);
     slot.pending.set(rpcId, {
       ...turn,
       timer,

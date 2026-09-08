@@ -356,6 +356,76 @@ describe("session kernel actor service", () => {
     }
   });
 
+  test("gives a replacement lane time to start after an actor turn times out", async () => {
+    const failures: Error[] = [];
+    const isolatedService = await startSessionKernelService({
+      port: 0,
+      token,
+      workerCount: 1,
+      responseTimeoutMs: 100,
+      databasePath: join(
+        stateDir,
+        "sessions",
+        "delayed-restart-session-kernel.sqlite",
+      ),
+      workerUrl: new URL(
+        "./testing/delayed-restart-worker.ts",
+        import.meta.url,
+      ),
+      onFailed: (error) => failures.push(error),
+    });
+    try {
+      const helloResponse = await fetch(`${isolatedService.url}/rpc`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          version: SESSION_KERNEL_TRANSPORT_VERSION,
+          actorVersion: SESSION_KERNEL_ACTOR_VERSION,
+          request: {
+            t: "hello",
+            rpcId: "delayed-restart-handshake",
+            version: SESSION_KERNEL_ACTOR_VERSION,
+          },
+        }),
+      });
+      const hello = (await helloResponse.json()) as { serviceEpoch: string };
+      expect(helloResponse.status).toBe(200);
+
+      const timedOut = await fetch(`${isolatedService.url}/rpc`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          version: SESSION_KERNEL_TRANSPORT_VERSION,
+          actorVersion: SESSION_KERNEL_ACTOR_VERSION,
+          serviceEpoch: hello.serviceEpoch,
+          request: {
+            t: "call",
+            rpcId: "stalled-session-read",
+            outputBytes: 1024,
+            request: {
+              t: "store",
+              method: "turnSnapshot",
+              args: ["slow-session"],
+            },
+          },
+        }),
+      });
+      expect(timedOut.status).toBe(429);
+
+      await Bun.sleep(400);
+      expect(failures).toEqual([]);
+      expect((await fetch(`${isolatedService.url}/ready`)).status).toBe(200);
+    } finally {
+      isolatedService.stop();
+    }
+  });
+
   test("a fail-stop withdraws the listener and reports through onFailed", async () => {
     const failures: Error[] = [];
     const isolatedService = await startSessionKernelService({
