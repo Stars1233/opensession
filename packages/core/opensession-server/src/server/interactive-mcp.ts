@@ -44,6 +44,7 @@ import { papercutsEnabledForRepo } from "./papercuts";
 import { defaultRepo, productName } from "./config";
 import { githubCredentialForRun } from "./github-auth";
 import { REPOS, getRepo, sessionRepoId } from "./worktree";
+import { labelPr } from "./pr-labels";
 import {
   createPullRequestMcpServer,
   ownerGithubUser,
@@ -246,6 +247,7 @@ export function interactiveMcpServers(
                 sharedCheckout: !!p.sharedCheckout,
               })),
             linkPr: (input) => linkPr(sessionId, input),
+            labelPr: (input) => labelPr(sessionId, input),
           }),
           // Durable repo/user/team memory, shared both ways with Slack's
           // channel memory. Write tools are

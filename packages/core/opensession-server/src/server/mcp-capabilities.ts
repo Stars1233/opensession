@@ -63,9 +63,10 @@ export const INTERNAL_MCP_CAPABILITIES = {
       "Publish a workspace directory as a durable internal web app when the deliverable needs to stay live beyond this run.",
   },
   "opensession-repos": {
-    summary: "Attach or switch repos, and link a PR to this session.",
+    summary:
+      "Attach or switch repos, link a PR to this session, and label PRs in any registered repo.",
     guidance:
-      "Attach or switch repositories and link pull requests while preserving this session's multi-repo context.",
+      "Attach or switch repositories and link pull requests while preserving this session's multi-repo context. Use label_pull_request to label a PR in any registered repo, including one your shell cannot reach.",
   },
   "opensession-memory": {
     summary:

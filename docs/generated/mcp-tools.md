@@ -49,7 +49,7 @@ touches an in-process tool:
 | [`opensession-humans`](#opensession-humans) | 3 | interactive, Slack loop, goal wake | Interactive runs need a session id (the answer routes back to it). |
 | [`opensession-keychain`](#opensession-keychain) | 3 | interactive | Needs a session id. |
 | [`opensession-publish`](#opensession-publish) | 4 | interactive | Needs a session id. |
-| [`opensession-repos`](#opensession-repos) | 4 | interactive | Needs a session id. |
+| [`opensession-repos`](#opensession-repos) | 5 | interactive | Needs a session id. |
 | [`opensession-memory`](#opensession-memory) | 9 | interactive | Needs a session id. |
 | [`opensession-web`](#opensession-web) | 3 | interactive, goal wake | Needs a session id. |
 | [`opensession-portals`](#opensession-portals) | 7 | interactive | Needs a session id. |
@@ -71,7 +71,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-30 servers, 133 tools.
+30 servers, 134 tools.
 
 ## opensession-sessions
 
@@ -495,7 +495,7 @@ Stop a published app. It stays registered with its versions intact and can be st
 
 ## opensession-repos
 
-Attach or switch repos, and link a PR to this session.
+Attach or switch repos, link a PR to this session, and label PRs in any registered repo.
 
 - **Source** `packages/core/opensession-server/src/agents/slack/repos-tools.ts`
 - **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`
@@ -525,6 +525,12 @@ Switch this session's PRIMARY repo when it was created against the wrong registe
 `mcp__opensession-repos__link_pr` · input: `url` (string), `repo` (string), `number` (number), `branch` (string)
 
 Link a pull request to this session so it shows in the session's Review tab beside the branch-derived PRs. Use when you open a follow-up PR on a different branch, or when a related PR (yours or someone else's) belongs with this session's work. PRs you open on this session's own branch (or an attached repo's branch) are shown automatically — don't link those.
+
+### `label_pull_request`
+
+`mcp__opensession-repos__label_pull_request` · input: `url` (string), `repo` (string), `number` (number), `add` (string[]), `remove` (string[])
+
+Add or remove labels on a pull request in any registered GitHub repo, including one this session does not have checked out. Labels are applied as the bot: the gateway mints a token for that repo, so this works where `gh` in your shell cannot see the repo. Pass the PR URL, or a repo id and number.
 
 ## opensession-memory
 

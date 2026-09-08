@@ -165,6 +165,7 @@ mounted; the shell credential is the bot either way.
 | Force-push own branch               | yes   | lease, as bot | no         | no       | no      |
 | Open or edit a PR                   | yes   | as owner      | as bot     | no       | no      |
 | Comment, reply in threads           | yes   | as bot        | as bot     | as bot   | as bot  |
+| Label a PR, any registered repo     | yes   | as bot        | own repo   | no       | no      |
 | Resolve or unresolve a thread       | yes   | as bot        | as bot     | no       | as bot  |
 | Submit an approving review          | yes   | no            | no         | no       | no      |
 | Merge                               | yes   | card          | no         | no       | no      |

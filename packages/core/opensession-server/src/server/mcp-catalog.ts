@@ -272,6 +272,7 @@ export const MCP_SERVER_CATALOG: McpServerCatalogEntry[] = [
           { id: "example", defaultBranch: "main", sharedCheckout: false },
         ],
         linkPr: () => unused("linkPr"),
+        labelPr: () => unused("labelPr"),
       }),
   },
   {
