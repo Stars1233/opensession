@@ -230,7 +230,8 @@ export function buildSessionContext(input: {
   author?: GitIdentity | null;
   /** Set when this turn was started by a connected person: the gateway's
    *  `open_pull_request` tool opens PRs as them, so skip the bot-attribution
-   *  assignee. The run's shell never holds their token. */
+   *  assignee. In code mode the shell holds their token too
+   *  (pi-runner runGithubEnv). */
   githubUserLogin?: string | null;
   /** `Name <email>` for the commit trailer (pi-runner GIT_COAUTHOR_ENV). */
   coAuthor?: string;

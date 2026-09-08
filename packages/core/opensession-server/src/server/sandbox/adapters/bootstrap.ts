@@ -101,7 +101,9 @@ import {
   toPiModel,
 } from "../../models";
 import { filterMcpServers } from "../../runner-shared";
-import { GITHUB_RUN_AUTH_FILE_ENV } from "../../github-auth";
+import { githubCredentialUser } from "../../auto-continue";
+import { GITHUB_RUN_AUTH_FILE_ENV, githubAuthEnv } from "../../github-auth";
+import { isMachineActor } from "../../session-actors";
 import {
   appendTranscriptEntries,
   recordEngineSessionOwner,
@@ -2163,14 +2165,21 @@ function makeRemoteLauncher(
       secureFiles.push(claudeAccountsPath, REMOTE_MCP_CONFIG);
 
       // GitHub credentials are projected through a private, run-scoped file,
-      // never spec.json, argv, or the persisted origin. Every run, whoever
-      // started it, receives a freshly minted repository-scoped App token:
-      // the code set for code mode, the read set for ask mode (the review
-      // workflows chew on untrusted PR content and can print their
-      // environment). No run ever receives a person's token
-      // (docs/github-authority.md).
-      let githubAuth: Record<string, string> = {};
-      {
+      // never spec.json, argv, or the persisted origin. A code run a connected
+      // person started acts as them (same gate as pi-runner's runGithubEnv:
+      // trusted profile, code mode, a human sender). Every other run receives
+      // a freshly minted repository-scoped App token: the code set for code
+      // mode, the read set for ask mode (the review workflows chew on
+      // untrusted PR content and can print their environment). Automations
+      // and machine senders never receive a person's token.
+      const githubPerson = githubCredentialUser(spec.user, spec.author?.name);
+      let githubAuth: Record<string, string> =
+        !automationProfile &&
+        spec.mode === "code" &&
+        !isMachineActor(githubPerson)
+          ? githubAuthEnv(githubPerson)
+          : {};
+      if (!githubAuth.GH_TOKEN) {
         // The sandbox origin is mutable by repository setup code. Bind service
         // authority only to the server-owned repo id recorded at ensure time.
         const repoId = readRemoteState(provider, sandboxId)?.repoId;

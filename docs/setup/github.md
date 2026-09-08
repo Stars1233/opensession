@@ -97,16 +97,34 @@ rewritten to HTTPS for that process so host keys cannot bypass the App.
 
 ## Who holds which credential
 
-No agent run ever holds a person's token. Every run, whoever started it,
-receives a short-lived installation token scoped to its repository: the code
-permission set in code mode (push a branch, comment, reply, resolve threads,
-read checks and Actions logs), the read set in ask mode. A person's token is
-used only by the gateway itself: the UI buttons (merge, close, review,
-comment) and the `open_pull_request` / `edit_pull_request` tools a turn gets
-when a connected person started it. The design and its reasoning are in
+A code turn a connected person started acts as that person: their token is
+the run's `GH_TOKEN` / `GITHUB_TOKEN` and, through a process-local
+credential helper, its HTTPS git credential, so the branch push and any PR
+the shell opens carry their identity. "Started by a person" means the
+turn's sender is a human (or the auto-continue of their own prompt), the run
+kind is interactive, and the mode is code. When that person is unknown,
+unmapped, or disconnected, the run falls back to the App token below rather
+than running credential-free. In a sandbox the launcher resolves the same
+choice on the host and projects only the chosen token into a private,
+run-scoped file.
+
+Every other run holds a short-lived installation token scoped to its
+repository and never a person's: the code permission set for unattended
+code runs and for machine senders into an interactive session (a review
+handoff, a worker report, an automation), the read set for every ask run,
+whoever started it, because the review workflows process untrusted PR
+content and can print their environment. Ask runs also ignore any
+launcher-supplied token. The gateway still uses a person's token for the UI
+buttons (merge, close, review, comment) and the `open_pull_request` /
+`edit_pull_request` tools. The merge guard refuses `gh pr merge`, approving
+reviews, and default-branch pushes in every run whichever token it holds,
+and a run never inherits the host operator's `gh` login: its `GH_CONFIG_DIR`
+is run-scoped, so a missing token fails with "not logged in". The longer
+design, and the stricter target this is a rollback from, are in
 [github-authority.md](../github-authority.md).
 
-Every session push therefore reaches GitHub as the bot account, and the PR
+A push from a person-started code turn therefore reaches GitHub as that
+person; pushes from every other run reach it as the bot account, and the PR
 webhook sees the bot as the `synchronize` sender. The review automation
 treats those pushes like human pushes; it only skips a bot-sender push while
 one of its own code loops (auto-fix, simplify, adversarial, or an @mention

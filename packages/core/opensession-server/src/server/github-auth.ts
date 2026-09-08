@@ -839,6 +839,21 @@ export function githubUserLoginForRun(user?: string | null): string | null {
   return account && tokenUsable(account) ? login : null;
 }
 
+/**
+ * API variables for a run that acts as its person on GitHub: GH_TOKEN (gh
+ * CLI's highest-precedence credential) + GITHUB_TOKEN (octokit-style
+ * tooling). Empty when the feature is off, the user is unknown/unmapped, or
+ * they never connected, so callers can spread it unconditionally and fall
+ * back to an App token. Callers own the trust gate: only a code turn a
+ * connected person started may receive this (docs/setup/github.md, "Who
+ * holds which credential").
+ */
+export function githubAuthEnv(user?: string | null): Record<string, string> {
+  const credential = githubCredentialForRun(user);
+  const token = credential?.env.GH_TOKEN;
+  return token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {};
+}
+
 /** A remote sandbox cannot read the server's per-user grant store. Its trusted
  * launcher writes only this run's access token to a private file and points the
  * host at it. The token never enters the persisted RunHostSpec or launch command. */
@@ -873,10 +888,23 @@ function githubProcessEnv(
 }
 
 /** Consume only the private run-scoped file projected by a remote launcher.
- * This can never consult a connected human account: no agent run holds a
- * person's token (docs/github-authority.md). */
+ * This never consults a connected human account: on a remote host the
+ * launcher already decided whose credential the run holds. */
 export function projectedGithubRunEnv(): Record<string, string> {
   return githubProcessEnv(projectedGithubAuthEnv());
+}
+
+/** Shell environment for a code turn a connected person started: their
+ * token for gh and, through the process-local credential helper, for HTTPS
+ * git, so the branch push and any PR carry their identity. Empty when nobody
+ * resolves (feature off with zero or several connected accounts, an unmapped
+ * or disconnected user) so the caller falls back to the App token, and empty
+ * on a remote host, whose launcher projected the run's credential already.
+ * The person's token is never persisted in .git/config or ~/.config/gh. */
+export function githubUserRunEnv(user?: string | null): Record<string, string> {
+  if (process.env[GITHUB_RUN_AUTH_FILE_ENV]) return {};
+  const auth = githubAuthEnv(user);
+  return auth.GH_TOKEN ? githubProcessEnv(auth) : {};
 }
 
 export interface GithubCredential {

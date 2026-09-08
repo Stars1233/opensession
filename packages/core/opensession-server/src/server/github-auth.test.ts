@@ -14,7 +14,9 @@ import { join } from "path";
 import {
   connectedGithubAccounts,
   GITHUB_RUN_AUTH_FILE_ENV,
+  githubAuthEnv,
   githubCredentialForRun,
+  githubUserRunEnv,
   projectedGithubRunEnv,
   githubCredentialForLogin,
   githubCredentialForPrincipal,
@@ -200,8 +202,6 @@ describe("token lookups + runner env", () => {
   });
 
   test("a person's credential gives server-side git and gh their token", () => {
-    // Server-owned calls only: no agent run receives this env
-    // (docs/github-authority.md).
     enableFeature();
     seedToken();
     expect(githubCredentialForRun("Alice")?.env).toMatchObject({
@@ -213,6 +213,56 @@ describe("token lookups + runner env", () => {
       GIT_CONFIG_VALUE_2: "git@github.com:",
       GIT_CONFIG_VALUE_3: "ssh://git@github.com/",
     });
+  });
+
+  test("a connected person's run env carries their token for gh and HTTPS git", () => {
+    enableFeature();
+    seedToken();
+    // API variables only: what the sandbox launcher projects into the
+    // run-scoped auth file.
+    expect(githubAuthEnv("Alice")).toEqual({
+      GH_TOKEN: "gho_test123",
+      GITHUB_TOKEN: "gho_test123",
+    });
+    // The host shell env adds the process-local credential helper and the
+    // SSH-to-HTTPS rewrite, so a push uses the same token as gh and nothing
+    // lands in .git/config or ~/.config/gh.
+    expect(githubUserRunEnv("Alice")).toMatchObject({
+      GH_TOKEN: "gho_test123",
+      GITHUB_TOKEN: "gho_test123",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_VALUE_2: "git@github.com:",
+      GIT_CONFIG_VALUE_3: "ssh://git@github.com/",
+    });
+    // The helper is the installed shim or the source-tree script.
+    expect(githubUserRunEnv("Alice").GIT_CONFIG_VALUE_1).toMatch(
+      /github-credential|gh-credential/,
+    );
+  });
+
+  test("an unconnected or unknown person yields no run env, never a host fallback", () => {
+    enableFeature();
+    seedToken();
+    // Operator mode: an unmapped sender and a mapped-but-disconnected one
+    // both resolve nothing, so the caller falls back to the App token. The
+    // env is empty rather than a blank GH_TOKEN so the fallback can spread
+    // over it.
+    expect(githubAuthEnv("Some Randomer")).toEqual({});
+    expect(githubUserRunEnv("Some Randomer")).toEqual({});
+    expect(githubUserRunEnv("Bob")).toEqual({});
+    expect(githubUserRunEnv(null)).toEqual({});
+    // A disconnect empties the store: the next turn gets nothing.
+    writeFileSync(process.env.OPENSESSION_GITHUB_AUTH_STORE!, '{"users":{}}');
+    expect(githubUserRunEnv("Alice")).toEqual({});
+  });
+
+  test("a remote host never consults the person store", () => {
+    enableFeature();
+    seedToken();
+    // The launcher already projected this run's credential; the guest must
+    // use only that file even if a store happens to be readable.
+    process.env[GITHUB_RUN_AUTH_FILE_ENV] = join(dir, "missing-auth.json");
+    expect(githubUserRunEnv("Alice")).toEqual({});
   });
 
   test("remote run env reads only its projected access-token file", () => {

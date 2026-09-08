@@ -62,13 +62,15 @@ configuration for the run.
   shared detached worktree pinned to `origin/<defaultBranch>`; only a
   repository configured as a shared self-development checkout uses its live
   checkout. Sandboxed ask runs use the sandbox workspace. Code gets an
-  isolated writable workspace/worktree and can edit and commit. Every run,
-  automation or not, holds a repository-scoped App installation token and
-  never a person's (`docs/github-authority.md`): code runs mint the code
-  permission set (push the branch, reply, inspect checks and Actions logs),
-  while ask runs — the review workflows, which process untrusted PR content —
-  mint the read-only set and ignore any launcher-supplied token, so nothing
-  they can be injected into holds write capability. What that token may do to
+  isolated writable workspace/worktree and can edit and commit. Every
+  automation run holds a repository-scoped App installation token and never
+  a person's (`docs/setup/github.md`, "Who holds which credential"): code
+  runs mint the code permission set (push the branch, reply, inspect checks
+  and Actions logs), while ask runs — the review workflows, which process
+  untrusted PR content — mint the read-only set and ignore any
+  launcher-supplied token, so nothing they can be injected into holds write
+  capability. Only a code turn a connected person started holds that
+  person's token instead. What that token may do to
   the default branch is a ruleset decision on GitHub; the command policy
   refuses merges, approving reviews, and default-branch pushes in every run
   as a tripwire. Every other scope still applies: MCP allowlist, denied
@@ -249,13 +251,15 @@ Enabling `userPrAuth` activates both halves below:
   pull-request-mcp.ts): teammates connect their GitHub account via the OAuth
   _device flow_ (Connections UI card, or implicitly by signing in). Tokens
   live per-login in `~/.opensession/github-auth.json` (0600, never returned
-  by any API). A person's token is used only by the gateway: the UI's PR
-  routes (merge, close, review, comment) and the `opensession-pull-requests`
-  tools (`open_pull_request`, `edit_pull_request`) mounted on a turn that a
-  connected person started. The gateway makes those requests with the
-  person's token; the run's shell holds the bot token and never the person's
-  (`docs/github-authority.md`). A review handoff, worker report, or
-  automation sender is nobody and gets no such tools. The run user resolves
+  by any API). A code turn a connected person started holds their token in
+  its shell (pi-runner `runGithubEnv`, the sandbox launcher's projected auth
+  file), so its pushes and any PR it opens are theirs; the gateway uses the
+  same token for the UI's PR routes (merge, close, review, comment) and the
+  `opensession-pull-requests` tools (`open_pull_request`,
+  `edit_pull_request`) mounted on such a turn. Ask runs, unattended runs,
+  and machine senders hold an App token and never a person's
+  (`docs/setup/github.md`). A review handoff, worker report, or automation
+  sender is nobody and gets no such tools. The run user resolves
   to a login through the SAME identity table as commit attribution, so the
   mapping is config (identity.team[].github), not code. The PR-attribution
   instructions swap the `--assignee` bot wording for "opened under their

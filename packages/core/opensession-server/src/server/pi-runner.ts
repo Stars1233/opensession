@@ -128,6 +128,7 @@ import { isMachineActor, providerAccountUser } from "./session-actors";
 import {
   GITHUB_RUN_AUTH_FILE_ENV,
   githubUserLoginForRun,
+  githubUserRunEnv,
   projectedGithubRunEnv,
 } from "./github-auth";
 import { ensureAgentAwsCredsFile } from "./aws-creds";
@@ -196,6 +197,38 @@ export async function githubReadRunEnv(
   if (!repo || repo.host === "codestorage" || !repo.ghRepo) return {};
   const { githubServiceReadOnlyEnv } = await import("./github-app");
   return githubServiceReadOnlyEnv(repo.ghRepo);
+}
+
+/** The GitHub credential one run's shell holds (docs/setup/github.md, "Who
+ * holds which credential").
+ *
+ * - A code turn a connected person started (`ownerTurn`) acts as them: their
+ *   token for gh and HTTPS git, so the push and the PR carry their identity.
+ * - Every other code run, including an owner turn whose person is not
+ *   connected, an automation, and a review handoff or worker report (a
+ *   machine sender is nobody), holds the repository-scoped App code set. A
+ *   launcher may hand a `github-*` code run its own token.
+ * - Every ask run holds the App read set: the review workflows chew on
+ *   untrusted PR content and can print their environment, so ask mode never
+ *   sees a person's token and ignores any launcher-supplied one.
+ *
+ * A remote host never consults the person store: its launcher already
+ * projected the run's credential (githubUserRunEnv is empty there). */
+export async function runGithubEnv(input: {
+  isCode: boolean;
+  ownerTurn: boolean;
+  /** The person the turn acts for (githubCredentialUser). */
+  user?: string | null;
+  githubKindRun: boolean;
+  launcherEnv?: Record<string, string>;
+  cwd: string;
+}): Promise<Record<string, string>> {
+  if (!input.isCode) return githubReadRunEnv(input.cwd);
+  const person = input.ownerTurn ? githubUserRunEnv(input.user) : {};
+  if (person.GH_TOKEN) return person;
+  if (input.githubKindRun && input.launcherEnv?.GH_TOKEN)
+    return input.launcherEnv;
+  return githubCodeRunEnv(input.cwd);
 }
 
 /** Child-env name carrying the `Co-authored-by` trailer an agent run must put
@@ -2072,10 +2105,10 @@ async function* runPiAttempt(
     // The person this turn acts for, if any: the sender, unless it is the
     // synthetic auto-continue driver, in which case the author fallback
     // names the session owner (#322). A machine sender (a review handoff, a
-    // worker report, an automation) is nobody. This decides only whether
-    // the gateway mounts the owner-identity tools and how the session
-    // context describes PR authorship; the shell credential below is the
-    // same for everyone.
+    // worker report, an automation) is nobody. An owner turn mounts the
+    // gateway's owner-identity tools, describes PR authorship as theirs in
+    // the session context, and in code mode puts their connected token in
+    // the shell (runGithubEnv); every other run holds an App token.
     const githubUser = githubCredentialUser(user, author?.name);
     const ownerTurn =
       !policy.unattended &&
@@ -2084,21 +2117,18 @@ async function* runPiAttempt(
     const githubUserLogin = ownerTurn
       ? githubUserLoginForRun(githubUser)
       : null;
-    // Every run's shell holds a repository-scoped App installation token and
-    // never a person's: the code set in code mode, the read set in ask mode
-    // (the review workflows chew on untrusted PR content and can print
-    // their environment). What that token may do to the default branch is
-    // GitHub's ruleset decision, not ours (docs/github-authority.md). A
-    // launcher may hand a github-* code run its own token; ask runs ignore
-    // any caller-supplied githubEnv so a launcher can never hand a review
-    // run a writable token.
+    // What the shell credential may do to the default branch is GitHub's
+    // ruleset decision; the merge guard below is the tripwire in front of
+    // it and applies whichever token the run holds.
     const githubKindRun = baseJournalKind(journal?.kind).startsWith("github-");
-    const githubEnv =
-      mode === "code"
-        ? githubKindRun && opts.githubEnv?.GH_TOKEN
-          ? opts.githubEnv
-          : await githubCodeRunEnv(cwd)
-        : await githubReadRunEnv(cwd);
+    const githubEnv = await runGithubEnv({
+      isCode: mode === "code",
+      ownerTurn,
+      user: githubUser,
+      githubKindRun,
+      launcherEnv: opts.githubEnv,
+      cwd,
+    });
     const agentGitEnv = await agentGitIdentityEnv(author);
     // A run INSIDE a shared self-development checkout pushes its base branch
     // by design (AGENTS.md); there the rulesets alone decide, and only merge

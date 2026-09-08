@@ -1,5 +1,19 @@
 # GitHub authority: who may do what, and with which credential
 
+Status of the shell credential, 2026-09-08 (later the same day): the
+"no agent run holds a person's token" part of Phase 1 is rolled back for
+now. A code turn a connected person started once again holds that person's
+token in its shell (`githubUserRunEnv` on the host, the launcher's projected
+auth file in a sandbox), falling back to the App code set when nobody is
+connected. Unattended runs, machine senders (review handoffs, worker
+reports, automations), and every ask run stay on the repository-scoped App
+token exactly as this design describes. Everything else in Phase 1 stands:
+the owner-identity gateway tools, the merge guard in every run, the retired
+git-transport credential, the run-scoped `GH_CONFIG_DIR`, and the bot git
+identity with the person as `Co-authored-by`. `docs/setup/github.md` ("Who
+holds which credential") is the current statement; the Delegate row below
+describes the target the rollback moved away from.
+
 Status: Phase 1 (credentials, tools, policy) implemented 2026-09-08; Phase 0
 (rulesets, App permission, credential revocation) is operator work per
 deployment, and Phases 2 and 3 are open. Written after the credential split
