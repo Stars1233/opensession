@@ -370,20 +370,30 @@ deploy. Phases 1 and 2 are code. Phase 3 is infrastructure.
    agent process holding a human credential. Auditors were told the cap and
    split are the corrective actions; the record has to say otherwise before
    the instance does.
-1. Add the humans-only ruleset to every covered repository, bypass list
-   copied from the existing integrity ruleset, plus the `DeployKey` bypass
-   where a release workflow pushes `main`. Leave the integrity ruleset
-   untouched. Verify on a scratch repository first. See the first open
-   question before applying this to `opensession` itself.
+1. Deploy Phase 1. Every later step waits on this: with the old code live,
+   restoring `contents: write` hands agent runs a human token that can merge
+   again, and the humans-only ruleset denies the merge button because the
+   old code merges with a non-bypass identity. The new code fails closed
+   while the permission is still read-only (bot token cannot push; loud
+   warning), so deploying first opens nothing.
 2. Restore `contents: write` on the installation (approve the updated
    permissions in the org).
-3. Unset `OPENSESSION_GITHUB_PUSH_TOKEN`; revoke the transport token. Revoke
+3. Add the humans-only ruleset to every covered repository, bypass list
+   and bypass mode copied from the existing integrity ruleset, plus the
+   `DeployKey` bypass where a release workflow pushes `main`. Leave the
+   integrity ruleset untouched. Verify on a scratch repository first, and
+   verify the merge, not only a push: a bypass human merges a pull request
+   through the deployed merge button, and an installation token is refused
+   on merge and on a push to `main` but pushes a feature branch. Push bypass
+   and merge bypass are evaluated separately. See the first open question
+   before applying this to `opensession` itself.
+4. Unset `OPENSESSION_GITHUB_PUSH_TOKEN`; revoke the transport token. Revoke
    and remove every other ambient credential on the host.
 
 After this, humans merge from the UI again and no bot identity can touch
-`main`. Agents in owner-started turns still hold the owner's token until
-Phase 1 lands; the humans-only ruleset does not bound that token, so Phase 1
-is what closes requirement 2.
+`main`. Until step 1 lands, agents in owner-started turns hold the owner's
+token, and the humans-only ruleset does not bound that token; Phase 1 is
+what closes requirement 2.
 
 **Phase 1, credentials and policy**
 

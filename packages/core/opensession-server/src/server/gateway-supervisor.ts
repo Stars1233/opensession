@@ -50,8 +50,14 @@ const PRELOAD_TIMEOUT_MS = 30_000;
 const FAST_HANDOFF_EXIT_TIMEOUT_MS = 2_500;
 // Heavy recovery can keep /ready false well after the backend is serving
 // liveness traffic. Peer mismatches are rejected by the pre-cut-over check;
-// do not destroy a healthy candidate merely because recovery takes a minute.
-const READY_TIMEOUT_MS = 60_000;
+// do not destroy a healthy candidate merely because recovery takes a while.
+// Recovery resumes every interrupted run and reconciles kernel ownership per
+// session, so its duration scales with active runs and host load: a healthy
+// deploy on a busy host took 47 s, and a 60 s budget killed the next one at
+// 61 s. The rollback it triggers needs the same recovery under the same load,
+// so a tight budget converts a slow boot into a cold restart. Traffic already
+// routes to the candidate while it recovers; waiting costs nothing extra.
+const READY_TIMEOUT_MS = 240_000;
 
 export function inheritedGatewaySocketFd(
   env: Record<string, string | undefined> = process.env,
