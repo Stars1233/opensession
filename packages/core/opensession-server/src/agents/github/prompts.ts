@@ -304,6 +304,58 @@ The review re-runs automatically after your push. ${
   }`;
 }
 
+export type ReviewSettledOutcome = "passed" | "capped";
+
+/**
+ * Marker at the head of the loop's closing message (handoff.ts settleHandoff).
+ * The outcome rides in the sentinel so the transcript can classify the notice
+ * without reading its prose; parseReviewSettled in the protocol package is the
+ * other half.
+ */
+export function reviewSettledSentinel(outcome: ReviewSettledOutcome): string {
+  return `<!--os:review-settled:${outcome}-->`;
+}
+
+/**
+ * The loop's closing turn. GitHub keeps the verdict on the PR, so without this
+ * the session's last word is its report on the final fix round and a person
+ * returning to the thread has to reconstruct where things stand. Asks the
+ * agent for one short wrap-up instead of another round of work.
+ */
+export function buildReviewSettledMessage(opts: {
+  prNumber: number;
+  title: string;
+  headRef: string;
+  /** owner/name, for gh commands and the PR link. */
+  repoFull: string;
+  rounds: number;
+  outcome: ReviewSettledOutcome;
+  confidence?: number;
+}): string {
+  const rounds = `${opts.rounds} fix round${opts.rounds === 1 ? "" : "s"}`;
+  const quality =
+    typeof opts.confidence === "number" ? `, quality ${opts.confidence}/5` : "";
+  const prUrl = `https://github.com/${opts.repoFull}/pull/${opts.prNumber}`;
+  const passed = opts.outcome === "passed";
+  const lead = passed
+    ? `✅ This session's PR #${opts.prNumber} “${opts.title}” (branch \`${opts.headRef}\`) passed review after ${rounds}${quality}. The review loop is closed; no more findings are coming your way.`
+    : `⏹️ This session's PR #${opts.prNumber} “${opts.title}” (branch \`${opts.headRef}\`) is still not merge-ready after ${rounds}${quality}. The automatic loop has stopped and what remains is over to humans.`;
+  const standing = passed
+    ? `review passed, CI (\`gh pr checks ${opts.prNumber} --repo ${opts.repoFull}\`), and whether anything still blocks a merge`
+    : `which findings are still open, why you left them, and what CI says (\`gh pr checks ${opts.prNumber} --repo ${opts.repoFull}\`)`;
+
+  return `${reviewSettledSentinel(opts.outcome)}
+${lead}
+
+Write a short wrap-up for whoever comes back to this thread cold. Your earlier messages report each round; this one is the current state:
+1. Where things stand: ${standing}.
+2. What changed across the fix rounds, in a few lines: the shape of the change, not a per-finding replay.
+3. Where to look: ${prUrl}, plus the preview URL if this branch has one.
+4. Anything a person still has to decide or do.
+
+Keep it short. Do not push new commits, re-run the review, or merge (\`gh pr merge\` is forbidden).`;
+}
+
 export type MergeabilityState = "conflicting" | "clear" | "pending";
 
 /** UNKNOWN is not success: GitHub calculates mergeability asynchronously. */

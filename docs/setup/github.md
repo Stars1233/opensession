@@ -174,6 +174,16 @@ These are the subscribed events the code consumes
 | `pull_request_review`                                               | refreshes PR state; when the Slack agent is enabled, review → Slack notification                                                                                                                                                                                     |
 | `workflow_run`                                                      | notifies sessions waiting on a merged PR's deploy                                                                                                                                                                                                                    |
 
+An automatic review that ends unsatisfied (blocking findings, or open findings
+below quality 4/5) hands its findings straight into the live session that owns
+the PR branch as a fix round, at most `OPENSESSION_REVIEW_HANDOFF_ROUNDS`
+(default 6) per PR; the session's push re-triggers the review. When a later
+review passes, or the round cap hands the rest to humans, that same session
+gets one closing message asking for a short wrap-up: where the PR stands, what
+changed across the rounds, and where to look. The transcript folds the whole
+loop into one "Review loop" row with the wrap-up beneath it.
+`OPENSESSION_REVIEW_HANDOFF=0` disables the handoff.
+
 ### Public-repository actor gate
 
 The webhook secret authenticates GitHub, not the person who caused an event.
