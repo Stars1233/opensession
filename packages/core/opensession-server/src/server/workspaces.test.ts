@@ -36,17 +36,17 @@ afterAll(() => {
 });
 
 describe("default workspace model settings", () => {
-  test("offers Fable planning with a Sol high implementation worker", () => {
+  test("offers Fable planning with an Astra high implementation worker", () => {
     expect(
       DEFAULT_WORKSPACE_MODEL_SETTINGS.presets?.find(
         (preset) => preset.id === "orchestrator-fable-sol",
       ),
     ).toMatchObject({
-      label: "Orchestrator · Fable + Sol",
+      label: "Orchestrator · Fable + Astra",
       lead: { model: "pi/anthropic/claude-fable-5-1", effort: "high" },
       supporting: [
         {
-          model: "pi/openai/gpt-5.6-sol",
+          model: "pi/openai/gpt-6-astra",
           effort: "high",
           role: "Implementation worker",
         },

@@ -180,18 +180,18 @@ export const DEFAULT_WORKSPACE_MODEL_SETTINGS: WorkspaceModelSettings = {
     },
     {
       id: "orchestrator-fable-sol",
-      label: "Orchestrator · Fable + Sol",
+      label: "Orchestrator · Fable + Astra",
       group: "orchestrator",
       lead: { model: "pi/anthropic/claude-fable-5-1", effort: "high" },
       supporting: [
         {
-          model: "pi/openai/gpt-5.6-sol",
+          model: "pi/openai/gpt-6-astra",
           effort: "high",
           role: "Implementation worker",
         },
       ],
       instructions:
-        "Use Fable to plan, review, and integrate. Delegate focused implementation work to Sol with self-contained briefs, then verify its results.",
+        "Use Fable to plan, review, and integrate. Delegate focused implementation work to Astra with self-contained briefs, then verify its results.",
     },
     {
       id: "orchestrator-sol",

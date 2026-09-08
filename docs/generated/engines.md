@@ -58,7 +58,7 @@ engine and dispatch id `routeModel()` returns for it.
 | `dial/low` | Dial · Low | pi | `pi/openai/gpt-5.6-luna` |
 | `dial/opus-fable` | Opus 5 + Fable oracle | pi | `pi/anthropic/claude-opus-5` |
 | `orchestrator/fable` | Orchestrator · Fable 5.1 | pi | `pi/anthropic/claude-fable-5-1` |
-| `orchestrator/fable-sol` | Orchestrator · Fable + Sol | pi | `pi/anthropic/claude-fable-5-1` |
+| `orchestrator/fable-sol` | Orchestrator · Fable + Astra | pi | `pi/anthropic/claude-fable-5-1` |
 | `orchestrator/sol` | Orchestrator · Sol | pi | `pi/openai/gpt-5.6-sol` |
 
 Every accepted id resolves to Pi before dispatch.

@@ -174,6 +174,10 @@ export function shortModelLabel(id: string, models: ModelOption[]): string {
   const preset = workspacePresetLabel(baseModelId(id), models);
   if (preset) return preset;
   const oc = routedModelParts(id);
+  if (oc?.provider === "dial" || oc?.provider === "orchestrator") {
+    const label = models.find((m) => m.id === id)?.label;
+    if (label) return label;
+  }
   if (oc) return friendlyModelSlug(oc.model);
   // Last resort is the id itself, minus its routing prefix — an id with no
   // catalog entry is still a name, and the engine is not part of it.
