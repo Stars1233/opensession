@@ -58,6 +58,14 @@ const FAST_HANDOFF_EXIT_TIMEOUT_MS = 2_500;
 // so a tight budget converts a slow boot into a cold restart. Traffic already
 // routes to the candidate while it recovers; waiting costs nothing extra.
 const READY_TIMEOUT_MS = 240_000;
+// A coordinated handoff waits for the deploy controller between phases: for
+// the peer restarts while parked, for the external health gate while
+// active-uncommitted, and for peer restoration while rollback-parked. This
+// bounds each of those waits when the controller never returns. It must not
+// run during activation: that wait is bounded by READY_TIMEOUT_MS, which is
+// deliberately longer, and a deadline armed at prepare time would kill a
+// candidate that is still recovering with traffic already routed to it.
+const COORDINATED_UNATTENDED_TIMEOUT_MS = 180_000;
 
 export function inheritedGatewaySocketFd(
   env: Record<string, string | undefined> = process.env,
@@ -146,6 +154,7 @@ export interface GatewaySupervisorDependencies {
   validateRelease(releaseRoot: string, sha: string): string;
   promoteCurrent(releaseRoot: string): void;
   onUnexpectedExit?(gateway: ManagedGateway, code: number): void;
+  coordinatedUnattendedTimeoutMs?: number;
   recordTransaction?(transaction: GatewayHandoffTransaction): void;
   clearTransaction?(): void;
   quiescePublicListener?(): void;
@@ -174,7 +183,7 @@ export class GatewaySupervisor {
     candidate: ManagedGateway;
     previous: ManagedGateway;
     nonce: string;
-    timeout: ReturnType<typeof setTimeout>;
+    timeout: ReturnType<typeof setTimeout> | null;
     phase: GatewayHandoffPhase;
     failure?: string;
   } | null = null;
@@ -278,6 +287,8 @@ export class GatewaySupervisor {
     }
     pending.phase = "activating";
     this.recordCoordinated();
+    // Activation is bounded by its own live and ready budgets below.
+    this.disarmCoordinatedExpiry();
     try {
       pending.candidate.activate!(pending.nonce);
       await timeout(
@@ -294,6 +305,7 @@ export class GatewaySupervisor {
       pending.phase = "active-uncommitted";
       this.standby = null;
       this.recordCoordinated();
+      this.armCoordinatedExpiry();
       return {
         ok: true,
         message: "coordinated gateway activated; awaiting commit",
@@ -324,6 +336,7 @@ export class GatewaySupervisor {
     pending.phase = "rollback-parked";
     this.standby = null;
     this.recordCoordinated();
+    this.armCoordinatedExpiry();
     return {
       ok: true,
       message: "target gateway parked; restore previous peers before abort",
@@ -367,7 +380,7 @@ export class GatewaySupervisor {
         READY_TIMEOUT_MS,
         "rollback gateway did not become ready",
       );
-      clearTimeout(pending.timeout);
+      this.disarmCoordinatedExpiry();
       this.coordinated = null;
       this.dependencies.clearTransaction?.();
       return {
@@ -394,7 +407,7 @@ export class GatewaySupervisor {
         message: "no healthy coordinated handoff awaits commit",
       };
     }
-    clearTimeout(pending.timeout);
+    this.disarmCoordinatedExpiry();
     const pid = pending.candidate.pid;
     this.coordinated = null;
     this.dependencies.clearTransaction?.();
@@ -459,6 +472,31 @@ export class GatewaySupervisor {
       phase: this.coordinated?.phase ?? "idle",
       ...(this.proxyMetrics ? { proxy: { ...this.proxyMetrics } } : {}),
     };
+  }
+
+  // Re-arm the unattended deadline for the phase just entered. Pointer
+  // authority already names the target, so an abandoned transaction ends by
+  // exiting the supervisor for a clean systemd boot of the selected release
+  // rather than guessing that the old gateway is still protocol-compatible.
+  private armCoordinatedExpiry(): void {
+    const pending = this.coordinated;
+    if (!pending) return;
+    if (pending.timeout) clearTimeout(pending.timeout);
+    const expiry = setTimeout(() => {
+      pending.candidate.kill(9);
+      void pending.candidate.exited.finally(() => {
+        this.dependencies.onUnexpectedExit?.(pending.candidate, 75);
+      });
+    }, this.dependencies.coordinatedUnattendedTimeoutMs ?? COORDINATED_UNATTENDED_TIMEOUT_MS);
+    expiry.unref?.();
+    pending.timeout = expiry;
+  }
+
+  private disarmCoordinatedExpiry(): void {
+    const pending = this.coordinated;
+    if (!pending?.timeout) return;
+    clearTimeout(pending.timeout);
+    pending.timeout = null;
   }
 
   private recordCoordinated(): void {
@@ -536,24 +574,15 @@ export class GatewaySupervisor {
       previousExited = true;
       this.dependencies.promoteCurrent(releaseRoot);
       this.selectActive(candidate);
-      const expiry = setTimeout(() => {
-        // Pointer authority already names the target. Do not guess that the old
-        // gateway is still protocol-compatible after an abandoned peer update;
-        // exit the supervisor so systemd boots the selected release cleanly.
-        candidate.kill(9);
-        void candidate.exited.finally(() => {
-          this.dependencies.onUnexpectedExit?.(candidate, 75);
-        });
-      }, 180_000);
-      expiry.unref?.();
       this.coordinated = {
         candidate,
         previous,
         nonce,
-        timeout: expiry,
+        timeout: null,
         phase: "parked",
       };
       this.recordCoordinated();
+      this.armCoordinatedExpiry();
       return {
         ok: true,
         message: "coordinated gateway prepared",
@@ -576,7 +605,7 @@ export class GatewaySupervisor {
   async shutdown(): Promise<void> {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
-    if (this.coordinated) clearTimeout(this.coordinated.timeout);
+    this.disarmCoordinatedExpiry();
     this.setRouteToActive(false);
     const children = new Set(
       [this.active, this.standby].filter(Boolean) as ManagedGateway[],
