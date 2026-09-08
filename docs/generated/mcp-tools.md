@@ -41,7 +41,7 @@ touches an in-process tool:
 | Server | Tools | Runs | Condition |
 | --- | --- | --- | --- |
 | [`opensession-sessions`](#opensession-sessions) | 15 | interactive, Slack loop, automation | Automation runs get it ONLY with the human-set `selfImprove` flag, and then in the `automationSelf` build below. |
-| [`opensession-admin`](#opensession-admin) | 13 | interactive, Slack loop | – |
+| [`opensession-admin`](#opensession-admin) | 14 | interactive, Slack loop | – |
 | [`opensession-runners`](#opensession-runners) | 5 | interactive | – |
 | [`opensession-goals`](#opensession-goals) | 8 | interactive | – |
 | [`opensession-search`](#opensession-search) | 2 | interactive | – |
@@ -70,7 +70,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-29 servers, 129 tools.
+29 servers, 130 tools.
 
 ## opensession-sessions
 
@@ -232,6 +232,12 @@ Delete an automation by id. This is permanent.
 `mcp__opensession-admin__run_automation` · input: `id` (string, required)
 
 Trigger an automation to run now (manual trigger), without waiting for its schedule.
+
+### `retrigger_automation_run`
+
+`mcp__opensession-admin__retrigger_automation_run` · input: `sessionId` (string, required)
+
+Re-run an automation with the exact triggering payload of one of its past runs (the session id of that run). Event and webhook runs replay their original event as a fresh concurrent run; cron and manual runs simply start again. Use this to redo a run after fixing the automation's prompt.
 
 ### `schedule_once`
 

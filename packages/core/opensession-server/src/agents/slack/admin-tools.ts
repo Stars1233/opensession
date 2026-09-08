@@ -24,7 +24,9 @@ import {
   updateAutomation,
   deleteAutomation,
   runAutomation,
+  retriggerAutomationSession,
 } from "../../server/automations";
+import { publishSessionChange } from "../../server/session-cache";
 import {
   readMcpConfig,
   addMcpServer,
@@ -439,6 +441,25 @@ export function createAdminMcpServer(ctx: AdminToolContext) {
             console.error("[admin] run_automation failed:", e),
           );
           return text(`Triggered *${a.name}* [\`${a.id}\`] — running now.`);
+        },
+      ),
+      tool(
+        "retrigger_automation_run",
+        "Re-run an automation with the exact triggering payload of one of its past runs (the session id of that run). Event and webhook runs replay their original event as a fresh concurrent run; cron and manual runs simply start again. Use this to redo a run after fixing the automation's prompt.",
+        {
+          sessionId: z
+            .string()
+            .describe(
+              "Session id of the past automation run whose trigger to replay.",
+            ),
+        },
+        async (args: { sessionId: string }) => {
+          const res = retriggerAutomationSession(args.sessionId);
+          if (!res.ok) return text(`Couldn't retrigger: ${res.reason}`);
+          publishSessionChange(args.sessionId);
+          return text(
+            `Retriggered *${res.name}* from \`${args.sessionId}\` — running now.`,
+          );
         },
       ),
       tool(
