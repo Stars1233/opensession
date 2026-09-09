@@ -1,5 +1,5 @@
 import type { SessionPrRef, UnifiedSession } from "./types";
-import { defaultRepo } from "./config";
+import { defaultRepo, githubBotLogins } from "./config";
 import type { PrInfo } from "./pr-cache";
 import { peekWorkspace, type Workspace } from "./workspaces";
 
@@ -152,6 +152,32 @@ export function mergeFooterPrRefs(
   return refs;
 }
 
+function isBotLogin(login: string, bots: readonly string[]): boolean {
+  const lower = login.toLowerCase();
+  return (
+    bots.includes(lower) || lower.endsWith("[bot]") || lower.endsWith("-bot")
+  );
+}
+
+/**
+ * The teammate a PR is for. A bot-authored PR (the instance's own GitHub
+ * identity opening it from a session) carries the person who asked for it as
+ * its assignee, and that is who is waiting on a review of it, not the bot.
+ * Computed here once so every client shows the same face.
+ */
+export function prRequesterLogin(
+  pr: Pick<PrInfo, "author" | "assignees">,
+): string | undefined {
+  const bots = githubBotLogins().map((login) => login.toLowerCase());
+  const author = pr.author?.trim();
+  if (author && !isBotLogin(author, bots)) return author;
+  return (
+    (pr.assignees || []).find((login) => !isBotLogin(login, bots)) ||
+    author ||
+    undefined
+  );
+}
+
 /** Refresh the PR fields omitted by targeted native-session reads. */
 export function enrichSessionPrRefs(
   session: UnifiedSession,
@@ -183,6 +209,7 @@ export function enrichSessionPrRefs(
           prReviewRequested: currentPr.reviewRequested,
           prReviewedBy: currentPr.reviewedBy,
           prAuthor: currentPr.author,
+          prRequester: prRequesterLogin(currentPr),
           prUpdatedAt: currentPr.updatedAt,
           prChecks: currentPr.checks,
         }

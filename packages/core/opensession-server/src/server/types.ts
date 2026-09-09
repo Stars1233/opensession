@@ -127,6 +127,9 @@ export interface UnifiedSession {
    *  changes requested / commented). Open PRs only. */
   prReviewedBy?: string[];
   prAuthor?: string;
+  /** GitHub login of the teammate the PR is for: the author, or on a
+   *  bot-authored PR its first human assignee (the bot records who asked). */
+  prRequester?: string;
   prUpdatedAt?: string;
   prChecks?: { total: number; passed: number; failed: number; pending: number };
   /** What the last automated review concluded on this PR. */

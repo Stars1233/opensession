@@ -5,6 +5,7 @@ import { join } from "path";
 import type { PrInfo } from "./pr-cache";
 import {
   enrichSessionPrRefs,
+  prRequesterLogin,
   projectWorkspacePrRefs,
   sessionPrBranch,
   shareWorkspacePrRefs,
@@ -431,6 +432,29 @@ describe("flat PR fields on a review checkout", () => {
     // after a PR that never existed.
     expect(tab.prs?.map((ref) => [ref.branch, ref.source, ref.number])).toEqual(
       [["add-lottie-primitive", "primary", 5286]],
+    );
+  });
+});
+
+describe("prRequesterLogin", () => {
+  test("names a human author as-is", () => {
+    expect(
+      prRequesterLogin({ author: "jfrolich", assignees: ["johnnylinsf"] }),
+    ).toBe("jfrolich");
+  });
+
+  test("names the human assignee behind a bot-authored pull request", () => {
+    expect(
+      prRequesterLogin({
+        author: "acme-butler[bot]",
+        assignees: ["release-bot", "johnnylinsf"],
+      }),
+    ).toBe("johnnylinsf");
+  });
+
+  test("keeps the bot when nobody is assigned", () => {
+    expect(prRequesterLogin({ author: "acme-bot", assignees: [] })).toBe(
+      "acme-bot",
     );
   });
 });
