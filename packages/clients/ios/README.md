@@ -131,9 +131,10 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   moves to the Closed sessions submenu of the session's overflow menu, which
   reopens a row the same way. On macOS, where the sidebar is the live-session
   switcher, the same scoped history lives in the selected session's toolbar
-  instead. On iOS, the PWA-style Liquid Glass action bar floats above the
-  composer with Archive, session actions, New session, and Next chat. It stays
-  directly above the composer when the keyboard opens. The actions menu carries
+  instead. On iOS, Archive and the session actions menu sit in the navigation
+  bar beside the title as one two-button group, and a Liquid Glass action bar
+  floats above the composer with New session and Next chat. It stays directly
+  above the composer when the keyboard opens. The actions menu carries
   worktree details, the pull request panel, Add to sidebar when needed, rename,
   share, hide or restore, and archive, matching the sidebar row's long-press
   menu. Completed native sessions can also fork from the current transcript tip
