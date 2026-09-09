@@ -1062,11 +1062,7 @@ struct SessionView: View {
                 autoFocusWhenNeverRan: emptyContent == nil,
                 onNextChat: onNextChat,
                 forkState: $forkState,
-                onForkCreated: onForkCreated,
-                // New session and Next chat ride above the composer on iOS
-                // (see `SessionActionBar`); archive and the ⋯ menu sit in the
-                // navigation bar beside the title.
-                onNewSession: onNewSession
+                onForkCreated: onForkCreated
             )
         }
         // The system treats a bottom `safeAreaBar` as adaptive chrome: when
@@ -1840,8 +1836,8 @@ private struct AddToSidebarButton: View {
 ///
 /// It carries the worktree actions the sidebar row offers under long-press, so
 /// the session isn't a dead end for them: details, its pull request, rename, share,
-/// hide and archive — plus "New session", which used to be the bare `+` this menu
-/// replaced.
+/// hide and archive — plus "New session in workspace", which used to be a bare
+/// `+` beside the title and then above the composer.
 ///
 /// Its own view struct on purpose. The menu reads `prDetails` and the hide
 /// store, and reading either inside `SessionView.body` would re-evaluate the
@@ -1893,21 +1889,18 @@ private struct SessionActionsMenu: View {
             }
             if let onNewSession {
                 Button(action: onNewSession) {
-                    // Two words, because the workspace it lands in is the one
-                    // you're already looking at — spelling it out wrapped the
-                    // row onto two lines to say what the tab strip then shows
-                    // anyway. VoiceOver keeps the long form, where naming the
-                    // scope costs no space: the same split as the web tab
-                    // strip's bare "+" and its aria-label.
-                    Label("New session", systemImage: "plus")
+                    // Names the scope now that this is the only place the
+                    // action lives: with no `+` left on screen, the row has
+                    // to say where the session lands. A workspace-less
+                    // legacy session has nothing to join, so the plain
+                    // wording stays honest there.
+                    Label(
+                        viewModel.session.workspaceId == nil
+                            ? "New session"
+                            : "New session in workspace",
+                        systemImage: "plus"
+                    )
                 }
-                .accessibilityLabel(
-                    // A workspace-less legacy session has nothing to join, so
-                    // the plain wording stays honest there.
-                    viewModel.session.workspaceId == nil
-                        ? "New session"
-                        : "New session in this workspace"
-                )
             }
             if let onFork {
                 Button(action: onFork) {
@@ -3076,10 +3069,6 @@ private struct SessionInputBar: View {
     var onNextChat: (() -> Void)?
     @Binding var forkState: SessionForkState
     var onForkCreated: ((String) async -> Void)?
-    /// The rest of the iOS action bar above the composer. Optional for the
-    /// same reason: a conversation with no workspace behind it (the Desk)
-    /// simply draws fewer buttons.
-    var onNewSession: (() -> Void)?
     @FocusState private var inputFocused: Bool
     /// What the "+" menu opened, if anything. One `@State` and one `.sheet`
     /// on purpose: stacking sheet modifiers on a single view leaves only the
@@ -3240,10 +3229,7 @@ private struct SessionInputBar: View {
             // Keep the actions with the composer inside the keyboard-adjusted
             // safe-area bar, so they remain directly above an open keyboard.
             if hasActionBar {
-                SessionActionBar(
-                    onNewSession: onNewSession,
-                    onNextChat: showNextChatButton ? onNextChat : nil
-                )
+                SessionActionBar(onNextChat: onNextChat)
             }
             #endif
 
@@ -3396,10 +3382,10 @@ private struct SessionInputBar: View {
     }
 
     #if os(iOS)
-    /// Whether the action bar has anything to hold. A conversation with no
-    /// workspace behind it draws no bar at all rather than an empty capsule.
+    /// Whether the action bar has anything to hold. Without the Next chat
+    /// preference there is no bar at all rather than an empty capsule.
     private var hasActionBar: Bool {
-        onNewSession != nil || (showNextChatButton && onNextChat != nil)
+        showNextChatButton && onNextChat != nil
     }
     #endif
 

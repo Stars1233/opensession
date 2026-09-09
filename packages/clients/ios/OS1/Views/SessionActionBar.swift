@@ -1,11 +1,11 @@
 #if os(iOS)
 import SwiftUI
 
-/// The composer's neighbours, as one floating glass capsule directly above
-/// it: a new session and the next chat. Both are about where you go next, so
-/// they sit under the thumb that is already on the composer. The session's
-/// own actions, archive and the ⋯ menu, live in the navigation bar beside the
-/// title instead (see `SessionView`'s toolbar).
+/// The composer's neighbour, as one floating glass capsule directly above
+/// it: the next chat. It is about where you go next, so it sits under the
+/// thumb that is already on the composer. The session's own actions, archive
+/// and the ⋯ menu (which carries New session in workspace), live in the
+/// navigation bar beside the title instead (see `SessionView`'s toolbar).
 ///
 /// It stays directly above the composer when the keyboard opens, keeping the
 /// buttons visible and reachable in the keyboard-adjusted safe area.
@@ -16,7 +16,6 @@ import SwiftUI
 /// as long as the menu is open. The composer learned this the hard way. See
 /// `SessionInputBar.composer`.
 struct SessionActionBar: View {
-    var onNewSession: (() -> Void)?
     var onNextChat: (() -> Void)?
 
     /// Matches the composer's round controls, so the two read as one system.
@@ -24,9 +23,6 @@ struct SessionActionBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            if let onNewSession {
-                iconButton("plus", label: "New session", action: onNewSession)
-            }
             if let onNextChat {
                 iconButton("arrow.right", label: "Next chat", action: onNextChat)
             }

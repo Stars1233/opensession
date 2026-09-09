@@ -132,10 +132,11 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   reopens a row the same way. On macOS, where the sidebar is the live-session
   switcher, the same scoped history lives in the selected session's toolbar
   instead. On iOS, Archive and the session actions menu sit in the navigation
-  bar beside the title as one two-button group, and a Liquid Glass action bar
-  floats above the composer with New session and Next chat. It stays directly
-  above the composer when the keyboard opens. The actions menu carries
-  worktree details, the pull request panel, Add to sidebar when needed, rename,
+  bar beside the title as one two-button group. With the Next chat preference
+  on, a Liquid Glass action bar floats above the composer holding that button;
+  it stays directly above the composer when the keyboard opens. The actions
+  menu carries New session in workspace, worktree details, the pull request
+  panel, Add to sidebar when needed, rename,
   share, hide or restore, and archive, matching the sidebar row's long-press
   menu. The model settings menu (the toolbar's slider control on macOS, nested
   in the actions menu on iOS) opens with a Weekly remaining row: what is left
