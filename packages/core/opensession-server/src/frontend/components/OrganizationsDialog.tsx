@@ -303,7 +303,10 @@ function ManageOrganizationsBody({
 
   return (
     <>
-      <ul className="flex flex-col gap-0.5" aria-label="Organizations">
+      <ul
+        className="m-0 flex list-none flex-col gap-0.5 p-0"
+        aria-label="Organizations"
+      >
         {list.accounts.map((account) => {
           const active = account.id === list.activeId;
           const label = active ? name : account.label;
@@ -311,7 +314,7 @@ function ManageOrganizationsBody({
           return (
             <li
               key={account.id}
-              className="flex min-h-11 items-center gap-3 rounded-row px-2 py-1.5"
+              className="flex min-h-11 items-center gap-3 py-1.5"
             >
               <span className="flex size-7 shrink-0 items-center justify-center">
                 {active ? (
