@@ -28,7 +28,7 @@ import {
 } from "./session-list-store";
 import { publishSessionRow } from "./session-row-events";
 import { workspacePrHead } from "./session-pr-target";
-import { getWorkspace } from "./workspaces";
+import { peekWorkspace } from "./workspaces";
 import { activeRunRecords } from "./run-journal";
 import {
   getRunState,
@@ -192,7 +192,12 @@ export async function publishSessionRowsForBranch(
     }
     const ids = new Set(rows.map((session) => session.id));
     for (const workspaceId of (await indexedActiveWorkspaceIds()) ?? []) {
-      const workspace = await getWorkspace(workspaceId);
+      // GitHub can deliver dozens of branch events together. The workspace
+      // projection is already warmed before the session index and maintained
+      // by every writer, so a branch refresh must not turn that burst into one
+      // authoritative catalog RPC per active workspace. That fan-out used to
+      // saturate the shared catalog lane and shed unrelated session writes.
+      const workspace = peekWorkspace(workspaceId);
       if (!workspace || workspacePrHead(workspace) !== branch) continue;
       for (const member of await indexedWorkspaceMembers(workspaceId))
         if (!member.archived) ids.add(member.id);
