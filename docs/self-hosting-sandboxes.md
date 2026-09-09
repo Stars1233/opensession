@@ -69,8 +69,8 @@ Needs attention, with manual sleep, wake, and recreate, plus the `setup` and
 `resume` logs.
 
 A session that started on this machine can move into a Sandbox later. The
-**This machine** badge on a code session offers _Move to Daytona_ or _Move to
-Box_ (`POST /api/sessions/<id>/sandbox/attach`). The session records the
+session's ⋯ menu offers _Move to Sandbox_ with the ready providers, Daytona
+or Box (`POST /api/sessions/<id>/sandbox/attach`). The session records the
 provider as Preparing, its Portals on this machine stop, and the Sandbox is
 provisioned in the background; the badge turns Awake when it is up. The next
 message takes the same path as a Sandbox session's first turn and adopts that
