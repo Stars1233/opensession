@@ -59,6 +59,7 @@ touches an in-process tool:
 | [`opensession-ask`](#opensession-ask) | 1 | interactive, Slack loop | Needs a session id. |
 | [`opensession-workflows`](#opensession-workflows) | 8 | interactive, automation | Automation runs get it ONLY with the human-set `workflows` flag. |
 | [`opensession-assets`](#opensession-assets) | 4 | interactive | Needs a session id. Works in read-only Ask mode — assets land outside the checkout. |
+| [`opensession-charts`](#opensession-charts) | 1 | interactive, automation | Needs a session id. Held to the automation bar: its only write is offloaded chart data into the calling session's own assets. |
 | [`opensession-pull-requests`](#opensession-pull-requests) | 3 | interactive | Only on a turn a connected person started: never a review handoff, a worker report, or an automation. |
 | [`opensession-todos`](#opensession-todos) | 5 | interactive | Needs a session id. |
 | [`opensession-schedule`](#opensession-schedule) | 3 | interactive | Needs a session id. |
@@ -71,7 +72,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-30 servers, 134 tools.
+31 servers, 135 tools.
 
 ## opensession-sessions
 
@@ -872,6 +873,21 @@ Read back a text asset from this session's asset storage (capped at 256 KB).
 `mcp__opensession-assets__delete_asset` · input: `path` (string, required)
 
 Delete a file or virtual folder from this session's asset storage.
+
+## opensession-charts
+
+Validate a Vega-Lite spec and get the ```vega-lite fence that renders as an interactive chart.
+
+- **Source** `packages/core/opensession-server/src/server/charts-mcp.ts`
+- **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`, `packages/core/opensession-server/src/server/automations.ts`
+- **Runs** interactive, automation
+- **Condition** Needs a session id. Held to the automation bar: its only write is offloaded chart data into the calling session's own assets.
+
+### `make_chart`
+
+`mcp__opensession-charts__make_chart` · input: `spec` (object | string, required), `data` (any[]), `title` (string), `name` (string)
+
+Turn a Vega-Lite spec into the ```vega-lite fence that renders as an interactive chart (tooltips, zoom, brushing) in this session. Compiles the spec with the same library the client uses and returns errors with their paths instead of a silent code block; large inline data is moved to a session asset the chart loads from. Paste the returned fence verbatim into your reply, on its own lines. Keep specs small and readable: aggregate first, use `data.values` (or the data argument) rather than external URLs, and omit width so the chart fills the column.
 
 ## opensession-pull-requests
 

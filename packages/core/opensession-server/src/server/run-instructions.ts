@@ -202,7 +202,11 @@ export function buildRunInstructions(input: {
 
   parts.push(
     "## Media\nShow selected results with `OPENSESSION_IMAGE: /abs/path.png` or " +
-      "`OPENSESSION_VIDEO: /abs/path.mp4`.",
+      "`OPENSESSION_VIDEO: /abs/path.mp4`. Charts: a ```vega-lite fence with inline " +
+      "`data.values`." +
+      (inproc["opensession-charts"]
+        ? " `make_chart` validates one and offloads large data."
+        : ""),
   );
   // Instance-local operator instructions last: they're the deployment's own
   // additions and may refine anything above.
