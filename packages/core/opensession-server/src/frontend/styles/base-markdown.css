@@ -704,9 +704,11 @@ html[data-theme="light"] .composer-hl .cmp-fence {
   white-space: pre;
   overflow-wrap: normal;
 }
-/* Keep the first line clear of both visible icon controls. */
+/* Keep the first line clear of both visible icon controls. The token lets
+   the diff wash below bleed exactly as far as the padding goes. */
 .md-code-wrap > pre {
-  padding-right: 80px;
+  --code-pad-right: 80px;
+  padding-right: var(--code-pad-right);
 }
 .md-code-controls {
   position: absolute;
@@ -888,7 +890,7 @@ html[data-theme="light"] .composer-hl .cmp-fence {
     top: 52px;
   }
   .md-code-wrap > pre {
-    padding-right: 104px;
+    --code-pad-right: 104px;
   }
 }
 
@@ -1360,6 +1362,35 @@ html[data-theme="light"] span.commit-ref:hover {
 .shiki-gutter {
   color: var(--text-faint);
   user-select: none;
+}
+
+/* ── Diff fences ────────────────────────────────────────────────
+   A ```diff fence washes its whole + and - rows (lib/shiki-engine.ts marks
+   them), so a patch written into a message reads like the tool-call diffs
+   beside it instead of tinting only the ink. Each row becomes a full-width
+   inline-block so it spans the well; the wash is a pseudo-element bled out
+   over the well's padding, because the row's own box stops at the content
+   edge. The row isolates so the wash can sit under its text and still above
+   the well. Scoped to `.markdown`: a tool result's <pre> has its own
+   padding, and its real diffs come from @pierre/diffs. */
+.markdown .md-code-diff .line {
+  display: inline-block;
+  width: 100%;
+  position: relative;
+  isolation: isolate;
+}
+.markdown .md-code-diff .diff-add::before,
+.markdown .md-code-diff .diff-del::before {
+  content: "";
+  position: absolute;
+  inset: 0 calc(-1 * var(--code-pad-right, 12px)) 0 -12px;
+  z-index: -1;
+}
+.markdown .md-code-diff .diff-add::before {
+  background: var(--green-soft);
+}
+.markdown .md-code-diff .diff-del::before {
+  background: var(--red-soft);
 }
 
 /* ── Docs (`.markdown wiki-doc`) ─────────────────────────────
