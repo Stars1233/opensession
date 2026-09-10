@@ -1193,6 +1193,18 @@ export function folderIconMarkup(size = MIN_ICON_SIZE): string {
   return iconMarkup(pathsMarkup([FOLDER_PATH]), size);
 }
 
+/** The two chevrons of IconChevronLeft and IconChevronRight pulled in to
+ *  one glyph: the grip of a before/after slider (lib/compare-block.ts). */
+export function chevronsLeftRightIconMarkup(size = MIN_ICON_SIZE): string {
+  return iconMarkup(
+    pathsMarkup([
+      "M9.25 7.75L5 12L9.25 16.25",
+      "M14.75 7.75L19 12L14.75 16.25",
+    ]),
+    size,
+  );
+}
+
 export function IconTrash(p: IconProps) {
   return (
     <Svg {...p}>
