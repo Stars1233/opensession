@@ -30,7 +30,7 @@ import { syncAgentSessionEngine } from "./agent-session-sync";
 import { cancelAgentWait } from "./agent-waits";
 import { runAgentHosted } from "./host-client";
 import { getRunState, transitionRunState } from "./run-state";
-import { resolveSessionRunInputs } from "./session-run-inputs";
+import { resolveSessionRunInputs, runAccountSpec } from "./session-run-inputs";
 import { defaultRepo } from "./config";
 import { isDevInstance } from "./dev-mode";
 import {
@@ -1827,6 +1827,7 @@ export function sandboxRunSecuritySpec(
   opts: {
     isAutomationSession: boolean;
     user?: string;
+    accountUser?: string;
     mcpServers?: McpScope;
     deniedTools?: Record<string, string>;
   },
@@ -1840,6 +1841,7 @@ export function sandboxRunSecuritySpec(
   | "aws"
   | "user"
   | "mcpGrantUser"
+  | "accountUser"
   | "journalKind"
   | "trustProfile"
 > {
@@ -1866,6 +1868,9 @@ export function sandboxRunSecuritySpec(
     mcpGrantUser: opts.isAutomationSession
       ? undefined
       : session.createdByLogin || undefined,
+    // The person pressing send may spend their own subscription even in an
+    // automation-owned session; the identity stops at account selection.
+    accountUser: opts.accountUser,
     journalKind: opts.isAutomationSession ? "automation" : "prompt",
     trustProfile: opts.isAutomationSession ? "automation" : "interactive",
   };
@@ -1885,6 +1890,7 @@ export async function maybeLaunchSandboxedRun(
     promptCarriesHandoff?: boolean;
     cwd: string;
     user?: string;
+    accountUser?: string;
     images?: ImageInput[];
     mcpServers?: McpScope;
     deniedTools?: Record<string, string>;
@@ -2176,13 +2182,9 @@ export async function maybeLaunchSandboxedRun(
         : interactiveFallbackModel(session.model),
       effort: portablePreset?.effort ?? session.effort,
       fastMode: session.fastMode,
-      accountId: disposableAutomationResume
-        ? owningAutomation?.accountId
-        : session.accountId,
-      accountStrict: disposableAutomationResume ? true : undefined,
-      usageCredits: disposableAutomationResume
-        ? owningAutomation?.usageCredits
-        : undefined,
+      // A disposable automation resume carries the automation's hard pin for
+      // its own turns; a person's takeover turn carries none (runAccountSpec).
+      ...runAccountSpec(session, opts, owningAutomation),
     };
     if (isAgentSessionCancelled(session.id, opts.startToken)) {
       unregisterRunToken(rpcToken);
@@ -3065,6 +3067,7 @@ async function runSessionPromptInner(
         promptCarriesHandoff: !!switchHandoff,
         cwd,
         user,
+        accountUser: runInputs.accountUser,
         images,
         mcpServers: mcpServers ?? "all",
         deniedTools,
@@ -3167,10 +3170,13 @@ async function runSessionPromptInner(
           aws: !isAutomationSession,
           author: commitAuthorFor(user, sessionPrincipal(session)),
           user: runInputs.user,
+          accountUser: runInputs.accountUser,
           fallbackModel: interactiveFallbackModel(session.model),
           effort: session.effort,
           fastMode: session.fastMode,
-          accountId: session.accountId,
+          // Session pin, except for a person's turn in an automation-owned
+          // session: they pay personal-first with the pool as backup.
+          ...runAccountSpec(session, runInputs),
           trustProfile: isAutomationSession ? "automation" : "interactive",
           journalKind: "prompt",
           onAskUser: makeAskHandler(sessionId),
@@ -3223,8 +3229,10 @@ async function runSessionPromptInner(
       effort: session.effort,
       fastMode: session.fastMode,
       // Pinned subscription for this session (claude-runner prefers it, pool
-      // fallback on exhaustion). Ignored by Codex models.
-      accountId: session.accountId,
+      // fallback on exhaustion). Ignored by Codex models. A person's turn in
+      // an automation-owned session carries no pin, so their own subscription
+      // is tried before the automation's account and the pool.
+      ...runAccountSpec(session, runInputs),
       // Only switch models when a fallback is explicitly configured. By default,
       // usage exhaustion stops the run so the human can choose what to do.
       fallbackModel: interactiveFallbackModel(session.model),
@@ -3284,6 +3292,9 @@ async function runSessionPromptInner(
       // Gate per-user MCP servers (allowedUsers) to the prompt's author. Automation
       // sessions pass no user, so they never see a user-restricted server.
       user: runInputs.user,
+      // The person who sent the prompt may spend their own subscription even
+      // when the session is automation-owned (the pool stays the backup).
+      accountUser: runInputs.accountUser,
       // The creator grant also gives provider routing a safe human identity for
       // synthetic continuations such as worker reports and restart recovery.
       mcpGrantUser: runInputs.mcpGrantUser,
