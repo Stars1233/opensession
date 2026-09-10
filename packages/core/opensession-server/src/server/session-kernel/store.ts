@@ -1797,6 +1797,11 @@ export class SessionKernelStore {
     // as already acknowledged. It never makes run/command/outbox state
     // ambiguous, so unrelated live state must not strand the whole session.
     if (commandKind === "transcript:ack_wake") return true;
+    // Older workers evaluated critical-settlement handling before recognizing
+    // SessionQuarantinedError. The rejected operation never executed, but the
+    // handler could persist its rejection as a second quarantine in the other
+    // store. This exact derived record carries no additional uncertainty.
+    if (reason?.startsWith(`Session ${sessionId} is quarantined:`)) return true;
     const recoverableSettlement =
       this.recoverableGatewaySettlementCommands(sessionId, commandKind) ??
       this.recoverableDeliverySettlementCommands(

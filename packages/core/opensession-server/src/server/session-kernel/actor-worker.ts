@@ -425,7 +425,13 @@ export function startSessionKernelActorWorker(): void {
       const infrastructure = isSessionKernelInfrastructureFailure(error);
       const critical =
         request.t === "reduce" && isCriticalSettlementCommand(request.command);
-      if (infrastructure || critical) {
+      if (error instanceof SessionQuarantinedError) {
+        // A rejected mutation did not execute. Preserve and report the
+        // original quarantine instead of treating a critical settlement's
+        // rejection as a second ambiguous write in the other store.
+        responseCode = error.code;
+        responseSessionId = error.sessionId;
+      } else if (infrastructure || critical) {
         const replaySafeWakeAck =
           infrastructure &&
           request.t === "reduce" &&
@@ -462,9 +468,6 @@ export function startSessionKernelActorWorker(): void {
             responseCode = "actor_fatal";
           }
         }
-      } else if (error instanceof SessionQuarantinedError) {
-        responseCode = error.code;
-        responseSessionId = error.sessionId;
       } else if (
         error &&
         typeof error === "object" &&
