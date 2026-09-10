@@ -126,6 +126,20 @@ describe("buildMergeRiskPrompt", () => {
     expect(prompt).not.toContain("truncated");
   });
 
+  test("counts the live window, not only the revert", () => {
+    const prompt = buildMergeRiskPrompt({ pr, patch: "", hints: [] });
+    // A read-side change to persisted data reinterprets the whole corpus.
+    expect(prompt).toContain("- `stored_data_semantics`");
+    expect(prompt).toContain("every stored record at once");
+    // Output users already downloaded is not restored by a revert.
+    expect(prompt).toContain("- `delivered_output`");
+    expect(prompt).toContain(
+      "A revert fixes the next request, not the last one",
+    );
+    // Silent breakage is noticed later, and that time counts.
+    expect(prompt).toContain("Time to notice is part of recovery time");
+  });
+
   test("bounds the patch and says so", () => {
     const prompt = buildMergeRiskPrompt({
       pr,
