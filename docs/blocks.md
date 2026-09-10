@@ -70,9 +70,19 @@ fence is a display block as well.
 
 ### Colour
 
-A ` ```palette ` fence lists one colour per line, `#hex` or any CSS
-colour, optionally followed by a name. A hex colour in a codespan
-(`` `#ff0080` ``) gets a swatch chip beside it.
+A ` ```palette ` fence lists one colour per line, with an optional
+name on either side: `#ff0080 Brand pink` or `Brand pink: #ff0080`. A
+colour is `#hex` (3, 4, 6 or 8 digits), a colour function with a flat
+argument list (`rgb()`, `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`,
+`oklch()`, `color()`; no `color-mix()` or `calc()`), or a CSS colour
+name. A trailing `;` or `,` on the value is ignored, so lines lifted from
+a stylesheet parse. Blank lines are skipped; any other line that is not a
+colour keeps the whole fence as code. Each swatch copies its value on
+click.
+
+A codespan that is exactly a six or eight digit hex (`` `#ff0080` ``)
+gets a swatch chip before the text. Three and four digit forms do not,
+since `#123` in a codespan is usually an issue number or an anchor.
 
 ### JSON tree
 

@@ -1,6 +1,7 @@
 import { Marked, type Token, type TokenizerThis, type Tokens } from "marked";
 import { BASE_PATH } from "./base";
 import { sanitizeHtmlFragment } from "./html-sanitize";
+import { hexSwatchColor } from "./palette-block";
 import { prStatusDisplay, type PrStatusInput } from "./pr-status";
 import { repoLabel } from "./repo-label";
 import { cleanSessionTitle } from "./session-title";
@@ -1325,6 +1326,11 @@ md.use({
       if (!renderInLink && SESSION_ID_EXACT.test(t)) return sessionLink(t);
       if (!renderInLink && AUTOMATION_ID_EXACT.test(t))
         return automationChip(t);
+      // A hex colour gets a swatch chip. The style is built from the
+      // validated, lowercased hex only, never from the span's raw text.
+      const swatch = hexSwatchColor(t);
+      if (swatch)
+        return `<code><span class="md-color-chip" style="background:${swatch}"></span>${attr(t)}</code>`;
       return `<code>${attr(t)}</code>`;
     },
     image(token: Tokens.Image) {

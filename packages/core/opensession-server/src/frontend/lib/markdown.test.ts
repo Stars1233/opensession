@@ -1319,3 +1319,37 @@ describe("GitHub user-attachment media", () => {
     expect(html).toContain(`<a href="${proxied}"`);
   });
 });
+
+describe("renderMarkdown hex colour codespans", () => {
+  it("puts a swatch chip before a six or eight digit hex codespan", () => {
+    expect(renderMarkdown("Use `#FF0080` here.")).toContain(
+      '<code><span class="md-color-chip" style="background:#ff0080"></span>#FF0080</code>',
+    );
+    expect(renderMarkdown("`#ff0080cc`")).toContain(
+      'style="background:#ff0080cc"></span>#ff0080cc</code>',
+    );
+  });
+
+  it("leaves short hashes and anything that is not exactly a hex alone", () => {
+    for (const span of [
+      "#123",
+      "#abcd",
+      "#5528",
+      "#ff0080 brand",
+      "#ff0080;",
+      "gg0080",
+      "#ff008",
+    ]) {
+      const html = renderMarkdown(`See \`${span}\`.`);
+      expect(html).not.toContain("md-color-chip");
+      expect(html).toContain(`<code>${span}</code>`);
+    }
+  });
+
+  it("never lets raw span text reach the style attribute", () => {
+    const html = renderMarkdown('`#ff0080" onmouseover="x`');
+    expect(html).not.toContain("md-color-chip");
+    expect(html).not.toContain("style=");
+    expect(html).toContain("<code>#ff0080&quot; onmouseover=&quot;x</code>");
+  });
+});
