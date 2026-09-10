@@ -599,6 +599,30 @@ describe("per-session session kernel storage", () => {
     host.close();
   });
 
+  test("releases a replay-safe transcript wake acknowledgement during a live run", () => {
+    const path = paths();
+    const host = new SessionKernelStoreHost(path.central, path.isolated);
+    const sessionId = "wake-ack-repair-session";
+    host.call("setRunState", [
+      { sessionId, state: "running", event: "prompt" },
+    ]);
+    host.quarantineSession(
+      sessionId,
+      "database or disk is full",
+      "transcript:ack_wake",
+    );
+
+    expect(host.quarantinedSession(sessionId)).toMatchObject({
+      repairable: true,
+    });
+    expect(host.call("releaseQuarantine", [sessionId])).toBe(true);
+    expect(host.quarantinedSession(sessionId)).toBeUndefined();
+    expect(host.storeForSession(sessionId).runState(sessionId).state).toBe(
+      "running",
+    );
+    host.close();
+  });
+
   test("repairs a committed outbox settlement while replay-safe lifecycle work remains", () => {
     const path = paths();
     const host = new SessionKernelStoreHost(path.central, path.isolated);

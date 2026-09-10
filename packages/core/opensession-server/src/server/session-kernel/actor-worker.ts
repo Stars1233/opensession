@@ -426,6 +426,11 @@ export function startSessionKernelActorWorker(): void {
       const critical =
         request.t === "reduce" && isCriticalSettlementCommand(request.command);
       if (infrastructure || critical) {
+        const replaySafeWakeAck =
+          infrastructure &&
+          request.t === "reduce" &&
+          request.command.kind === "transcript" &&
+          request.command.request.op === "ack_wake";
         if (
           !sessionId ||
           isSessionKernelCentralStoreFailure(error) ||
@@ -433,6 +438,11 @@ export function startSessionKernelActorWorker(): void {
         ) {
           failStop = true;
           responseCode = "actor_fatal";
+        } else if (replaySafeWakeAck) {
+          // This monotonic acknowledgement is safe to retry after transient
+          // storage pressure. Quarantining would incorrectly fence an active
+          // run even though no lifecycle state became ambiguous.
+          responseCode = "retryable";
         } else {
           try {
             const commandKind =
