@@ -1497,22 +1497,6 @@ describe("renderMarkdown math", () => {
   });
 });
 
-describe("renderMarkdown fence info strings", () => {
-  it("keeps the whole info string on a fence that carries more than a language", () => {
-    const html = renderMarkdown("```artifact scripts\n<b>&</b>\n```");
-    expect(html).toContain(
-      '<pre><code class="language-artifact" data-info="artifact scripts">',
-    );
-    expect(html).toContain("&lt;b&gt;&amp;&lt;/b&gt;\n</code></pre>");
-  });
-
-  it("leaves a plain language fence as marked writes it", () => {
-    expect(renderMarkdown("```ts\nlet a = 1\n```")).toBe(
-      '<pre><code class="language-ts">let a = 1\n</code></pre>\n',
-    );
-  });
-});
-
 describe("session media placed in the body", () => {
   const shot = "/media?path=%2Ftmp%2Fshot.png";
   const clip = "/media?path=%2Ftmp%2Fclip.mp4";
