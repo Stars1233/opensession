@@ -18,6 +18,7 @@
 import { ansiUpgrader } from "./ansi-block";
 import { artifactUpgrader } from "./artifact-block";
 import { chartUpgrader } from "./chart-fence";
+import { choicesUpgrader } from "./choices-block";
 import { jsonTreeUpgrader } from "./json-tree-block";
 import { mathUpgrader } from "./math-block";
 import { mermaidUpgrader } from "./mermaid-fence";
@@ -25,6 +26,7 @@ import { paletteUpgrader } from "./palette-block";
 import { tableUpgrader } from "./table-block";
 import { metricsUpgrader } from "./metrics-block";
 import { slidesUpgrader } from "./slides-block";
+import { treeUpgrader } from "./tree-block";
 import type { EffectiveTheme } from "./theme";
 
 export interface FenceUpgradeContext {
@@ -95,6 +97,8 @@ export const FENCE_UPGRADERS: readonly FenceUpgrader[] = [
   ansiUpgrader,
   artifactUpgrader,
   slidesUpgrader,
+  choicesUpgrader,
+  treeUpgrader,
 ];
 
 /** The upgrader that claims a fence, if any. */

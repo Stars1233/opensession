@@ -132,15 +132,21 @@ a hundred, or more than one ragged row in ten keeps the plain code fence.
 
 ### Quick replies
 
-A ` ```choices ` fence lists one reply per line. Each renders as a chip;
-picking one sends that text as the next message. Chips go quiet once a
-message has been sent after them.
+A ` ```choices ` fence lists one reply per line (a leading `- ` is
+tolerated), up to twelve. Each renders as a chip; picking one sends that
+text as the next message on the composer's own path, so it queues while a
+run is busy. Chips go quiet once any later user message exists, and
+wherever there is no session to send into.
 
 ### File trees
 
-A ` ```tree ` fence holds an indented tree (two spaces per level, or
-`tree` CLI box-drawing output). Directories fold; a file row opens that file
-in the workspace pane when the session has one.
+A ` ```tree ` fence holds an indented tree (two spaces or a tab per level,
+a trailing `/` marks a directory) or `tree` CLI box-drawing output
+(`├──`, `│`, `└──`, the ASCII charset too). A trailing `# note` on a line
+shows dim beside the name. Directories fold, the top two levels open. A
+file row opens that file in the Changes pane when it is one of the
+session's changed files; the app has no viewer for an arbitrary repo file,
+so any other row is a label.
 
 ### Artifacts
 

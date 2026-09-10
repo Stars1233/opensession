@@ -591,14 +591,17 @@ export function IconTerminal(p: IconProps) {
   );
 }
 
+const FILE_PATHS = [
+  "M7.75 19.25H16.25C17.3546 19.25 18.25 18.3546 18.25 17.25V9L14 4.75H7.75C6.64543 4.75 5.75 5.64543 5.75 6.75V17.25C5.75 18.3546 6.64543 19.25 7.75 19.25Z",
+  "M18 9.25H13.75V5",
+];
+
 export function IconFile(p: IconProps) {
   return (
     <Svg {...p}>
-      <path
-        {...stroke}
-        d="M7.75 19.25H16.25C17.3546 19.25 18.25 18.3546 18.25 17.25V9L14 4.75H7.75C6.64543 4.75 5.75 5.64543 5.75 6.75V17.25C5.75 18.3546 6.64543 19.25 7.75 19.25Z"
-      />
-      <path {...stroke} d="M18 9.25H13.75V5" />
+      {FILE_PATHS.map((d) => (
+        <path key={d} {...stroke} d={d} />
+      ))}
     </Svg>
   );
 }
@@ -795,13 +798,13 @@ export function IconPin(p: IconProps) {
   );
 }
 
+const FOLDER_PATH =
+  "M4.75 16.25V7.75C4.75 6.64543 5.64543 5.75 6.75 5.75H9.68934C9.88823 5.75 10.079 5.82902 10.2197 5.96967L12 7.75H17.25C18.3546 7.75 19.25 8.64543 19.25 9.75V16.25C19.25 17.3546 18.3546 18.25 17.25 18.25H6.75C5.64543 18.25 4.75 17.3546 4.75 16.25Z";
+
 export function IconFolder(p: IconProps) {
   return (
     <Svg {...p}>
-      <path
-        {...stroke}
-        d="M4.75 16.25V7.75C4.75 6.64543 5.64543 5.75 6.75 5.75H9.68934C9.88823 5.75 10.079 5.82902 10.2197 5.96967L12 7.75H17.25C18.3546 7.75 19.25 8.64543 19.25 9.75V16.25C19.25 17.3546 18.3546 18.25 17.25 18.25H6.75C5.64543 18.25 4.75 17.3546 4.75 16.25Z"
-      />
+      <path {...stroke} d={FOLDER_PATH} />
     </Svg>
   );
 }
@@ -1178,6 +1181,16 @@ export function chevronLeftIconMarkup(size = MIN_ICON_SIZE): string {
 /** <IconChevronRight> as markup: the fold caret on a JSON tree row. */
 export function chevronRightIconMarkup(size = MIN_ICON_SIZE): string {
   return iconMarkup(pathsMarkup([CHEVRON_RIGHT_PATH]), size);
+}
+
+/** <IconFile> as markup. */
+export function fileIconMarkup(size = MIN_ICON_SIZE): string {
+  return iconMarkup(pathsMarkup(FILE_PATHS), size);
+}
+
+/** <IconFolder> as markup. */
+export function folderIconMarkup(size = MIN_ICON_SIZE): string {
+  return iconMarkup(pathsMarkup([FOLDER_PATH]), size);
 }
 
 export function IconTrash(p: IconProps) {

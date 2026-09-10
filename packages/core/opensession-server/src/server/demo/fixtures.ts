@@ -319,6 +319,28 @@ export function demoSessions(opts: {
           iso(t0 + 170_000),
           MODEL_FABLE,
         ),
+        // Blocks that talk back to the session: a file tree whose rows open
+        // the changed file, and quick replies that send as the next turn.
+        transcriptLineAssistantText(
+          "The fix touches these files:\n\n" +
+            "```tree\n" +
+            "acme-todo/\n" +
+            "├── src/\n" +
+            "│   ├── upload.ts  # retry loop\n" +
+            "│   └── upload.test.ts\n" +
+            "├── NOTES.md\n" +
+            "└── package.json\n" +
+            "```\n\n" +
+            "How do you want to proceed?\n\n" +
+            "```choices\n" +
+            "- Merge the PR\n" +
+            "- Add a test for the terminal error\n" +
+            "- Explain the fix again\n" +
+            "```",
+          "demo-pr-a4",
+          iso(t0 + 190_000),
+          MODEL_FABLE,
+        ),
       ],
     });
   }

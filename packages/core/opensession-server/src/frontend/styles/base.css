@@ -39,3 +39,5 @@
 @import "./base-keyframes.css";
 @import "./blocks/palette.css";
 @import "./blocks/table.css";
+@import "./blocks/choices.css";
+@import "./blocks/tree.css";
