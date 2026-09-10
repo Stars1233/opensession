@@ -80,7 +80,7 @@ sequenceDiagram
   - ```metrics (`Label: value (delta)` per line): a row of metric cards.
   - ```choices (one reply per line): chips the reader clicks to send that reply. Use it when you end a turn with a small set of options.
   - ```tree (indented, trailing `/` for directories, or `tree` CLI output): a collapsible file tree.
-  - ```artifact (a complete HTML document or fragment) or ```svg: a sandboxed preview with a source toggle; add `scripts` to the info string only when it needs them. ```slides (markdown split on `---`): a swipeable deck.
+  - ```artifact (a complete HTML document or fragment) or ```svg: a sandboxed preview with a source toggle, scripts never run. ```slides (markdown split on `---`): a swipeable deck.
 
 - Use `diff` when the point is what changes and the surrounding shape already exists. Match the diff shape to the topic.
 
