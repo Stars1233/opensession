@@ -16,6 +16,7 @@
  */
 
 import { chartUpgrader } from "./chart-fence";
+import { mathUpgrader } from "./math-block";
 import { mermaidUpgrader } from "./mermaid-fence";
 import { paletteUpgrader } from "./palette-block";
 import { tableUpgrader } from "./table-block";
@@ -80,6 +81,7 @@ export const FENCE_UPGRADERS: readonly FenceUpgrader[] = [
   paletteUpgrader,
   tableUpgrader,
   metricsUpgrader,
+  mathUpgrader,
 ];
 
 /** The upgrader that claims a fence, if any. */
