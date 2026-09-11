@@ -46,9 +46,12 @@ interface DeskConversationProps {
   model?: string;
   effort?: string;
   hideBefore?: string;
-  /** While a voice call is live, typed messages go into it instead of
-   *  starting a text run. Return false to fall through to the normal send. */
-  voiceSend?: (text: string) => boolean;
+  /** Present while a voice call is up: typed messages go into it instead of
+   * starting a text run. Resolves true once the call has taken the text;
+   * false means it did not, and the draft must survive. */
+  voiceSend?: (text: string) => Promise<boolean>;
+  /** The voice call control, rendered in the composer beside dictation. */
+  voiceCall?: { active: boolean; status?: string; onToggle: () => void };
   /** Drill into a session a tool call spawned (the Desk delegates constantly).
    *  The overlay has no side pane, so this opens it in the full viewer. */
   onOpenSubagent?: (sessionId: string) => void;
@@ -72,6 +75,7 @@ export function DeskConversation({
   effort: sessionEffort,
   hideBefore,
   voiceSend,
+  voiceCall,
   onOpenSubagent,
   suggestions,
 }: DeskConversationProps) {
@@ -398,11 +402,12 @@ export function DeskConversation({
 
   // Returns true when the message was consumed, so the (uncontrolled) Composer
   // clears its draft; false keeps it for a retry — same contract as the
-  // session view.
+  // session view. The voice path answers asynchronously: the draft clears
+  // only once the call has acknowledged the text.
   function handleSend(
     raw: string,
     opts?: { steer?: boolean; pastedTexts?: string[] },
-  ): boolean {
+  ): boolean | Promise<boolean> {
     const content = raw.trim();
     const pastedTexts = opts?.pastedTexts ?? [];
     if (!connected) return false;
@@ -432,11 +437,33 @@ export function DeskConversation({
       ]);
       return true;
     }
-    // Live voice call: inject the typed message into it (the call mirrors its
+    // Live voice call: a text-only message goes into it (the call mirrors its
     // transcript back, so no optimistic bubble — the entry lands via append).
-    if (content && voiceSend?.(content)) {
-      followRef.current = true;
-      return true;
+    // Attachments can't ride a call, so they take the ordinary path below.
+    if (
+      voiceSend &&
+      content &&
+      images.length === 0 &&
+      files.length === 0 &&
+      pastedTexts.length === 0
+    ) {
+      return voiceSend(content).then((taken) => {
+        if (taken) {
+          followRef.current = true;
+          return true;
+        }
+        setEntries((prev) => [
+          ...prev,
+          {
+            id: randomUUID(),
+            type: "system",
+            content:
+              "The voice call didn't take that message. Try again, or end the call to send it as text.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        return false;
+      });
     }
     // Prefer the staged disk path (HTTP upload); fall back to inline dataUrl.
     const filePayload = files.map((f) =>
@@ -609,6 +636,7 @@ export function DeskConversation({
             onDictationActive={handleDictationActive}
             config={{
               draftKey: `desk:${sessionId}`,
+              call: voiceCall,
               attachmentShortcutActive: presenceActive,
               placeholder: connected
                 ? placeholder || "Ask your Desk…"
@@ -641,6 +669,7 @@ export function DeskConversation({
               mentionFetch: (query) => fetchFileMentions(query, sessionId),
               paletteFetch: (query) =>
                 fetchMentionSuggestions(query, sessionId, getCurrentUser()),
+              onToggleCall: voiceCall?.onToggle,
             }}
           />
           <FullPageFileDropOverlay active={fileDragActive} />

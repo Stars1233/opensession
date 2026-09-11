@@ -53,9 +53,9 @@ function DeskBody({
     {},
   );
 
-  // Voice mode (Settings → Desk voice): a live GPT Realtime call layered on
-  // this same Desk session. The call mirrors its transcript into the session,
-  // so the conversation below updates live while you talk.
+  // Voice mode (Settings → Desk voice): a GPT-Live call layered on this same
+  // Desk session. The server mirrors the call's transcript into the session,
+  // so the conversation below updates while you talk.
   const [voiceEnabled, setVoiceEnabled] = useState(getDeskVoicePref);
   const [voiceState, setVoiceState] = useState<DeskVoiceState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -73,8 +73,19 @@ function DeskBody({
   );
 
   const voiceActive = voiceState !== "idle" && voiceState !== "error";
+  const voiceStatus: Record<DeskVoiceState, string | undefined> = {
+    idle: undefined,
+    error: undefined,
+    connecting: "Connecting…",
+    listening: "Listening",
+    thinking: "Thinking…",
+    speaking: "Speaking",
+    action: "Working…",
+  };
 
   function toggleVoice() {
+    // `active` covers a start still connecting: pressing the handset again
+    // then cancels that start instead of layering a second call on it.
     if (voiceRef.current?.active) {
       voiceRef.current.stop();
       return;
@@ -164,13 +175,7 @@ function DeskBody({
           >
             {voiceState === "error"
               ? (voiceError ?? "Voice call failed")
-              : {
-                  connecting: "Connecting…",
-                  listening: "Listening",
-                  thinking: "Thinking…",
-                  speaking: "Speaking",
-                  action: "Working…",
-                }[voiceState]}
+              : voiceStatus[voiceState]}
           </span>
         )}
         <Button
@@ -221,8 +226,22 @@ function DeskBody({
             model={settings.model}
             effort={settings.effort}
             hideBefore={clearedAt}
-            voiceSend={(text) =>
-              voiceRef.current?.active ? voiceRef.current.sendText(text) : false
+            voiceSend={
+              voiceActive
+                ? (text) =>
+                    voiceRef.current?.sendText(text) ?? Promise.resolve(false)
+                : undefined
+            }
+            // The handset lives in the composer beside dictation; the header
+            // label above shows the call's state.
+            voiceCall={
+              voiceEnabled
+                ? {
+                    active: voiceActive,
+                    status: voiceStatus[voiceState],
+                    onToggle: toggleVoice,
+                  }
+                : undefined
             }
             // The Desk's job is delegating, so its transcript is full of
             // spawned workers. There's no side pane in a modal — open the

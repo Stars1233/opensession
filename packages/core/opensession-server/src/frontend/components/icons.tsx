@@ -1463,6 +1463,19 @@ export function IconPhone(p: IconProps) {
   );
 }
 
+// A handset for a live call, as distinct from IconPhone's device and
+// IconMic's dictation. One continuous stroke so it stays legible at 20px.
+export function IconCall(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path
+        {...stroke}
+        d="M7.4 4.75c.5 0 .95.3 1.14.76l1.12 2.7c.17.41.1.88-.19 1.22l-1.3 1.53a11.3 11.3 0 0 0 4.87 4.87l1.53-1.3c.34-.29.81-.36 1.22-.19l2.7 1.12c.46.19.76.64.76 1.14v1.9c0 .93-.8 1.68-1.73 1.6C10.53 19.36 4.64 13.47 3.9 6.48A1.6 1.6 0 0 1 5.5 4.75h1.9Z"
+      />
+    </Svg>
+  );
+}
+
 // Friendly machine face for automation-owned sessions. Kept geometric and
 // neutral so it reads as origin, not as a chat persona or assistant avatar.
 export function IconRobot(p: IconProps) {
