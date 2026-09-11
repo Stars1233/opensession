@@ -694,6 +694,9 @@ html[data-theme="light"] .composer-hl .cmp-fence {
   margin: 6px 0;
   display: block;
   background: #000;
+  /* Keep the letterbox black off the translucent border: painted under it,
+     the 25% grey reads as near-black, much heavier than an image's edge. */
+  background-clip: padding-box;
 }
 .md-video-wrap {
   position: relative;
