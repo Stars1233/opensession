@@ -33,6 +33,14 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   row stays findable and its menu offers "Restore to my sidebar". An open
   teammate, automation, or spawned session can also be claimed from its native
   action surface with "Add to sidebar", sharing `/api/lanes` with the web.
+  A claim, snooze or hide made on another client lands here without a
+  foreground: the server's `user_map_changed` frame names the map, the
+  matching store re-reads it (`UserMapSync`), and the list refetches its rows.
+  Each store orders its re-reads (`HydrationClock`): a slower, older GET, or
+  one begun before a write this client confirmed, is dropped rather than
+  applied over the newer map, and a write's own response is installed only
+  when no re-read began after the write started (the server broadcasts the
+  frame before it answers the PUT); otherwise the store re-reads.
   Unread rows
   read like the web sidebar's, off the same shared store (`/api/reads`): a row
   whose sessions carry activity past your last read goes semibold at full label
