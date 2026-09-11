@@ -36,6 +36,7 @@ import {
 import { getRepo } from "../worktree";
 import { configuredServer } from "../config";
 import { portalNavigationRequest } from "../portal-sign-in";
+import { hostPortalActivity } from "../portal-lifecycle";
 import { portalWaitingResponse } from "../portal-waiting-page";
 import { sleepingSandboxPortalStatus } from "../sandbox-portals";
 import type { UnifiedSession } from "../types";
@@ -98,7 +99,7 @@ export async function handlePreviewRoutes(
     try {
       // Host Portals keep their authenticated Caddy route while sleeping. A
       // real navigation wakes one; background fetches from stale tabs do not.
-      const hostPortal = hostPortalRouteStatus(httpsPort - 6_000);
+      const hostPortal = await hostPortalRouteStatus(httpsPort - 6_000);
       if (hostPortal) {
         if (!portalRouteAuthorized(httpsPort))
           return notActive(hostPortal.sessionId);
@@ -193,6 +194,9 @@ export async function handlePreviewRoutes(
         },
       });
     }
+    // Only authenticated, authorized Portal traffic counts. Session-list and
+    // readiness polling never extend a host preview's idle lifetime.
+    hostPortalActivity.touch(httpsPort - 6_000);
     return new Response(null, {
       status: 204,
       headers: { "Cache-Control": "no-store" },
