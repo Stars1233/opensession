@@ -882,6 +882,14 @@ struct SessionView: View {
                 modelMenu
                     .help("Model and reasoning settings")
             }
+            // Where the next turn runs. Only for a session the server would
+            // let move: a Sandbox, Runner, automation or Ask session has no
+            // such choice, and the item would only ever refuse.
+            if SandboxMove.canMove(viewModel.session) {
+                ToolbarItem(placement: .topTrailingCompat) {
+                    SandboxMoveToolbarMenu(viewModel: viewModel)
+                }
+            }
             #endif
             }
 
@@ -1911,6 +1919,7 @@ private struct SessionActionsMenu: View {
     @State private var pendingMerge: String?
     @State private var merging = false
     @State private var mergeError: String?
+    @State private var sandboxMove = SandboxMoveViewModel()
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -1993,6 +2002,22 @@ private struct SessionActionsMenu: View {
                 showWorktreeInfo = true
             } label: {
                 Label("Worktree details", systemImage: "info.circle")
+            }
+            // Where the next turn runs. Offered only when the server would
+            // accept the move (a code session with a repository, on this
+            // machine, not an automation's and not on a Runner); a 428 from
+            // the server becomes the confirmation below.
+            if canMoveToSandbox {
+                Menu {
+                    SandboxMoveMenuItems(
+                        model: sandboxMove,
+                        session: viewModel.session,
+                        isRunning: viewModel.isRunning,
+                        onMoved: adoptSandboxMove
+                    )
+                } label: {
+                    Label("Move to Sandbox", systemImage: "cube")
+                }
             }
             // What the next turn runs on. It was only reachable through the
             // worktree details sheet, which is a long way to go for a setting
@@ -2147,6 +2172,13 @@ private struct SessionActionsMenu: View {
                 .foregroundStyle(OS1VisualStyle.text)
         }
         .accessibilityLabel("Session actions")
+        .sandboxMovePrompts(sandboxMove, onMoved: adoptSandboxMove)
+        .task(id: viewModel.session.id) {
+            // One read of the instance's Sandboxes per session, and none for
+            // a session that cannot move: the menu shows the rows before it
+            // is opened, so they must be known before then.
+            if canMoveToSandbox { await sandboxMove.loadProviders() }
+        }
         .confirmationDialog(
             mergeConfirmationTitle,
             isPresented: Binding(
@@ -2178,6 +2210,16 @@ private struct SessionActionsMenu: View {
     private func openWorker(_ worker: Session) {
         guard let url = SessionLinks.url(for: worker.id) else { return }
         openURL(url)
+    }
+
+    private var canMoveToSandbox: Bool {
+        SandboxMove.canMove(viewModel.session)
+    }
+
+    /// The row says Preparing from this call on, so the submenu is gone
+    /// before the refresh that confirms it starts.
+    private func adoptSandboxMove(_ status: SessionSandboxStatus) {
+        SandboxMoveViewModel.adopt(status, into: viewModel)
     }
 
     private var addIntent: SidebarAddition.Intent? {
