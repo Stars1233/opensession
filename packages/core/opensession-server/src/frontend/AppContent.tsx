@@ -76,7 +76,7 @@ import { getActiveViewTab, saveActiveViewTab } from "./lib/active-view-tab";
 import { cachedRepos, resolveWorkspaceApi } from "./lib/api";
 import { buildAppCommandActions } from "./components/app-command-actions";
 import { isToolView, parseRoute, routePath, type Route } from "./lib/app-route";
-import { onDeskShow } from "./lib/desk-show";
+import { onDeskShow, type DeskShowTarget } from "./lib/desk-show";
 import {
   APP_BODY,
   DETAIL_TOPBAR,
@@ -136,6 +136,7 @@ import { Button } from "./ui/button";
 import { cn } from "./ui/cn";
 import { EmptyState, LoadingState } from "./ui/state";
 import { ToastHost, toast } from "./ui/toast";
+import { PulseDot } from "./ui/status";
 import { Tooltip } from "./ui/tooltip";
 import { TopBar, TopBarActions, TopBarTitle } from "./ui/top-bar";
 
@@ -472,6 +473,9 @@ export function AppContent({
     setShortcutsOpen,
     taskCount,
   } = appViewState;
+  // A Desk voice call outlives a minimised Desk; the trigger shows it is live.
+  const [deskCallActive, setDeskCallActive] = useState(false);
+  const deskCallShown = deskCallActive && !deskOverlay.open;
   const { closePalette, startNewSessionCreate } = useNewSessionCreateStart({
     getCurrentRoute,
     navigate,
@@ -516,13 +520,6 @@ export function AppContent({
   const socketInject = useEffectEvent(inject);
   const socketNavigate = useEffectEvent(navigate);
   const socketGetCurrentRoute = useEffectEvent(getCurrentRoute);
-  const voiceShow = useEffectEvent((route: Route) => {
-    navigate(route);
-    // The phone sheet covers the page; minimise it so what was asked for is
-    // visible. The call keeps running in the mounted body.
-    if (isPhone) setDeskOverlay((desk) => ({ ...desk, open: false }));
-  });
-  useEffect(() => onDeskShow(voiceShow), []);
   useEffect(() => {
     return addHandler((msg) => {
       if (msg.type === "error") {
@@ -804,6 +801,43 @@ export function AppContent({
     openTicketWorkspace,
     openReviewForSession,
   } = workspacePanes;
+
+  // Desk's show_in_app landed here (lib/desk-show). A workspace pane is part
+  // of the route; a session's tab is applied the way the sidebar does it: Review
+  // through the pending-open pulse that survives the workspace-change reset,
+  // chat by clearing the workspace's remembered pane before the route lands.
+  const voiceShow = useEffectEvent((target: DeskShowTarget, route: Route) => {
+    const shownSession =
+      target.kind === "session" && target.tab
+        ? sessions.find(
+            (session) =>
+              session.id === target.id || session.aliasIds?.includes(target.id),
+          )
+        : undefined;
+    const sessionKey = wsKeyFor(shownSession);
+    if (shownSession && target.tab === "review") {
+      openReviewForSession(shownSession);
+    } else if (shownSession && sessionKey && target.tab === "chat") {
+      saveActiveViewTab(sessionKey, null);
+      setActiveViewTabState(null);
+      navigate(route);
+    } else if (
+      shownSession?.workspaceId &&
+      (target.tab === "conversation" || target.tab === "video")
+    ) {
+      navigate({
+        view: "workspace",
+        id: shownSession.workspaceId,
+        tab: target.tab,
+      });
+    } else {
+      navigate(route);
+    }
+    // The phone sheet covers the page; minimise it so what was asked for is
+    // visible. The call keeps running in the mounted body.
+    if (isPhone) setDeskOverlay((desk) => ({ ...desk, open: false }));
+  });
+  useEffect(() => onDeskShow(voiceShow), []);
 
   const sessionTabs = useSessionTabs({
     routing: {
@@ -1258,6 +1292,10 @@ export function AppContent({
               topbarTitle={topbarTitle}
               phoneTitleHandedOver={phoneTitleHandedOver}
               commandMenuRef={commandMenuRef}
+              deskCallActive={deskCallShown}
+              onOpenDesk={() =>
+                setDeskOverlay({ open: true, origin: "bottom-right" })
+              }
               setAppHeaderEl={setAppHeaderEl}
               setHeaderRepoEl={setHeaderRepoEl}
               setHeaderModelEl={setHeaderModelEl}
@@ -1854,7 +1892,11 @@ export function AppContent({
 				    on the root page (see .desk-fab). ⌘J and the command palette still
 				    summon it too. */}
             {(!isPhone || !mobileDetail) && (
-              <Tooltip label="Desk" side="left" shortcut={["⌘", "J"]}>
+              <Tooltip
+                label={deskCallShown ? "Desk call in progress" : "Desk"}
+                side="left"
+                shortcut={["⌘", "J"]}
+              >
                 <button
                   className={DESK_FAB}
                   style={
@@ -1869,9 +1911,18 @@ export function AppContent({
                   onClick={() =>
                     setDeskOverlay({ open: true, origin: "bottom-right" })
                   }
-                  aria-label="Open the Desk"
+                  aria-label={
+                    deskCallShown
+                      ? "Desk call in progress. Open the Desk"
+                      : "Open the Desk"
+                  }
                 >
                   <IconDesk size={24} />
+                  {/* The call keeps running behind a minimised Desk; the dot
+                      says so until the call ends or Desk is back up. */}
+                  {deskCallShown && (
+                    <PulseDot className="absolute top-0 right-0 ring-2 ring-[var(--composer-surface)]" />
+                  )}
                 </button>
               </Tooltip>
             )}
@@ -1885,6 +1936,7 @@ export function AppContent({
               }
               phone={isPhone}
               onOpenSession={(id) => navigate({ view: "session", id })}
+              onCallActiveChange={setDeskCallActive}
             />
 
             {/* ⌘K command palette — actions, PRs, and sessions across every view. */}
