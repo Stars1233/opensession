@@ -11,6 +11,14 @@ import { DeskVoiceClient, type DeskVoiceState } from "../lib/desk-voice-client";
 import { getDeskVoicePref, onDeskVoiceChanged } from "../lib/desk-voice-pref";
 import { cn } from "../ui/cn";
 import { errorMessage } from "../lib/error-message";
+import { useDeskPanel } from "../hooks/useDeskPanel";
+import { deskPanelOwnsFocus } from "../lib/desk-panel";
+import {
+  DESK_PANEL_GRAB,
+  DESK_PANEL_HANDLE,
+  DESK_PANEL_HANDLES,
+  DESK_PANEL_ORIGIN,
+} from "../lib/desk-panel-classes";
 
 /**
  * The Desk — a summonable overlay (⌘J / the floating desk button) on top of
@@ -19,8 +27,14 @@ import { errorMessage } from "../lib/error-message";
  *
  * Persistence is the point: after the first summon the body STAYS MOUNTED
  * (hidden, not unmounted) — the session's scoped socket keeps watching, so every
- * later ⌘J is instant with the transcript already in place. It uses the same
- * palette modal as the command menu.
+ * later ⌘J is instant with the transcript already in place.
+ *
+ * On desktop it is a floating panel, not a modal: no backdrop, no focus trap,
+ * and the page underneath stays live, so it can sit open in a corner while
+ * you work in other sessions. Its header drags it and its edges resize it
+ * (hooks/useDeskPanel), and the place it was left is kept per browser. On a
+ * phone it stays the sheet it was, over a backdrop, because there is no room
+ * beside it for anything else.
  *
  * The Desk is a normal durable session (desk: true, hidden from the session
  * lists) pinned to a fast model+effort server-side; "Clear" sets a display
@@ -42,7 +56,12 @@ function DeskBody({
   phone,
   onClose,
   onOpenSession,
-}: Omit<DeskOverlayProps, "open" | "openOrigin"> & { active: boolean }) {
+  onGrab,
+}: Omit<DeskOverlayProps, "open" | "openOrigin"> & {
+  active: boolean;
+  /** Desktop: a pointer down on the header starts moving the panel. */
+  onGrab?: (event: React.PointerEvent<HTMLElement>) => void;
+}) {
   const user = getCurrentUser();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [clearedAt, setClearedAt] = useState<string | undefined>(undefined);
@@ -162,8 +181,26 @@ function DeskBody({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Header */}
-      <div className="flex shrink-0 items-center gap-2.5 border-b border-divider px-4 py-2.5">
+      {/* Header. On desktop it is also the grab bar: a press anywhere on it
+			    but its buttons starts a move. */}
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-2.5 border-b border-divider px-4 py-2.5",
+          onGrab && DESK_PANEL_GRAB,
+        )}
+        onPointerDown={
+          onGrab
+            ? (event) => {
+                if (
+                  event.target instanceof Element &&
+                  event.target.closest("button")
+                )
+                  return;
+                onGrab(event);
+              }
+            : undefined
+        }
+      >
         <IconDesk size={22} className="text-dim" />
         <span className="min-w-0 flex-1 truncate text-item-title font-semibold text-fg">
           Desk
@@ -279,24 +316,70 @@ export function DeskOverlay({
     if (open) setOpened(true);
   }, [open]);
 
+  // Desktop only: the phone sheet is laid out by the palette viewport.
+  const floating = !phone;
+  const panelRef = useRef<HTMLDivElement>(null);
+  const panel = useDeskPanel(floating && open, panelRef);
+
   return (
     <Modal.Root
       open={open}
-      onOpenChange={(next) => {
-        if (!next) onClose();
+      onOpenChange={(next, details) => {
+        if (next) return;
+        // Base UI hears Escape on the document, so a floating Desk would
+        // close under an Escape meant for the session you are working in.
+        // It only takes the key from its own focus.
+        if (
+          floating &&
+          details.reason === "escape-key" &&
+          !deskPanelOwnsFocus(panelRef.current)
+        ) {
+          details.cancel();
+          return;
+        }
+        onClose();
       }}
-      modal="trap-focus"
+      // A floating panel shares the page: no focus trap, and neither an
+      // outside press nor focus leaving it counts as a dismissal. The phone
+      // sheet keeps the trap so a touch screen reader can find its way out.
+      modal={floating ? false : "trap-focus"}
+      disablePointerDismissal={floating}
     >
       <Modal.Content
-        variant="palette"
+        ref={panelRef}
+        variant={floating ? "floating" : "palette"}
         keepMounted
-        widthClassName="w-[min(650px,100%)]"
+        widthClassName={floating ? undefined : "w-[min(650px,100%)]"}
+        style={
+          floating
+            ? {
+                left: panel.rect.left,
+                top: panel.rect.top,
+                width: panel.rect.width,
+                height: panel.rect.height,
+              }
+            : undefined
+        }
         className={cn(
-          phone ? "h-[min(600px,85dvh)]" : "h-[600px] max-h-[80dvh]",
-          openOrigin === "center" ? "origin-center" : "origin-bottom-right",
-          "rounded-b-[var(--composer-radius)] transition-[scale,translate,opacity]! duration-[100ms]! data-[starting-style]:translate-y-0! data-[starting-style]:scale-[0.9]!",
+          floating
+            ? [
+                openOrigin === "center"
+                  ? "origin-center"
+                  : DESK_PANEL_ORIGIN[panel.corner],
+                "rounded-b-[var(--composer-radius)]",
+              ]
+            : [
+                "h-[min(600px,85dvh)]",
+                openOrigin === "center"
+                  ? "origin-center"
+                  : "origin-bottom-right",
+                "rounded-b-[var(--composer-radius)] transition-[scale,translate,opacity]! duration-[100ms]! data-[starting-style]:translate-y-0! data-[starting-style]:scale-[0.9]!",
+              ],
         )}
         aria-label="Desk"
+        // The marker ⌘J and the Escape guard find the open panel by
+        // (lib/desk-panel).
+        data-desk-panel=""
       >
         {(open || opened) && (
           <DeskBody
@@ -304,8 +387,23 @@ export function DeskOverlay({
             phone={phone}
             onClose={onClose}
             onOpenSession={onOpenSession}
+            onGrab={floating ? panel.startMove : undefined}
           />
         )}
+        {/* Resize handles: pointer-only affordances along the shell's edges.
+				    The panel is complete without them, so they stay out of the
+				    accessibility tree rather than adding eight nameless separators. */}
+        {floating &&
+          DESK_PANEL_HANDLES.map((handle) => (
+            <div
+              key={handle.id}
+              aria-hidden="true"
+              className={cn(DESK_PANEL_HANDLE, handle.className)}
+              onPointerDown={(event) =>
+                panel.startResize(handle.id, handle.cursor, event)
+              }
+            />
+          ))}
       </Modal.Content>
     </Modal.Root>
   );
