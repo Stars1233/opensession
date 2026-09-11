@@ -1037,6 +1037,13 @@ export function demoReplayScript(): Array<() => JsonlLine[]> {
       { command: "bun run gateway:dev --smoke /health" },
       "span api-gateway:/health 3.1ms ok\nsmoke passed",
     ),
+    // A sessions MCP call: the row links to the session it names.
+    step(
+      9,
+      "opensession-sessions_get_session",
+      { id: "bks-demo-pr", transcript_lines: 4 },
+      '🟢 *Fix flaky upload retry test*  `bks-demo-pr`\n   done · opensession · code · branch demo/fix-flaky-upload · createdBy="Alex" · 2h ago\n   PR open https://github.com/acme/acme-todo/pull/128\n\n*Recent transcript:*\n• tool:Bash: Using bash\n• tool_result: 100 pass 0 fail\n• assistant: Fixed and verified — 100/100 green.',
+    ),
     say(
       "demo-live-a4",
       "Traces verified end-to-end on the hot paths. Next loop: tag spans with tenant id and wire the sampler config.",
