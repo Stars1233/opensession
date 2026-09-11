@@ -120,9 +120,11 @@ export function MediaLightboxHost() {
       const target = e.target;
       // Enter on the focused link dispatches a click whose target is the
       // wrapping <a>, not the <img> inside it — match both, or keyboard
-      // activation falls through to the raw file in a new tab.
+      // activation falls through to the raw file in a new tab. A comparison's
+      // stills (compare-block.ts) take the click in 2-up and Onion skin,
+      // where nothing lies over them.
       const media =
-        target.closest?.("img.md-image") ||
+        target.closest?.("img.md-image, img.md-compare-img") ||
         target.closest?.("a.md-image-link")?.querySelector("img.md-image") ||
         lightboxBlockMediaFor(target) ||
         lightboxDiagramFor(target);

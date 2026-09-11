@@ -19,7 +19,7 @@ only carrier of information the reader needs.
 | ` ```diff `                          | Patch with whole added and removed rows washed         | `lib/shiki-engine.ts`                                             |
 | `OPENSESSION_IMAGE: /abs/path.png`   | Image in place, full column width, optional caption    | `server/transcript-media.ts`, `lib/markdown.ts`                   |
 | `OPENSESSION_VIDEO: /abs/path.mp4`   | Video player in place, optional caption                | same                                                              |
-| `OPENSESSION_COMPARE: /a.png /b.png` | Before/after slider, optional caption                  | same, `lib/compare-block.ts`                                      |
+| `OPENSESSION_COMPARE: /a.png /b.png` | Before/after: 2-up, swipe or onion skin, with caption  | same, `lib/compare-block.ts`                                      |
 | `> [!NOTE]` … `> [!CAUTION]`         | GitHub-style callout                                   | `lib/markdown.ts`                                                 |
 | `$$ … $$`, `$ … $`, ` ```math `      | Typeset math (KaTeX)                                   | `lib/math-block.ts`                                               |
 | ` ```palette `, `` `#ff0080` ``      | Colour swatches; a hex codespan gets a swatch chip     | `lib/palette-block.ts`                                            |
@@ -72,10 +72,20 @@ their body and render exactly as before.
 ### Before/after
 
 `OPENSESSION_COMPARE: /abs/before.png /abs/after.png` renders the two stills
-as one slider: drag the divider, tap anywhere, or use the arrow keys with the
-slider focused. Both paths obey the media rules above, both land in
-`images[]` and `featuredMedia`, and the caption rule is the same. The server
-rewrites the line into a ` ```compare ` fence:
+with the three views a GitHub image diff has, on a switch under them:
+
+- **2-up**: both stills whole, side by side under their names. Select either
+  to open it in the gallery.
+- **Swipe**: one slider. Drag the divider, tap anywhere, or use the arrow
+  keys with the slider focused. The expand button opens the after still.
+- **Onion skin**: the after still laid over the before; the range beside the
+  switch sets how much of it shows.
+
+The view is a per-user preference that follows you across devices, 2-up until
+you pick another; switching one comparison switches every one on the page.
+Both paths obey the media rules above, both land in `images[]` and
+`featuredMedia`, and the caption rule is the same. The server rewrites the
+line into a ` ```compare ` fence:
 
 ```
 before: /media?path=...
@@ -83,8 +93,8 @@ after: /media?path=...
 caption: Retry timeline
 ```
 
-`lib/compare-block.ts` upgrades the fence into the slider; a client without
-it shows the two URLs and the caption as a code block. The fence can also be
+`lib/compare-block.ts` upgrades the fence into the comparison; a client
+without it shows the two URLs and the caption as a code block. The fence can also be
 written by hand with any http(s) or root-relative still.
 
 ### Callouts
