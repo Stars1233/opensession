@@ -223,7 +223,14 @@ export class VoiceTranscriptRows {
       gapMs: number;
       idleMs: number;
       rowId: (role: VoiceRole, startMs: number) => string;
-      onRow: (row: { id: string; role: VoiceRole; text: string }) => void;
+      onRow: (row: {
+        id: string;
+        role: VoiceRole;
+        text: string;
+        /** Timeline span of the fragments joined into this row. */
+        startMs: number;
+        endMs: number;
+      }) => void;
     },
   ) {}
 
@@ -286,7 +293,13 @@ export class VoiceTranscriptRows {
     const row = this.open[role];
     this.open[role] = null;
     if (row && row.text.trim())
-      this.opts.onRow({ id: row.id, role, text: row.text.trim() });
+      this.opts.onRow({
+        id: row.id,
+        role,
+        text: row.text.trim(),
+        startMs: row.startMs,
+        endMs: row.endMs,
+      });
   }
 
   private clearIdle(role: VoiceRole) {
@@ -667,8 +680,8 @@ function finalize(call: LiveCall, reason: string, seconds?: number): void {
 interface LiveServerEvent {
   type: string;
   delta?: string;
-  start_ms?: number;
-  end_ms?: number;
+  start_ms?: unknown;
+  end_ms?: unknown;
   delegation_id?: string | null;
   event?: LiveResponseEvent;
   reason?: string;
@@ -676,6 +689,21 @@ interface LiveServerEvent {
   error?: { message?: string; code?: string };
   message?: string;
   code?: string;
+}
+
+export function liveTranscriptSpan(event: {
+  start_ms?: unknown;
+  end_ms?: unknown;
+}): { startMs: number; endMs: number } {
+  const startMs =
+    typeof event.start_ms === "number" && Number.isFinite(event.start_ms)
+      ? event.start_ms
+      : 0;
+  const endMs =
+    typeof event.end_ms === "number" && Number.isFinite(event.end_ms)
+      ? event.end_ms
+      : startMs;
+  return { startMs, endMs };
 }
 
 function handleSidebandEvent(call: LiveCall, event: LiveServerEvent): void {
@@ -689,8 +717,7 @@ function handleSidebandEvent(call: LiveCall, event: LiveServerEvent): void {
               ? "user"
               : "assistant",
           delta: event.delta,
-          startMs: event.start_ms ?? 0,
-          endMs: event.end_ms ?? event.start_ms ?? 0,
+          ...liveTranscriptSpan(event),
         });
         touch(call);
       }
@@ -838,10 +865,13 @@ async function createLiveVoiceCallNow(
       // Only what the Desk said is rewritten: a spoken PR number becomes
       // `repo#N` and a session it started gets named, so the mirrored row
       // renders chips. The user's words stay exactly as transcribed.
+      // The mirrored id carries the row's end too (`-end-<endMs>`), so the
+      // browser's captions (frontend/lib/voice-captions.ts) can take down
+      // exactly the fragments this row covers without matching its text.
       onRow: (row) =>
         mirrorVoiceEntries(user, [
           {
-            id: row.id,
+            id: `${row.id}-end-${row.endMs}`,
             role: row.role,
             text:
               row.role === "assistant"
