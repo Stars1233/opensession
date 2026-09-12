@@ -51,6 +51,11 @@ import {
 import { SHOW_IN_APP_TOOL, showInApp } from "./desk-voice-show";
 import { DeskVoiceNavigation } from "./desk-voice-navigation";
 import type { DeskNavigationRequest } from "../shared/desk-navigation";
+import {
+  LiveBackendInputBudget,
+  compactLiveToolOutput,
+  type LiveBackendInputItem,
+} from "./desk-voice-live-input";
 
 export const DESK_LIVE_MODEL = "gpt-live-1";
 /** The default backend (Terra). The instance-wide choice between it and Luna
@@ -373,10 +378,13 @@ export class LiveResponseLoop {
    * Busy from the moment it is sent, so two typed messages in quick
    * succession cannot both see an idle loop and open colliding responses. */
   private createPending = false;
+  private stopped = false;
+  private inputBudget = new LiveBackendInputBudget();
 
   constructor(
     private readonly io: {
-      send: (event: Record<string, unknown>) => void;
+      send: (event: Record<string, unknown>) => boolean | void;
+      onFailure?: (message: string) => void;
       runTool: (
         callId: string,
         name: string,
@@ -397,6 +405,7 @@ export class LiveResponseLoop {
   }
 
   handle(delegationId: string, event: LiveResponseEvent): void {
+    if (this.stopped) return;
     const state = this.delegations.get(delegationId) ?? {
       open: new Set<string>(),
       calls: 0,
@@ -451,6 +460,7 @@ export class LiveResponseLoop {
   /** Ask the backend to run (typed text): immediate when idle, otherwise
    * deferred until the outstanding tool results have been submitted. */
   requestContinue(): void {
+    if (this.stopped) return;
     if (this.busy) {
       this.continueWanted = true;
       return;
@@ -459,9 +469,65 @@ export class LiveResponseLoop {
     this.createResponse();
   }
 
+  /** A rejected typed message stays in the browser's draft. */
+  sendText(text: string): boolean {
+    if (this.stopped) return false;
+    const item: LiveBackendInputItem = {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text }],
+    };
+    if (!this.inputBudget.accept(item)) return false;
+    if (!this.send({ type: "response.item.create", item })) return false;
+    this.requestContinue();
+    return true;
+  }
+
+  /** item.create has no success acknowledgment. A provider rejection must
+   * stop the continuation, not leave createPending stuck or replay tools. */
+  handleError(message: string, clientEventId?: string): void {
+    if (
+      clientEventId?.startsWith("voice-backend-") ||
+      /Backend response input history|Missing function call outputs/i.test(
+        message,
+      )
+    )
+      this.fail();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.createPending = false;
+    this.continueWanted = false;
+    for (const state of this.delegations.values()) state.open.clear();
+    this.delegations.clear();
+  }
+
+  private fail(reason = "Voice could not continue this call.") {
+    if (this.stopped) return;
+    this.stop();
+    this.io.onFailure?.(
+      `${reason} Start a new call to continue. Tool results already received are saved in this chat.`,
+    );
+  }
+
+  private send(event: Record<string, unknown>): boolean {
+    if (this.stopped) return false;
+    if (
+      this.io.send({
+        ...event,
+        event_id: `voice-backend-${crypto.randomUUID()}`,
+      }) === false
+    ) {
+      this.fail();
+      return false;
+    }
+    return true;
+  }
+
   private createResponse() {
     this.createPending = true;
-    this.io.send({ type: "response.create" });
+    this.send({ type: "response.create" });
   }
 
   private async execute(
@@ -484,14 +550,25 @@ export class LiveResponseLoop {
       output = { error: e instanceof Error ? e.message : String(e) };
     }
     if (!state.open.has(callId)) return; // response failed meanwhile
-    this.io.send({
-      type: "response.item.create",
-      item: {
-        type: "function_call_output",
-        call_id: callId,
-        output: JSON.stringify(output) ?? "",
-      },
-    });
+    let compact: string;
+    try {
+      compact = compactLiveToolOutput(output);
+    } catch {
+      compact = JSON.stringify({
+        error:
+          "The tool ran, but its result could not be serialized. Do not repeat the action.",
+      });
+    }
+    const item: LiveBackendInputItem = {
+      type: "function_call_output",
+      call_id: callId,
+      output: compact,
+    };
+    if (!this.inputBudget.accept(item)) {
+      this.fail("Voice reached this call's input limit.");
+      return;
+    }
+    if (!this.send({ type: "response.item.create", item })) return;
     state.open.delete(callId);
     this.maybeContinue(delegationId, state);
   }
@@ -649,6 +726,7 @@ function touch(call: LiveCall): void {
 function finalize(call: LiveCall, reason: string, seconds?: number): void {
   if (call.finalized) return;
   call.finalized = true;
+  call.loop.stop();
   call.navigation?.close();
   calls.delete(call.id);
   for (const t of [call.idleTimer, call.maxTimer, call.closeTimer])
@@ -699,7 +777,8 @@ interface LiveServerEvent {
   event?: LiveResponseEvent;
   reason?: string;
   usage?: { seconds?: number };
-  error?: { message?: string; code?: string };
+  error?: { message?: string; code?: string; client_event_id?: string };
+  client_event_id?: string;
   message?: string;
   code?: string;
 }
@@ -753,6 +832,10 @@ function handleSidebandEvent(call: LiveCall, event: LiveServerEvent): void {
         `[desk-voice-live] ${call.id} error: ${
           event.error?.message ?? event.message ?? JSON.stringify(event)
         }`,
+      );
+      call.loop.handleError(
+        event.error?.message ?? event.message ?? "Voice backend error",
+        event.error?.client_event_id ?? event.client_event_id,
       );
       break;
     default:
@@ -906,6 +989,17 @@ async function createLiveVoiceCallNow(
     }),
     loop: new LiveResponseLoop({
       send: (event) => sendEvent(call, event),
+      onFailure: (message) => {
+        call.rows.flushAll();
+        mirrorVoiceEntries(user, [
+          {
+            id: `voice-${liveId}-backend-error`,
+            role: "assistant",
+            text: message,
+          },
+        ]);
+        requestClose(call);
+      },
       runTool: async (callId, name, args) => {
         let result: unknown;
         try {
@@ -986,16 +1080,7 @@ export function sendLiveVoiceText(
   if (!trimmed) return false;
   // Acknowledge only what the backend actually received: a false here keeps
   // the browser's draft instead of mirroring a message nobody heard.
-  const sent = sendEvent(call, {
-    type: "response.item.create",
-    item: {
-      type: "message",
-      role: "user",
-      content: [{ type: "input_text", text: trimmed }],
-    },
-  });
-  if (!sent) return false;
-  call.loop.requestContinue();
+  if (!call.loop.sendText(trimmed)) return false;
   mirrorVoiceEntries(user, [
     { id: `voice-typed-${crypto.randomUUID()}`, role: "user", text: trimmed },
   ]);

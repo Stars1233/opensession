@@ -495,10 +495,180 @@ describe("LiveResponseLoop", () => {
     ) => Promise<unknown>,
   ) {
     const sent: Array<Record<string, unknown>> = [];
-    const l = new LiveResponseLoop({ send: (e) => sent.push(e), runTool });
+    const l = new LiveResponseLoop({
+      send: (e) => {
+        sent.push(e);
+      },
+      runTool,
+    });
     return { l, sent };
   }
   const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  test("six large parallel PR checks all fit and continue without missing outputs", async () => {
+    const results = Array.from({ length: 6 }, (_, i) => ({
+      content: [
+        {
+          type: "text",
+          text:
+            `PR ${i + 1} is not ready: checks pending.\n` +
+            "✓ passing check\n".repeat(1000),
+        },
+      ],
+      structuredContent: { checks: "duplicate check details".repeat(1000) },
+    }));
+    const { l, sent } = loop(async (id) => results[Number(id)]);
+    // Typed input and tool results share the same call-wide budget.
+    expect(l.sendText("Open another workspace ready for review")).toBe(true);
+    l.handle("del_1", { type: "response.created" });
+    for (let i = 0; i < results.length; i++)
+      l.handle("del_1", {
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          call_id: String(i),
+          name: "opensession-repos_check_pr_ready",
+        },
+      });
+    l.handle("del_1", { type: "response.completed" });
+    await tick();
+    const items = sent
+      .filter((e) => e.type === "response.item.create")
+      .map((e) => e.item);
+    expect(items).toHaveLength(7);
+    expect(
+      items.reduce(
+        (bytes: number, item) =>
+          bytes + Buffer.byteLength(JSON.stringify(item)),
+        0,
+      ),
+    ).toBeLessThan(32_768);
+    const outputs = items
+      .slice(1)
+      .map((item) => item as { call_id: string; output: string });
+    expect(outputs.map((item) => item.call_id)).toEqual([
+      "0",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+    ]);
+    expect(outputs.every((item) => JSON.parse(item.output).truncated)).toBe(
+      true,
+    );
+    expect(sent.at(-1)?.type).toBe("response.create");
+    l.handle("del_1", { type: "response.created" });
+    l.handle("del_1", { type: "response.completed" });
+    expect(l.busy).toBe(false);
+  });
+
+  test("stops once on a rejected input and never replays outstanding tools", async () => {
+    const failures: string[] = [];
+    const sent: Array<Record<string, unknown>> = [];
+    let release: (value: unknown) => void = () => {};
+    let ran = 0;
+    const l = new LiveResponseLoop({
+      send: (event) => {
+        sent.push(event);
+      },
+      onFailure: (message) => failures.push(message),
+      runTool: () => {
+        ran++;
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    l.handle("del_1", { type: "response.created" });
+    l.handle("del_1", {
+      type: "response.output_item.done",
+      item: { type: "function_call", call_id: "action", name: "start_session" },
+    });
+    l.requestContinue();
+    l.handleError(
+      "Backend response input history is limited to 128 items and 32768 UTF-8 bytes per session.",
+    );
+    l.handleError("Missing function call outputs for: action.");
+    release({ started: true });
+    await tick();
+    l.requestContinue();
+    l.handle("del_2", {
+      type: "response.output_item.done",
+      item: { type: "function_call", call_id: "again", name: "start_session" },
+    });
+    expect(l.sendText("try again")).toBe(false);
+    expect(l.busy).toBe(false);
+    expect(sent).toEqual([]);
+    expect(failures).toHaveLength(1);
+    expect(ran).toBe(1);
+  });
+
+  test("closes on call-wide budget exhaustion before sending an oversized history", async () => {
+    let failures = 0;
+    let bytes = 0;
+    let items = 0;
+    const l = new LiveResponseLoop({
+      send: (event) => {
+        if (event.type === "response.item.create") {
+          bytes += Buffer.byteLength(JSON.stringify(event.item));
+          items++;
+        }
+      },
+      onFailure: () => {
+        failures++;
+      },
+      runTool: async () => ({ text: "long output ".repeat(1000) }),
+    });
+    for (let i = 0; i < 40; i++) {
+      l.handle(`del_${i}`, { type: "response.created" });
+      l.handle(`del_${i}`, {
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          call_id: `c${i}`,
+          name: "inspect_session",
+        },
+      });
+      l.handle(`del_${i}`, { type: "response.completed" });
+      await tick();
+      l.handle(`del_${i}`, { type: "response.created" });
+      l.handle(`del_${i}`, { type: "response.completed" });
+    }
+    expect(bytes).toBeLessThanOrEqual(32_768);
+    expect(items).toBeLessThanOrEqual(128);
+    expect(failures).toBe(1);
+    expect(l.busy).toBe(false);
+  });
+
+  test("handles correlated backend command errors, but ignores unrelated errors", () => {
+    const failures: string[] = [];
+    const l = new LiveResponseLoop({
+      send: () => {},
+      runTool: async () => ({}),
+      onFailure: (m) => failures.push(m),
+    });
+    l.requestContinue();
+    l.handleError("Unrelated command was invalid", "other-command");
+    expect(l.busy).toBe(true);
+    l.handleError("Backend command was rejected", "voice-backend-test");
+    expect(l.busy).toBe(false);
+    expect(failures).toHaveLength(1);
+  });
+
+  test("a failed send stops the loop instead of leaving a pending response", () => {
+    let failures = 0;
+    const l = new LiveResponseLoop({
+      send: () => false,
+      runTool: async () => ({}),
+      onFailure: () => {
+        failures++;
+      },
+    });
+    expect(l.sendText("hello")).toBe(false);
+    expect(l.busy).toBe(false);
+    expect(failures).toBe(1);
+  });
 
   test("answers every function call before continuing the response", async () => {
     const ran: string[] = [];
