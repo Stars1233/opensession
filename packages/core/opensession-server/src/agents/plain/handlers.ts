@@ -8,7 +8,8 @@ import {
   sendCustomerReply,
   formatThreadContext,
   cleanDraftText,
-  createLinearIssue,
+  createGithubIssue,
+  linkThreadToGithubIssue,
   plain,
 } from "./api";
 import {
@@ -29,6 +30,19 @@ import {
 } from "../../server/config";
 
 const DEFAULT_REPO_DIR = defaultRepo().repo;
+const DEFAULT_GH_REPO = defaultRepo().ghRepo;
+const configuredWorkspaceId = configuredIntegration("plain").workspaceId;
+/** Deep link to the thread in app.plain.com, or null without a workspace id. */
+function plainThreadUrl(threadId: string): string | null {
+  return typeof configuredWorkspaceId === "string" && configuredWorkspaceId
+    ? `https://app.plain.com/workspace/${configuredWorkspaceId}/thread/${threadId}/`
+    : null;
+}
+/** Append the Plain thread link to an issue body. */
+function issueBodyWithThread(description: string, threadId: string): string {
+  const url = plainThreadUrl(threadId);
+  return `${description.trim()}\n\n- Plain thread: ${url ?? threadId}`;
+}
 const configuredMention = configuredIntegration("plain").mentionHandle;
 const PLAIN_MENTION =
   typeof configuredMention === "string" && configuredMention.trim()
@@ -49,8 +63,8 @@ interface ActiveSession {
   branch: string;
   worktreeDir: string;
   claudeSessionId: string | null;
-  linearIssueId?: string;
-  linearIssueIdentifier?: string;
+  issueNumber?: number;
+  issueUrl?: string;
 }
 export const activeSessions = new Map<string, ActiveSession>();
 
@@ -358,10 +372,10 @@ async function handleAgentMention(
       }
     }
 
-    // Linear issue
-    if (result.includes("LINEAR ISSUE:")) {
+    // GitHub issue (feature requests). "LINEAR ISSUE:" is the legacy label.
+    if (/(?:GITHUB|LINEAR) ISSUE:/i.test(result)) {
       const issueMatch = result.match(
-        /LINEAR ISSUE:\s*([\s\S]*?)(?:$|(?=\n\n[A-Z]))/i,
+        /(?:GITHUB|LINEAR) ISSUE:\s*([\s\S]*?)(?:$|(?=\n\n[A-Z]))/i,
       );
       if (issueMatch) {
         const issueText = issueMatch[1].trim();
@@ -372,19 +386,30 @@ async function handleAgentMention(
           const title = titleMatch[1].trim();
           const description = descMatch ? descMatch[1].trim() : issueText;
 
-          const issue = await createLinearIssue(title, description);
+          const issue = await createGithubIssue(
+            title,
+            issueBodyWithThread(description, threadId),
+          );
           if (issue) {
+            const linked = await linkThreadToGithubIssue(
+              threadId,
+              issue.repo,
+              issue.number,
+            );
+            const linkNote = linked
+              ? "and linked this thread to it."
+              : "but linking this thread failed. Link it by hand.";
             await postNote(
               threadId,
               customerId,
-              `Created Linear issue: ${issue.identifier}\n${issue.url}`,
-              `Created Linear issue: [${issue.identifier}](${issue.url})`,
+              `Created GitHub issue #${issue.number} ${linkNote}\n${issue.url}`,
+              `Created GitHub issue [#${issue.number}](${issue.url}) ${linkNote}`,
             );
           } else {
             await postNote(
               threadId,
               customerId,
-              `Failed to create Linear issue. Check Linear auth (OAuth token store / LINEAR_API_KEY) in the opensession logs.`,
+              `Failed to create the GitHub issue. Check the GitHub App credential for ${DEFAULT_GH_REPO} in the opensession logs.`,
             );
           }
           return;
@@ -398,15 +423,20 @@ async function handleAgentMention(
       const title = thread.title || "Support ticket work";
 
       try {
-        const issue = await createLinearIssue(
+        const issue = await createGithubIssue(
           title,
-          `Work from Plain support thread.\n\nThread: ${threadId}\nCustomer: ${thread.customer.fullName || thread.customer.email?.email || "Unknown"}`,
+          issueBodyWithThread(
+            `Work from Plain support thread.\n\nCustomer: ${thread.customer.fullName || thread.customer.email?.email || "Unknown"}`,
+            threadId,
+          ),
+          [],
         );
 
         if (issue) {
+          await linkThreadToGithubIssue(threadId, issue.repo, issue.number);
           const worktreeDir = await createWorktree(
             branchName,
-            issue.identifier,
+            `#${issue.number}`,
             title,
             result,
           );
@@ -417,22 +447,22 @@ async function handleAgentMention(
             branch: branchName,
             worktreeDir,
             claudeSessionId: null,
-            linearIssueId: issue.id,
-            linearIssueIdentifier: issue.identifier,
+            issueNumber: issue.number,
+            issueUrl: issue.url,
           };
           activeSessions.set(threadId, session);
 
           await postNote(
             threadId,
             customerId,
-            `Started worktree for code work.\n\nBranch: ${branchName}\nLinear: ${issue.identifier} (${issue.url})\nDirectory: ${worktreeDir}\n\n${PLAIN_MENTION} work on <description> - to have me work on something in this worktree`,
-            `Started worktree for code work.\n\n- **Branch:** \`${branchName}\`\n- **Linear:** [${issue.identifier}](${issue.url})\n- **Directory:** \`${worktreeDir}\`\n\n*${PLAIN_MENTION} work on \\<description\\>* - to have me work on something in this worktree`,
+            `Started worktree for code work.\n\nBranch: ${branchName}\nIssue: #${issue.number} (${issue.url})\nDirectory: ${worktreeDir}\n\n${PLAIN_MENTION} work on <description> - to have me work on something in this worktree`,
+            `Started worktree for code work.\n\n- **Branch:** \`${branchName}\`\n- **Issue:** [#${issue.number}](${issue.url})\n- **Directory:** \`${worktreeDir}\`\n\n*${PLAIN_MENTION} work on \\<description\\>* - to have me work on something in this worktree`,
           );
         } else {
           await postNote(
             threadId,
             customerId,
-            "Failed to create Linear issue for worktree. Check Linear auth (OAuth token store / LINEAR_API_KEY) in the opensession logs.",
+            `Failed to create the GitHub issue for the worktree. Check the GitHub App credential for ${DEFAULT_GH_REPO} in the opensession logs.`,
           );
         }
       } catch (e) {
@@ -562,12 +592,12 @@ async function gateAndFireThreadCreated(
   if (!hasSubscriber) return;
 
   // Outbound follow-ups fire thread_created too: when a teammate emails a
-  // customer on a done thread, or the Linear integration links a thread and
+  // customer on a done thread, or the issue tracker integration links a thread and
   // sets it to "close the loop", Plain spins up a fresh thread — same event,
   // and thread.createdBy is the state machine either way. Two outbound shapes
   // to reject:
   //   1. First message is a teammate/bot (UserActor/MachineUserActor).
-  //   2. No customer message at all — the thread was created by a Linear link
+  //   2. No customer message at all — the thread was created by an issue link
   //      / status change and any reply is outbound. The outbound EmailEntry can
   //      lag the webhook by MINUTES (seen: 147s), longer than we poll, so we
   //      can't wait for it. But a genuine inbound ticket opens WITH the

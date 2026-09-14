@@ -39,7 +39,15 @@ Config keys under `integrations.plain` in `~/.opensession/config.json`:
 | `apiUrl`        | GraphQL endpoint used by the archive safety sweep; default `https://core-api.uk.plain.com/graphql/v1`                                                  |
 | `workspaceId`   | Plain workspace id (`w_…`) for app.plain.com deep links; unset hides the UI's open-in-Plain affordances                                                |
 | `mentionHandle` | handle in Plain notes that wakes the mention flow, with or without a leading `@`; default is `persona.name` lowercased with spaces replaced by hyphens |
-| `linearTeamKey` | Linear team key or UUID used when the legacy mention flow creates an issue directly; it uses the Linear OAuth token store or `LINEAR_API_KEY`          |
+
+When the legacy mention flow creates an issue (`GITHUB ISSUE:` in the model's
+reply, or `start worktree`), it opens a GitHub issue in the default
+repository's `ghRepo` with the GitHub App's repository-scoped credential
+(`issues: write`), labels it `feature-request`, and links the thread to it
+through Plain's GitHub Issues integration (a `github_issue` thread link with
+source id `owner/name/number`). Plain's Top issues then ranks GitHub issues,
+and closing an issue moves its linked threads to Close the loop, so never
+close or reopen an issue while threads are still linked to it.
 
 The Plain MCP server used by agent runs is separate from the server-side Plain
 SDK. Open Session does not bundle a Plain MCP server. Add your compatible
@@ -97,7 +105,7 @@ The gate fetches the thread up to eight times: once immediately, then after up
 to seven 15-second waits. It skips the thread when its earliest email/chat was
 sent by a Plain user or machine user. If no email/chat appears but other
 timeline activity exists after 30 seconds, it treats the thread as an outbound
-follow-up or Linear close-the-loop thread and skips it. A still-empty thread
+follow-up or issue-tracker close-the-loop thread and skips it. A still-empty thread
 after all attempts fails open and is triaged.
 
 The tool-less router then returns one of three routes:
@@ -137,8 +145,7 @@ Scope the automation deliberately:
   but does not grant authority; see
   [github.md](github.md#automation-pr-credentials-and-review-requests).
 - **`mcpServers`** is the run's allowlist. The template suggests `plain`,
-  `workos`, `tinybird`, `linear`, `sentry`, and `stripe`; remove servers you do
-  not use. `[]` means no external MCP servers. For an ordinary unsandboxed
+  `workos`, `tinybird`, `sentry`, and `stripe`; remove servers you do not use. `[]` means no external MCP servers. For an ordinary unsandboxed
   automation, omitting the field preserves the legacy behavior of exposing all
   configured servers. Sandbox automations run in fresh disposable Daytona
   Executors and require a qualified provider, a pinned subscription account,

@@ -1,14 +1,12 @@
 /**
- * Plain and Linear API helpers for the Plain agent.
+ * Plain and GitHub issue helpers for the Plain agent.
  */
 import { AttachmentType, PlainClient } from "@team-plain/typescript-sdk";
-import { loadTokens, getValidToken } from "../linear/oauth";
 import { fetchWithTimeout } from "../../server/shared/fetch-with-timeout";
-import { configuredIntegration } from "../../server/config";
+import { defaultRepo } from "../../server/config";
 import { splitNoteText } from "./notes";
 
 const PLAIN_API_KEY = process.env.PLAIN_API_KEY || "";
-const LINEAR_API_KEY = process.env.LINEAR_API_KEY || "";
 
 export const plain = new PlainClient({ apiKey: PLAIN_API_KEY });
 
@@ -1060,123 +1058,93 @@ export function formatThreadContext(
 }
 
 /**
- * Resolve a Linear Authorization header. Prefers the Linear agent's OAuth
- * token store (~/.linear-agent-tokens.json, auto-refreshed) and falls back to
- * the LINEAR_API_KEY env var (bare for personal lin_api_ keys, Bearer otherwise).
+ * Create a GitHub issue in the default repository with the GitHub App's
+ * repository-scoped credential (needs `issues: write`). Feature requests from
+ * support are tracked as GitHub issues; Plain's Top issues ranks them through
+ * the thread links added with linkThreadToGithubIssue. Returns null when no
+ * App credential is configured or GitHub rejects the request.
  */
-async function linearAuthHeader(): Promise<string | null> {
-  const tokens = await loadTokens();
-  for (const orgId of Object.keys(tokens)) {
-    const token = await getValidToken(orgId, tokens);
-    if (token) return `Bearer ${token}`;
-  }
-  if (LINEAR_API_KEY) {
-    return LINEAR_API_KEY.startsWith("lin_api_")
-      ? LINEAR_API_KEY
-      : `Bearer ${LINEAR_API_KEY}`;
-  }
-  return null;
-}
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const teamIdCache = new Map<string, string>();
-
-/** Resolve a team key (e.g. "ENG") to its UUID — issueCreate only accepts UUIDs. */
-async function resolveLinearTeamId(
-  auth: string,
-  team: string,
-): Promise<string | null> {
-  if (UUID_RE.test(team)) return team;
-  const cached = teamIdCache.get(team);
-  if (cached) return cached;
-
-  const response = await fetchWithTimeout("https://api.linear.app/graphql", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: auth },
-    body: JSON.stringify({
-      query: `
-        query TeamByKey($key: String!) {
-          teams(filter: { key: { eq: $key } }, first: 1) {
-            nodes { id }
-          }
-        }
-      `,
-      variables: { key: team },
-    }),
-  });
-  const data = await response.json();
-  const id = data.data?.teams?.nodes?.[0]?.id;
-  if (id) {
-    teamIdCache.set(team, id);
-    return id;
-  }
-  console.error(
-    `Linear team not found for key "${team}":`,
-    data.errors || data,
-  );
-  return null;
-}
-
-/** Create a Linear issue */
-export async function createLinearIssue(
+export async function createGithubIssue(
   title: string,
-  description: string,
-  teamId?: string,
-): Promise<{ id: string; identifier: string; url: string } | null> {
-  const auth = await linearAuthHeader();
-  if (!auth) {
-    console.error(
-      "No Linear credentials (OAuth token store empty and LINEAR_API_KEY unset)",
-    );
+  body: string,
+  labels: string[] = ["feature-request"],
+): Promise<{ number: number; url: string; repo: string } | null> {
+  const repo = defaultRepo().ghRepo;
+  if (!repo) {
+    console.error("[plain] No default GitHub repository configured");
     return null;
   }
-
+  const { githubAppRepositoryToken } = await import("../../server/github-app");
+  const token = await githubAppRepositoryToken(repo);
+  if (!token) {
+    console.error(`[plain] No GitHub App credential for ${repo}`);
+    return null;
+  }
   try {
-    const configuredTeam = configuredIntegration("plain").linearTeamKey;
-    const resolvedTeamId = await resolveLinearTeamId(
-      auth,
-      teamId || (typeof configuredTeam === "string" ? configuredTeam : ""),
-    );
-    if (!resolvedTeamId) return null;
-
-    const response = await fetchWithTimeout("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: auth,
-      },
-      body: JSON.stringify({
-        query: `
-          mutation CreateIssue($input: IssueCreateInput!) {
-            issueCreate(input: $input) {
-              success
-              issue {
-                id
-                identifier
-                url
-              }
-            }
-          }
-        `,
-        variables: {
-          input: {
-            title,
-            description,
-            teamId: resolvedTeamId,
-          },
+    const response = await fetchWithTimeout(
+      `https://api.github.com/repos/${repo}/issues`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
         },
-      }),
-    });
-
-    const data = await response.json();
-    if (data.data?.issueCreate?.success) {
-      return data.data.issueCreate.issue;
+        body: JSON.stringify({ title, body, labels }),
+      },
+    );
+    if (!response.ok) {
+      console.error(
+        `[plain] GitHub issue creation failed: ${response.status} ${(await response.text()).slice(0, 300)}`,
+      );
+      return null;
     }
-    console.error("Linear issue creation failed:", data);
-    return null;
+    const data = await response.json();
+    return { number: data.number, url: data.html_url, repo };
   } catch (e) {
-    console.error("Error creating Linear issue:", e);
+    console.error("[plain] Error creating GitHub issue:", e);
     return null;
   }
+}
+
+/**
+ * Link a Plain thread to a GitHub issue through Plain's GitHub Issues
+ * integration (`github_issue` thread link, source id `owner/name/number`).
+ * The thread then counts towards the issue in Top issues and moves to Close
+ * the loop when the issue is closed.
+ */
+export async function linkThreadToGithubIssue(
+  threadId: string,
+  repo: string,
+  number: number,
+): Promise<boolean> {
+  const result = await plain.rawRequest({
+    query: `
+      mutation CreateThreadLink($input: CreateThreadLinkInput!) {
+        createThreadLink(input: $input) {
+          error { code message }
+          threadLink { id }
+        }
+      }
+    `,
+    variables: {
+      input: {
+        threadId,
+        sourceType: "github_issue",
+        sourceId: `${repo}/${number}`,
+      },
+    },
+  });
+  const error =
+    result.error ?? (result.data as any)?.createThreadLink?.error ?? null;
+  if (error) {
+    console.error(
+      `[plain] createThreadLink failed for ${threadId} -> ${repo}#${number}:`,
+      error.code ?? "",
+      error.message,
+    );
+    return false;
+  }
+  return true;
 }
