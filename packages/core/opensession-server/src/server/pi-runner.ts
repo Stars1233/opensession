@@ -159,7 +159,11 @@ import {
   toPiModel,
 } from "./models";
 import { resolveWorkspaceModelPreset } from "./workspace-model-presets";
-import { expandSkillCommand, skillSearchPaths } from "./skill-paths";
+import {
+  expandSkillCommand,
+  gatePstackSkills,
+  skillSearchPaths,
+} from "./skill-paths";
 import type { ResolvedWorkspaceModelPreset } from "./workspace-model-presets";
 import type { TranscriptEntry } from "./types";
 import type { RunAgentOpts } from "./agent-runner";
@@ -2089,6 +2093,7 @@ async function* runPiAttempt(
           model,
           effort: opts.effort,
           fastMode: opts.fastMode,
+          pstackMode: opts.pstackMode,
           accountId: opts.accountId,
           accountStrict: opts.accountStrict,
           usageCredits: opts.usageCredits,
@@ -2547,6 +2552,12 @@ async function* runPiAttempt(
       // shipped skill dead in the product.
       noSkills: true,
       additionalSkillPaths: skillSearchPaths(cwd),
+      // The pstack family stays loaded but invisible to the model until the
+      // session turns pstack mode on (composer toggle or /pstack).
+      skillsOverride: (base) => ({
+        ...base,
+        skills: gatePstackSkills(base.skills, opts.pstackMode),
+      }),
       noPromptTemplates: true,
       noThemes: true,
       // Pi's context-file discovery walks every ancestor of cwd up to /
@@ -2712,6 +2723,7 @@ async function* runPiAttempt(
           model,
           effort: opts.effort,
           fastMode: opts.fastMode,
+          pstackMode: opts.pstackMode,
           accountId: opts.accountId,
           accountStrict: opts.accountStrict,
           usageCredits: opts.usageCredits,

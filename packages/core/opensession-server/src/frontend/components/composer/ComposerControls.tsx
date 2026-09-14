@@ -26,6 +26,7 @@ import { composerMorph } from "../../ui/motion";
 import { Tooltip } from "../../ui/tooltip";
 import {
   IconAtSign,
+  IconChecklist,
   IconCrosshair,
   IconNote,
   IconPaperclip,
@@ -145,6 +146,8 @@ interface ComposerAddMenuProps {
   noteMode?: boolean;
   onNoteModeChange?: (active: boolean) => void;
   onSetGoal?: (goal: string | null) => void;
+  pstackMode?: boolean;
+  onPstackModeChange?: (on: boolean) => void;
   menuExtra?: (context: { close: () => void }) => ReactNode;
   sendMenu?: (context: {
     text: string;
@@ -175,6 +178,8 @@ export function ComposerAddMenu({
   noteMode,
   onNoteModeChange,
   onSetGoal,
+  pstackMode,
+  onPstackModeChange,
   menuExtra,
   sendMenu,
   outgoingText,
@@ -293,6 +298,29 @@ export function ComposerAddMenu({
               </span>
               <span className="grow whitespace-nowrap">
                 {noteMode ? "Back to prompting" : "Write a team note"}
+              </span>
+            </ComposerPressButton>
+          )}
+          {onPstackModeChange && (
+            <ComposerPressButton
+              type="button"
+              className={composerMenuItem}
+              onPress={() => {
+                setMenu(null);
+                onPstackModeChange(!pstackMode);
+              }}
+              aria-pressed={!!pstackMode}
+              title={
+                pstackMode
+                  ? "Stop loading the pstack playbooks and skills"
+                  : "Load the pstack playbooks and skills for every turn"
+              }
+            >
+              <span className={composerMenuIcon}>
+                <IconChecklist size={22} />
+              </span>
+              <span className="grow whitespace-nowrap">
+                {pstackMode ? "Turn off pstack mode" : "Turn on pstack mode"}
               </span>
             </ComposerPressButton>
           )}

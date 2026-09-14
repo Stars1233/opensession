@@ -60,6 +60,41 @@ export function skillSearchPaths(worktreeDir?: string): string[] {
   return out;
 }
 
+/**
+ * The pstack family: the `pstack` and `poteto-mode` entry skills plus every
+ * skill under `pstack-suite`. Matched by directory name rather than by the
+ * shipped root, because a session on this repository loads the same files
+ * through its checkout's `.claude/skills` symlink.
+ */
+const PSTACK_SKILL_DIR_RE =
+  /(?:^|[\\/])(?:pstack|poteto-mode|pstack-suite)[\\/]/;
+
+export function isPstackSkillPath(filePath: string): boolean {
+  return PSTACK_SKILL_DIR_RE.test(filePath);
+}
+
+/**
+ * Hide the pstack family from the model unless the session opted in.
+ *
+ * Only the `name` and `description` of a visible skill reach the system
+ * prompt, and several pstack descriptions read as standing orders ("Must
+ * always apply"), so every session used to pick them up on its own. Marking
+ * them `disableModelInvocation` keeps them loaded, so `/pstack <task>` and an
+ * explicit `/unslop` still expand, while the model no longer sees them until
+ * pstack mode is on.
+ */
+export function gatePstackSkills<T extends { filePath: string }>(
+  skills: T[],
+  pstackMode: boolean | undefined,
+): T[] {
+  if (pstackMode) return skills;
+  return skills.map((skill) =>
+    isPstackSkillPath(skill.filePath)
+      ? { ...skill, disableModelInvocation: true }
+      : skill,
+  );
+}
+
 /** The fields of pi's `Skill` this module needs. */
 export interface LoadedSkill {
   name: string;

@@ -815,6 +815,7 @@ export function SessionViewer({
   const { accountId, effort, fastMode, goalOverride } = workspaceModel;
   const { currentGoal, setEffort, setFastMode } = workspaceModel;
   const { setAccountId, setGoalOverride } = workspaceModel;
+  const { pstackMode, setPstackOverride } = workspaceModel;
   const { workflowRuns, workflowsLoaded, workflowAction, setWorkflowRuns } =
     workspaceTools.workflows;
   const { runningAgents, hasPlain, plainUrl } = workspaceTools.relations;
@@ -1222,6 +1223,7 @@ export function SessionViewer({
       setAccountId,
       setFastMode,
       setGoalOverride,
+      setPstackOverride,
     },
     setters: {
       renameDraft,
@@ -1239,6 +1241,7 @@ export function SessionViewer({
   const { handleOpenSlackComposer, commitRename } = headerActions.actions;
   const { handleModelChange, handleAccountChange, handleSetGoal } =
     headerActions.actions;
+  const { handlePstackModeChange } = headerActions.actions;
   const { showDeleteConfirm, setShowDeleteConfirm, confirm } =
     headerActions.deleteState;
   const { confirmDialog, deleting, setDeleting } = headerActions.deleteState;
@@ -1790,7 +1793,7 @@ export function SessionViewer({
               fastMode,
               accounts,
               accountId,
-              currentGoal,
+              standing: { goal: currentGoal, pstackMode },
               usage,
               composerRef,
               noteMode,
@@ -1816,6 +1819,7 @@ export function SessionViewer({
             moreActions: {
               handleAccountChange,
               handleSetGoal,
+              handlePstackModeChange,
             },
           }}
           layout={{

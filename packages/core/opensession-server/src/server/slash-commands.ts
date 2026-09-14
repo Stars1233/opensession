@@ -89,18 +89,24 @@ export function handleSlashCommand(
         ? "Pstack mode is on. Use /pstack off or /poteto-mode off to disable it."
         : "Pstack mode is off. Use /pstack <task> or /poteto-mode <task> to enable it.";
     }
+    // The in-hand snapshot is updated too: a task-bearing /pstack runs on
+    // this same object, and the run only loads the pstack skills when it
+    // sees the flag.
     if (["off", "disable", "stop"].includes(input.toLowerCase())) {
       touchNativeSession(session.id, { pstackMode: undefined });
+      session.pstackMode = undefined;
       return "Pstack mode disabled.";
     }
     if (["on", "enable", "start"].includes(input.toLowerCase())) {
       touchNativeSession(session.id, { pstackMode: true });
+      session.pstackMode = true;
       return "Pstack mode enabled. It will apply to future turns until /pstack off.";
     }
     // A task-bearing invocation is both the sticky mode switch and a regular
     // skill prompt. Returning null lets Pi expand the bundled pstack skill for
     // this first turn; later turns receive the compact standing mode note.
     touchNativeSession(session.id, { pstackMode: true });
+    session.pstackMode = true;
     return null;
   }
 

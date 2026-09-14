@@ -6,7 +6,12 @@ import {
   pstackCommandInput,
   PSTACK_MODE_NOTE,
 } from "./pstack-mode";
-import { expandSkillCommand, SHIPPED_SKILLS_DIR } from "./skill-paths";
+import {
+  expandSkillCommand,
+  gatePstackSkills,
+  isPstackSkillPath,
+  SHIPPED_SKILLS_DIR,
+} from "./skill-paths";
 import { searchSkills } from "./skills";
 
 describe("pstack mode", () => {
@@ -38,6 +43,42 @@ describe("pstack mode", () => {
     expect(PSTACK_MODE_NOTE).toContain("Pstack mode is enabled");
     expect(PSTACK_MODE_NOTE).toContain("spawn_task");
     expect(PSTACK_MODE_NOTE).toContain("never grants additional access");
+  });
+
+  test("hides the pstack family from the model until the session opts in", () => {
+    const shipped = join(SHIPPED_SKILLS_DIR, "pstack-suite", "skills");
+    // The checkout symlink path a session on this repository loads from.
+    const linked = "/tmp/ws/.claude/skills/pstack-suite/skills/unslop/SKILL.md";
+    const skills = [
+      { filePath: join(SHIPPED_SKILLS_DIR, "pstack", "SKILL.md") },
+      { filePath: join(SHIPPED_SKILLS_DIR, "poteto-mode", "SKILL.md") },
+      { filePath: join(shipped, "unslop", "SKILL.md") },
+      { filePath: linked },
+      { filePath: join(SHIPPED_SKILLS_DIR, "simplify", "SKILL.md") },
+      // A different skill whose name merely starts with "pstack".
+      { filePath: join(SHIPPED_SKILLS_DIR, "pstack-notes", "SKILL.md") },
+    ];
+
+    expect(skills.map((s) => isPstackSkillPath(s.filePath))).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+    ]);
+
+    const gated = gatePstackSkills(skills, undefined);
+    expect(
+      gated.map(
+        (s) =>
+          (s as { disableModelInvocation?: boolean }).disableModelInvocation,
+      ),
+    ).toEqual([true, true, true, true, undefined, undefined]);
+    // Still loaded: an explicit /unslop or /pstack keeps expanding.
+    expect(gated.map((s) => s.filePath)).toEqual(skills.map((s) => s.filePath));
+
+    expect(gatePstackSkills(skills, true)).toBe(skills);
   });
 
   test("lists and expands both bundled command names with their tasks", () => {

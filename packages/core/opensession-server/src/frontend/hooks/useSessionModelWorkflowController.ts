@@ -42,6 +42,16 @@ export function useSessionModelWorkflowController(
   useEffect(() => setGoalOverride(undefined), [session.id, session.goal]);
   const currentGoal =
     goalOverride !== undefined ? goalOverride : (session.goal ?? null);
+  // Same shape for pstack mode: /pstack on|off persists server-side and the
+  // session broadcast catches up a moment later.
+  const [pstackOverride, setPstackOverride] = useState<boolean | undefined>(
+    undefined,
+  );
+  useEffect(
+    () => setPstackOverride(undefined),
+    [session.id, session.pstackMode],
+  );
+  const pstackMode = pstackOverride ?? !!session.pstackMode;
   useEffect(() => {
     fetchModels(session.workspaceId || undefined)
       .then((m) => {
@@ -138,10 +148,12 @@ export function useSessionModelWorkflowController(
       fastMode,
       goalOverride,
       currentGoal,
+      pstackMode,
       setEffort,
       setFastMode,
       setAccountId,
       setGoalOverride,
+      setPstackOverride,
     },
     workflows: {
       workflowRuns,

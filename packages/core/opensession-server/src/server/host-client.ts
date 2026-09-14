@@ -236,6 +236,7 @@ export interface HostedRunOpts {
    *  matching RunHostSpec fields). */
   effort?: string;
   fastMode?: boolean;
+  pstackMode?: boolean;
   accountId?: string;
   accountStrict?: boolean;
   usageCredits?: boolean;
@@ -434,6 +435,7 @@ async function* runAgentInProcess(
     accountAffinityKey: opts.accountAffinityKey,
     effort: opts.effort,
     fastMode: opts.fastMode,
+    pstackMode: opts.pstackMode,
     accountId: opts.accountId,
     accountStrict: opts.accountStrict,
     usageCredits: opts.usageCredits,
@@ -567,6 +569,7 @@ function hostedRunRecord(spec: RunHostSpec): ActiveRunRecord {
     transientFallback: spec.transientFallback,
     effort: spec.effort,
     fastMode: spec.fastMode,
+    pstackMode: spec.pstackMode,
     accountId: spec.accountId,
     accountStrict: spec.accountStrict,
     usageCredits: spec.usageCredits,
@@ -627,6 +630,7 @@ async function spawnHostRun(
     accountAffinityKey: opts.accountAffinityKey,
     effort: opts.effort,
     fastMode: opts.fastMode,
+    pstackMode: opts.pstackMode,
     accountId: opts.accountId,
     accountStrict: opts.accountStrict,
     usageCredits: opts.usageCredits,

@@ -117,6 +117,8 @@ export interface RunHostSpec {
   effort?: string;
   /** OpenAI priority service tier for ChatGPT OAuth Codex runs. */
   fastMode?: boolean;
+  /** Pstack mode: the pstack skill family is visible to the model. */
+  pstackMode?: boolean;
   /** Pinned account in the active model provider's pool; pool fallback applies. */
   accountId?: string;
   /** Hard accountId pin — never rotate into the shared pool (cost cap). */

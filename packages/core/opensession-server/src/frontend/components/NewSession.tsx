@@ -73,6 +73,7 @@ import {
   IconArrowUp,
   IconChevronDown,
   IconChevronRight,
+  IconChecklist,
   IconConnections,
   IconDotsHorizontal,
   IconEye,
@@ -424,6 +425,9 @@ export function NewSession({
     }
   }
   const [fastMode, setFastMode] = useState(false);
+  // Pstack mode: the pstack playbooks and skills load for every turn. Off by
+  // default so an ordinary session never sees them.
+  const [pstackMode, setPstackMode] = useState(false);
   // Pinned provider account for the new session ("" = auto pool pick).
   // Soft pin: the runner prefers it and falls back on exhaustion. Only
   // meaningful for Anthropic/OpenAI subscription-backed models.
@@ -1041,6 +1045,7 @@ export function NewSession({
     if (model) createMessage.model = model;
     // This assignment replaces `...(fastMode ? { fastMode: true } : {})`.
     if (fastMode) createMessage.fastMode = true;
+    if (pstackMode) createMessage.pstackMode = true;
     if (accountProvider && accountId) createMessage.accountId = accountId;
     // Once defaults have loaded, Host is an explicit override ("local").
     // Omitting the field would make the server re-apply the user's default.
@@ -1594,6 +1599,7 @@ export function NewSession({
                       FOOTER_ICON_BTN,
                       (branchPicked ||
                         sandboxProvider ||
+                        pstackMode ||
                         modelEngine(effectiveModelId) !== "pi" ||
                         selectedMcpServers.length > 0) &&
                         paletteIconBtnOn,
@@ -1715,6 +1721,18 @@ export function NewSession({
                       </Menu.Popup>
                     </Menu.SubmenuRoot>
                   )}
+                  <Menu.CheckboxItem
+                    checked={pstackMode}
+                    closeOnClick={false}
+                    onCheckedChange={setPstackMode}
+                    className="justify-between gap-3"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <IconChecklist className="shrink-0 text-dim" size={20} />
+                      <span className="truncate">Pstack mode</span>
+                    </span>
+                    <Menu.Check on={pstackMode} className="text-dim" />
+                  </Menu.CheckboxItem>
                   <Menu.SubmenuRoot>
                     <Menu.SubmenuTrigger className="justify-between gap-3">
                       <span className="flex min-w-0 items-center gap-2">

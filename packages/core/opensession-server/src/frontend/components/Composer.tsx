@@ -58,6 +58,7 @@ import {
   IconArrowUp,
   IconReturn,
   IconPaperclip,
+  IconChecklist,
   IconCrosshair,
   IconEye,
   IconNote,
@@ -189,6 +190,7 @@ export function Composer({
     accounts,
     accountId,
     goal,
+    pstackMode,
     usage,
     prefill,
     hint,
@@ -212,6 +214,7 @@ export function Composer({
     onFastModeChange,
     onAccountChange,
     onSetGoal,
+    onPstackModeChange,
     onImagesChange,
     onFilesChange,
     onAddAttachments,
@@ -467,7 +470,12 @@ export function Composer({
   // Whether the "+" has anything to show. Images keep the attachment row
   // available in note mode, while the mode row remains the way back out.
   const hasAddMenu =
-    canAttach || !!onSetGoal || !!onNoteModeChange || !!menuExtra || !!sendMenu;
+    canAttach ||
+    !!onSetGoal ||
+    !!onNoteModeChange ||
+    !!onPstackModeChange ||
+    !!menuExtra ||
+    !!sendMenu;
 
   // Phones get a ChatGPT-style resting state: while the field is empty and
   // unfocused, the composer collapses to a single-row pill ("+ · placeholder ·
@@ -667,6 +675,22 @@ export function Composer({
               keywords: ["target", "objective"],
               icon: <IconCrosshair size={16} />,
               run: () => setMenu("goal"),
+            },
+          ]
+        : []),
+      ...(onPstackModeChange
+        ? [
+            {
+              id: "pstack-mode",
+              label: pstackMode
+                ? "Turn off pstack mode"
+                : "Turn on pstack mode",
+              description: pstackMode
+                ? "Stop loading the pstack playbooks and skills"
+                : "Load the pstack playbooks and skills for every turn",
+              keywords: ["pstack", "poteto", "playbook", "rigorous"],
+              icon: <IconChecklist size={16} />,
+              run: () => onPstackModeChange(!pstackMode),
             },
           ]
         : []),
@@ -1682,6 +1706,8 @@ export function Composer({
               noteMode={noteMode}
               onNoteModeChange={onNoteModeChange}
               onSetGoal={onSetGoal}
+              pstackMode={pstackMode}
+              onPstackModeChange={onPstackModeChange}
               menuExtra={menuExtra}
               sendMenu={sendMenu}
               outgoingText={outgoingText}

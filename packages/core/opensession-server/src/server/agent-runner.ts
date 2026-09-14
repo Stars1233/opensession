@@ -126,6 +126,8 @@ export interface RunAgentOpts {
   effort?: string;
   /** Use OpenAI's priority service tier when this is a ChatGPT OAuth Codex run. */
   fastMode?: boolean;
+  /** Pstack mode: the pstack skill family is visible to the model. */
+  pstackMode?: boolean;
   /**
    * External MCP servers this run may mount. REQUIRED and with no implicit
    * default: pass an allowlist, `[]` for none, or `"all"` to mount every

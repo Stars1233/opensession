@@ -218,6 +218,7 @@ interface TranscriptContent {
   transcriptIndexExpected: boolean;
   historyTruncated: boolean;
   atTop: boolean;
+  /** Older rows are on the wire: a legacy page walk or indexed ranges. */
   loadingHistory: boolean;
 }
 
@@ -313,6 +314,12 @@ interface ComposerState {
   isAsk: boolean;
 }
 
+/** Standing context every turn carries: the pinned goal and pstack mode. */
+interface ComposerStanding {
+  goal: string | null;
+  pstackMode: boolean;
+}
+
 interface ComposerConfiguration {
   stopRequestedAt: number | null;
   stopRequest: number;
@@ -324,7 +331,7 @@ interface ComposerConfiguration {
   fastMode: boolean;
   accounts: NonNullable<ComposerProps["config"]["accounts"]>;
   accountId: string;
-  currentGoal: string | null;
+  standing: ComposerStanding;
   usage: ComposerProps["config"]["usage"];
   composerRef: RefObject<HTMLTextAreaElement | null>;
   noteMode: boolean;
@@ -356,6 +363,9 @@ interface ComposerActions {
 interface ComposerMoreActions {
   handleAccountChange: NonNullable<ComposerProps["actions"]["onAccountChange"]>;
   handleSetGoal: NonNullable<ComposerProps["actions"]["onSetGoal"]>;
+  handlePstackModeChange: NonNullable<
+    ComposerProps["actions"]["onPstackModeChange"]
+  >;
 }
 
 interface LayoutRegion {
@@ -580,7 +590,7 @@ export function SessionViewerMainRegion({
     fastMode,
     accounts,
     accountId,
-    currentGoal,
+    standing,
     usage,
     composerRef,
     noteMode,
@@ -603,7 +613,8 @@ export function SessionViewerMainRegion({
     setEffort,
     setFastMode,
   } = composer.actions;
-  const { handleAccountChange, handleSetGoal } = composer.moreActions;
+  const { handleAccountChange, handleSetGoal, handlePstackModeChange } =
+    composer.moreActions;
   const {
     actionClearance,
     summaryStep,
@@ -1336,7 +1347,8 @@ export function SessionViewerMainRegion({
                     accounts:
                       session.source === "opensession" ? accounts : undefined,
                     accountId,
-                    goal: currentGoal,
+                    goal: standing.goal,
+                    pstackMode: standing.pstackMode,
                     usage,
                     textareaRef: composerRef,
                   }}
@@ -1364,6 +1376,10 @@ export function SessionViewerMainRegion({
                     onSetGoal:
                       session.source === "opensession"
                         ? handleSetGoal
+                        : undefined,
+                    onPstackModeChange:
+                      session.source === "opensession"
+                        ? handlePstackModeChange
                         : undefined,
                     mentionFetch: (query) =>
                       fetchFileMentions(query, session.id),

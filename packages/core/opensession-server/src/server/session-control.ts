@@ -106,6 +106,8 @@ export interface CreateSessionOpts {
   effort?: string;
   /** OpenAI fast-mode flag persisted on the session. */
   fastMode?: boolean;
+  /** Pstack mode persisted on the session: the pstack skill family loads for its runs. */
+  pstackMode?: boolean;
   /** Composer image attachments as `data:image/...;base64,` URLs. */
   images?: string[];
   /** Raw composer file references, already staged through `/api/upload`. */

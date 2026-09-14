@@ -715,6 +715,7 @@ interface HeaderActionModel {
   setAccountId: Dispatch<SetStateAction<string>>;
   setFastMode: Dispatch<SetStateAction<boolean>>;
   setGoalOverride: Dispatch<SetStateAction<string | null | undefined>>;
+  setPstackOverride: Dispatch<SetStateAction<boolean | undefined>>;
 }
 interface HeaderActionSetters {
   renameDraft: string | null;
@@ -821,6 +822,15 @@ export function useSessionHeaderActions({
       user: getCurrentUser(),
     });
   }
+  function handlePstackModeChange(on: boolean) {
+    model.setPstackOverride(on);
+    runtime.send({
+      type: "prompt",
+      sessionId: identity.session.id,
+      content: on ? "/pstack on" : "/pstack off",
+      user: getCurrentUser(),
+    });
+  }
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
   const [deleting, setDeleting] = useState(false);
@@ -836,6 +846,7 @@ export function useSessionHeaderActions({
       handleModelChange,
       handleAccountChange,
       handleSetGoal,
+      handlePstackModeChange,
     },
     deleteState: {
       showDeleteConfirm,

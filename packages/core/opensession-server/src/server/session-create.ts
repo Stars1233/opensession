@@ -56,6 +56,14 @@ import { configuredInteractiveDefaultModel } from "./model-catalog";
 import { notifyMentions } from "./mentions";
 import { newSessionId } from "./paths";
 import { enablesPstackMode, PSTACK_MODE_NOTE } from "./pstack-mode";
+
+/** Pstack mode for a new session: the palette toggle or a `/pstack <task>` opening prompt. */
+function specPstackMode(spec: {
+  pstackMode?: boolean;
+  displayPrompt: string;
+}): boolean {
+  return spec.pstackMode === true || enablesPstackMode(spec.displayPrompt);
+}
 import {
   pastedTextsFromWire,
   withPastedTexts,
@@ -229,6 +237,7 @@ export interface CreateSessionMessage {
   model?: unknown;
   effort?: unknown;
   fastMode?: unknown;
+  pstackMode?: unknown;
   accountId?: string;
   mcpServers?: unknown;
   repo?: unknown;
@@ -388,6 +397,8 @@ export interface ResolvedCreate {
   /** Stable preset instructions captured at creation, even if the workspace changes later. */
   presetNote?: string;
   fastMode?: boolean;
+  /** Pstack mode from the palette toggle; `/pstack <task>` as the opening prompt also enables it. */
+  pstackMode?: boolean;
   accountId?: string;
   images?: ImageInput[];
   externalRefs?: NativeSessionFile["externalRefs"];
@@ -686,7 +697,7 @@ function createdSessionFileDefaults(spec: ResolvedCreate): NativeSessionFile {
       : {}),
     ...(spec.effort ? { effort: spec.effort } : {}),
     ...(spec.presetNote ? { presetNote: spec.presetNote } : {}),
-    ...(enablesPstackMode(spec.displayPrompt) ? { pstackMode: true } : {}),
+    ...(specPstackMode(spec) ? { pstackMode: true } : {}),
     ...(spec.fastMode ? { fastMode: true } : {}),
     ...(spec.accountId ? { accountId: spec.accountId } : {}),
     ...(spec.plainThreadId ? { plainThreadId: spec.plainThreadId } : {}),
@@ -1392,7 +1403,7 @@ export async function openCreatedSession(
 ): Promise<void> {
   assertAutomationDescendantOpeningIsolation(spec);
   const bksId = spec.id;
-  const pstackMode = enablesPstackMode(spec.displayPrompt);
+  const pstackMode = specPstackMode(spec);
   const pendingAttach = spec.attachRepos?.repos.length
     ? spec.attachRepos
     : null;
@@ -1835,6 +1846,7 @@ export async function openCreatedSession(
               model: spec.model,
               effort: spec.effort,
               fastMode: spec.fastMode,
+              pstackMode,
               accountId: spec.accountId,
               fallbackModel: interactiveFallbackModel(spec.model),
               mcpServers: openingTrust.mcpServers,
@@ -2338,6 +2350,10 @@ export async function handleCreateSessionMessage(
   const createFastMode = forkSource
     ? forkSource.fastMode
     : msg.fastMode === true;
+  // Pstack mode from the palette's More options (forks inherit).
+  const createPstackMode = forkSource
+    ? forkSource.pstackMode
+    : msg.pstackMode === true;
   // Pinned provider account from the palette (forks inherit).
   const createAccountId = forkSource
     ? forkSource.accountId
@@ -2913,6 +2929,7 @@ export async function handleCreateSessionMessage(
       effort: createEffort,
       presetNote: workspacePreset?.note,
       fastMode: createFastMode,
+      pstackMode: createPstackMode,
       accountId: createAccountId,
       images,
       externalRefs: inheritedRefs,

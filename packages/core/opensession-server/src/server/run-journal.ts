@@ -91,6 +91,7 @@ export interface ActiveRunRecord {
   transientFallback?: boolean; // model must not replace selectedModel in session state
   effort?: string; // reasoning effort, preserved across resume
   fastMode?: boolean; // OpenAI priority service tier, preserved across resume
+  pstackMode?: boolean; // pstack skill family visible to the model, preserved across resume
   accountId?: string; // pinned provider account, preserved across resume
   accountStrict?: boolean; // hard pin: never rotate into the pool (automation cost cap)
   usageCredits?: boolean; // may run on accounts spending usage-credits past their limits

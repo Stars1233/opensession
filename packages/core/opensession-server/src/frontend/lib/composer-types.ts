@@ -57,6 +57,10 @@ export interface ComposerConfig {
   accountId?: string;
   /** Session goal pinned via /goal and sent with every prompt. */
   goal?: string | null;
+  /** Pstack mode: the pstack playbooks and skills load for every turn.
+   * Off by default; the "+" menu toggles it when `onPstackModeChange` is
+   * wired. */
+  pstackMode?: boolean;
   /** Conversation usage shown in the model menu. */
   usage?: SessionUsage;
   /**
@@ -148,6 +152,8 @@ export interface ComposerActions {
   onAccountChange?: (accountId: string) => void;
   /** Sets or clears the session goal from the inline target control. */
   onSetGoal?: (goal: string | null) => void;
+  /** Turns pstack mode on or off for the session. */
+  onPstackModeChange?: (on: boolean) => void;
   onImagesChange?: (images: string[]) => void;
   onFilesChange?: (files: FileAttachment[]) => void;
   onAddAttachments?: (picked: FileList | File[]) => void | Promise<void>;

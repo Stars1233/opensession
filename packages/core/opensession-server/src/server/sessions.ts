@@ -980,6 +980,7 @@ export function nativeSessionRow(data: NativeSessionFile): UnifiedSession {
     model: data.model,
     effort: data.effort,
     fastMode: data.fastMode,
+    pstackMode: data.pstackMode,
     accountId: data.accountId,
     codexThreadId: data.codexThreadId,
     piSessionId: data.piSessionId,

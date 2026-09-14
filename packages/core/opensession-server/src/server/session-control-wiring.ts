@@ -698,6 +698,7 @@ registerSessionControl({
       model: modelInput,
       effort: effortInput,
       fastMode: fastModeInput,
+      pstackMode: pstackModeInput,
       images: imageUrls,
       files: rawFiles,
       pastedTexts,
@@ -804,6 +805,9 @@ registerSessionControl({
     const createFastMode = fork
       ? fork.source.fastMode === true
       : fastModeInput === true;
+    const createPstackMode = fork
+      ? fork.source.pstackMode === true
+      : pstackModeInput === true;
     // Pinned provider account: validated exactly like the web palette
     // (mismatched/unknown/foreign ids drop to the pool).
     const createAccountId = fork
@@ -1287,6 +1291,7 @@ ${createMentionsNote}`;
       model,
       effort: createEffort,
       fastMode: createFastMode || undefined,
+      pstackMode: createPstackMode || undefined,
       accountId: createAccountId,
       images,
       // Feed-item linkage follows the session's workspace (Video tab +

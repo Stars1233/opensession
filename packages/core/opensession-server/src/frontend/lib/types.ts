@@ -573,6 +573,8 @@ export interface UnifiedSession {
   effort?: string;
   /** OpenAI priority service tier for ChatGPT OAuth Codex runs. */
   fastMode?: boolean;
+  /** Pstack mode: the pstack skill family loads for this session's runs. */
+  pstackMode?: boolean;
   /** Pinned account in the active model provider's pool; unset = auto. */
   accountId?: string;
   /** DETAIL ONLY — see `claudeSessionId`. */

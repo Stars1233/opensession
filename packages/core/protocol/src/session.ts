@@ -436,6 +436,8 @@ export type ProtocolClientMessage =
       effort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       /** OpenAI priority service tier for the opening and later turns. */
       fastMode?: boolean;
+      /** Start in pstack mode: the pstack skill family loads for every turn. */
+      pstackMode?: boolean;
       /** Pinned provider account; omitted means automatic pool selection. */
       accountId?: string;
       /** Fork an existing session, keeping its real conversation history. */
