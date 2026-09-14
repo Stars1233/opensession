@@ -8,7 +8,7 @@ import {
   type OpenIssue,
 } from "../lib/api";
 import { compactAge, dateGroup, personLabel } from "../lib/pr-rows";
-import { renderMarkdown } from "../lib/markdown";
+import { renderPrCommentMarkdown } from "../lib/markdown";
 import {
   PR_GROUP_LABEL,
   PR_LIST,
@@ -457,7 +457,7 @@ export function Issues({ sessions, onOpenSession, topbarActionsEl }: Props) {
               {preview.body ? (
                 <MarkdownBody
                   className="markdown mt-5"
-                  html={renderMarkdown(preview.body)}
+                  html={renderPrCommentMarkdown(preview.body)}
                 />
               ) : (
                 <div className="mt-5 text-supporting text-faint">
