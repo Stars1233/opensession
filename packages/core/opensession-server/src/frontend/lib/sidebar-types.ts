@@ -21,6 +21,8 @@ export interface Props {
   selectedId: string | null;
   /** True while the pull request list is open: highlights its entry. */
   prsActive: boolean;
+  /** True while the Issues page is open: highlights its entry. */
+  issuesActive: boolean;
   /**
    * True while the Feed page is open: highlights its entry. Note this is the
    * Feed *tool*, not the sidebar's `feeds` (the Slack/Linear/GitHub sources,

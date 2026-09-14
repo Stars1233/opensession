@@ -6,6 +6,7 @@ import {
   IconDatabase,
   IconFile,
   IconInbox,
+  IconIssue,
   IconListCircles,
   IconMail,
   IconPullRequest,
@@ -37,6 +38,7 @@ interface SidebarToolsModelOptions {
   navigation: NavigationActions;
   feedActive: boolean;
   prsActive: boolean;
+  issuesActive: boolean;
   tasksActive: boolean;
   taskCount: number;
   plainActive: boolean;
@@ -60,6 +62,7 @@ export function createSidebarToolsModel({
   navigation,
   feedActive,
   prsActive,
+  issuesActive,
   tasksActive,
   taskCount,
   plainActive,
@@ -100,6 +103,14 @@ export function createSidebarToolsModel({
       active: prsActive,
       onClick: navigation.openPrs,
       title: "Pull request worktrees",
+    },
+    {
+      id: "issues",
+      label: SIDEBAR_TOOL_LABELS.issues,
+      icon: <IconIssue />,
+      active: issuesActive,
+      onClick: navigation.openIssues,
+      title: "Open GitHub issues",
     },
     {
       id: "tasks",

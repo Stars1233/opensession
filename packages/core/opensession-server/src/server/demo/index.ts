@@ -135,6 +135,16 @@ export async function startDemo(): Promise<void> {
     console.error("[demo] PR cache reseed failed:", e);
   }
 
+  // The Issues page lists GitHub issues the demo repo will never have; seed
+  // the in-memory snapshot so the page has rows to show.
+  try {
+    const [{ seedIssueCache }, { demoIssues, DEMO_REPO_ID }] =
+      await Promise.all([import("../issue-cache"), import("./fixtures")]);
+    seedIssueCache(DEMO_REPO_ID, demoIssues(Date.now()));
+  } catch (e) {
+    console.error("[demo] issue cache seed failed:", e);
+  }
+
   try {
     offerDemoAsk(state);
   } catch (e) {

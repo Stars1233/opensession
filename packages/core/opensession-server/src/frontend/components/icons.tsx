@@ -1535,6 +1535,16 @@ export function IconPullRequest(p: IconProps) {
   );
 }
 
+// iconic-pro circle-dot — GitHub's open-issue mark.
+export function IconIssue(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle {...stroke} cx="12" cy="12" r="8.25" />
+      <circle {...stroke} cx="12" cy="12" r="2.25" />
+    </Svg>
+  );
+}
+
 // iconic-pro rotate-anti-clockwise — the ⟲ "restore" glyph.
 export function IconRestore(p: IconProps) {
   return (

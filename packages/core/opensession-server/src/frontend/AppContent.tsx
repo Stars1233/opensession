@@ -30,6 +30,7 @@ import { NavigationProvider } from "./components/NavigationProvider";
 import { NewSession } from "./components/NewSession";
 import { PrQueuePreview } from "./components/PrQueuePreview";
 import { Prs } from "./components/Prs";
+import { Issues } from "./components/Issues";
 import { Reports } from "./components/Reports";
 import { Databases } from "./components/Databases";
 import { RestartOverlay } from "./components/RestartOverlay";
@@ -84,7 +85,9 @@ import {
   DETAIL_TOPBAR_ACTIONS,
   DETAIL_TOPBAR_TITLE,
   DETAIL_TOPBAR_TITLE_TEXT,
+  LIST_COLUMN_VIEWS,
   tabSplitDropPreviewClass,
+  TOPBAR_ACTION_VIEWS,
 } from "./lib/app-shell-classes";
 import { appTopbarTitle } from "./lib/app-topbar-title";
 import type { AppProps, PendingCreateDraft } from "./lib/app-types";
@@ -1197,6 +1200,7 @@ export function AppContent({
     goBack,
     openNextChat,
     openPrs: () => navigate({ view: "prs" }),
+    openIssues: () => navigate({ view: "issues" }),
     openFeed: () => navigate({ view: "feed" }),
     openSettings: (section) => navigate({ view: "settings", section }),
     openTasks: () => navigate({ view: "tasks" }),
@@ -1437,8 +1441,7 @@ export function AppContent({
                         <TopBarTitle
                           className={cn(
                             DETAIL_TOPBAR_TITLE,
-                            (route.view === "prs" || route.view === "feed") &&
-                              PR_PAGE_COLUMN,
+                            LIST_COLUMN_VIEWS.has(route.view) && PR_PAGE_COLUMN,
                             route.view === "archived" && ARCHIVED_PAGE_COLUMN,
                           )}
                         >
@@ -1452,8 +1455,7 @@ export function AppContent({
                           <TopBarActions
                             className={cn(
                               DETAIL_TOPBAR_ACTIONS,
-                              (route.view === "prs" ||
-                                route.view === "archived") &&
+                              TOPBAR_ACTION_VIEWS.has(route.view) &&
                                 "ml-4 flex-1 pl-0",
                             )}
                             ref={setTopbarActionsEl}
@@ -1629,6 +1631,12 @@ export function AppContent({
                       send={send}
                       addHandler={addHandler}
                       onOpenSession={(id) => navigate({ view: "session", id })}
+                    />
+                  ) : route.view === "issues" ? (
+                    <Issues
+                      sessions={sessions}
+                      onOpenSession={(id) => navigate({ view: "session", id })}
+                      topbarActionsEl={topbarActionsEl}
                     />
                   ) : route.view === "reviews" ? (
                     <Reviews

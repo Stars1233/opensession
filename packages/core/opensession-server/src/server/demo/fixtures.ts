@@ -1053,6 +1053,72 @@ export function demoReplayScript(): Array<() => JsonlLine[]> {
 
 // ── Stores beyond the session dir ──────────────────────────────────────────────
 
+/** Open issues for the Issues page. One already has the live demo session
+ *  so the list shows a running row; the others are still waiting. */
+export function demoIssues(now: number) {
+  const at = (hoursAgo: number) => new Date(now - hoursAgo * 3600_000);
+  const issue = (
+    number: number,
+    title: string,
+    body: string,
+    opts: {
+      hoursAgo: number;
+      author: string;
+      labels?: string[];
+      comments?: number;
+      sessionId?: string;
+    },
+  ) => ({
+    repo: DEMO_REPO_ID,
+    ghRepo: DEMO_GH_REPO,
+    number,
+    title,
+    url: `https://github.com/${DEMO_GH_REPO}/issues/${number}`,
+    body,
+    author: opts.author,
+    person: null,
+    labels: opts.labels ?? [],
+    assignees: [],
+    comments: opts.comments ?? 0,
+    createdAt: at(opts.hoursAgo + 6).toISOString(),
+    updatedAt: at(opts.hoursAgo).toISOString(),
+    sessionId: opts.sessionId ?? `bks-ghpr-${number}-issue`,
+    assigned: (opts.labels ?? []).includes("os"),
+  });
+  return [
+    issue(
+      131,
+      "Upload retries stall after the third attempt",
+      "Large uploads that fail three times stop retrying and the progress bar sits at 92% until the tab is reloaded.\n\n**Steps**\n\n1. Throttle the network to Slow 3G\n2. Upload a 40 MB file\n3. Watch the retry counter\n\nExpected: the upload resumes or reports the failure.",
+      {
+        hoursAgo: 1,
+        author: "kent",
+        labels: ["bug", "os"],
+        comments: 3,
+        sessionId: DEMO_LIVE_SESSION_ID,
+      },
+    ),
+    issue(
+      129,
+      "Add keyboard shortcut for archiving a todo",
+      "`e` should archive the focused todo, matching the shortcut sheet in Settings.",
+      { hoursAgo: 9, author: "maya", labels: ["enhancement"], comments: 1 },
+    ),
+    issue(
+      124,
+      "Dark mode: due-date chips lose contrast",
+      "The amber due-date chip on a dark background is 2.9:1. Needs the tokenized amber, not the raw hex.",
+      { hoursAgo: 30, author: "kent", labels: ["design"] },
+    ),
+    issue(118, "Document the export format", "", {
+      hoursAgo: 80,
+      author: "sam",
+      labels: ["docs"],
+      comments: 4,
+    }),
+  ];
+}
+
 export function demoAutomations(now: number) {
   const iso8 = (agoMin: number) => iso(now - agoMin * 60_000);
   return [

@@ -17,6 +17,7 @@ function navigationFixture(openPrs: () => void): NavigationActions {
     openNextChat() {},
     openPrs,
     openFeed() {},
+    openIssues() {},
     openSettings() {},
     openTasks() {},
     openAutomation() {},

@@ -136,6 +136,7 @@ describe("sidebar tool order", () => {
       "plain",
       "analytics",
       "databases",
+      "issues",
     ]);
   });
 });

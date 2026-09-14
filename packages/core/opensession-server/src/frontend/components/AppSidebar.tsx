@@ -232,6 +232,7 @@ export function AppSidebar({
             route.view === "session" ? (listedSession?.id ?? route.id) : null
           }
           prsActive={route.view === "prs"}
+          issuesActive={route.view === "issues"}
           feedActive={route.view === "feed"}
           connected={connected}
           tasksActive={route.view === "tasks"}

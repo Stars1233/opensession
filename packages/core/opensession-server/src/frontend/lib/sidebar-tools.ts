@@ -16,6 +16,7 @@ import { whenCurrentUserReady } from "./auth-ready";
 export const SIDEBAR_TOOL_IDS = [
   "feed",
   "prs",
+  "issues",
   "tasks",
   "plain",
   "catchup",
@@ -30,6 +31,7 @@ export type SidebarToolId = (typeof SIDEBAR_TOOL_IDS)[number];
 export const SIDEBAR_TOOL_LABELS: Record<SidebarToolId, string> = {
   feed: "Feed",
   prs: "Pull requests",
+  issues: "Issues",
   tasks: "Tasks",
   // The Plain queue as a destination. The alternate sidebar band opens a
   // ticket's workspace; this tool opens the ticket directly.

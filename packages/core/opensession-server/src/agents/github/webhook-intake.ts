@@ -109,6 +109,12 @@ export async function handleGithubWebhook(req: Request): Promise<Response> {
     import("../../server/pr-webhook")
       .then((m) => m.handlePrWebhookEvent(event, payload))
       .catch((e) => console.error("[github] pr-webhook dispatch failed:", e));
+    // The Issues page polls; an issue event just makes its next poll fresh.
+    if (event === "issues" || event === "issue_comment") {
+      import("../../server/issue-cache")
+        .then((m) => m.invalidateIssueCache())
+        .catch(() => {});
+    }
 
     if (
       event === "pull_request" ||

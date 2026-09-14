@@ -25,6 +25,7 @@ import {
   IconMail,
   IconMoon,
   IconPlus,
+  IconIssue,
   IconPullRequest,
   IconSidebarLeft,
   IconStack,
@@ -275,6 +276,15 @@ export function buildAppCommandActions({
       category: "Navigate",
       icon: <IconPullRequest size={18} />,
       run: () => navigate({ view: "prs" }),
+    },
+    {
+      id: "issues",
+      label: "Issues",
+      description: "Open the GitHub issue list",
+      category: "Navigate",
+      keywords: ["github", "issue"],
+      icon: <IconIssue size={18} />,
+      run: () => navigate({ view: "issues" }),
     },
     {
       id: "feed",

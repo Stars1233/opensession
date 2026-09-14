@@ -30,7 +30,7 @@ enum SidebarTools {
     /// both clients. Keep it in step with DEFAULT_VISIBLE_TOOLS in
     /// packages/core/opensession-server/src/frontend/lib/sidebar-tools.ts.
     static let allIds = [
-        feed, prs, tasks, plain, catchUp, "supporttinder", reports,
+        feed, prs, "issues", tasks, plain, catchUp, "supporttinder", reports,
         "analytics",
     ]
     static let defaultVisible = [feed, prs, plain, catchUp]

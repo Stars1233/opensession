@@ -28,6 +28,7 @@ export interface NavigationActions {
   openNextChat(): void;
 
   openPrs(): void;
+  openIssues(): void;
   openFeed(): void;
   openSettings(section?: SettingsSectionKey): void;
   openTasks(): void;

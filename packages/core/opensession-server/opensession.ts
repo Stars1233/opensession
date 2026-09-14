@@ -398,6 +398,7 @@ const server: import("bun").Server<WSClientData> = hotServe({
       "/goals",
       "/goals/*",
       "/tasks",
+      "/issues",
       "/analytics",
       "/reports",
       "/reports/*",

@@ -1,3 +1,5 @@
+import type { Route } from "./app-route";
+
 /**
  * The application shell, as finished utility classes — what used to be
  * `.app-body`, `.workspace-shell`, `.detail-pane` and `.detail-topbar` in
@@ -223,6 +225,17 @@ export const DETAIL_TOPBAR_TITLE =
  */
 export const DETAIL_TOPBAR_ACTIONS =
   "ml-auto flex min-w-0 items-center gap-2 pl-4 font-normal empty:hidden";
+
+/** List pages laid out in the pull request list's centred column: the bar's
+ *  title takes the same column so it lines up with the list below. */
+export const LIST_COLUMN_VIEWS: ReadonlySet<Route["view"]> = new Set<
+  Route["view"]
+>(["prs", "feed", "issues"]);
+
+/** Pages whose controls fill the actions slot beside the title. */
+export const TOPBAR_ACTION_VIEWS: ReadonlySet<Route["view"]> = new Set<
+  Route["view"]
+>(["prs", "issues", "archived"]);
 
 /**
  * The word inside that row, which is only there once the page's own heading has

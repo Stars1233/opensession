@@ -4,6 +4,7 @@ import { splitSessionRef, subagentSuffix } from "./share-link";
 
 export type Route =
   | { view: "prs" }
+  | { view: "issues" }
   | { view: "feed" }
   | { view: "new"; prompt?: string }
   | { view: "session"; id: string; subagent?: string[] }
@@ -155,6 +156,7 @@ export function parseRoute(pathname: string): Route {
   if (path === "/analytics") return { view: "analytics" };
   if (path === "/feed" || path === "/people") return { view: "feed" };
   if (path === "/tasks") return { view: "tasks" };
+  if (path === "/issues") return { view: "issues" };
   if (path === "/new") return { view: "new" };
 
   const automation = path.match(/^\/automations(?:\/(.+))?$/);
@@ -233,6 +235,8 @@ export function routePath(route: Route): string {
       return `${BASE_PATH}/feed`;
     case "tasks":
       return `${BASE_PATH}/tasks`;
+    case "issues":
+      return `${BASE_PATH}/issues`;
     case "new":
       return route.prompt
         ? `${BASE_PATH}/new?prompt=${encodeURIComponent(route.prompt)}`

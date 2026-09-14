@@ -114,3 +114,10 @@ describe("route helpers", () => {
     ).toBe(false);
   });
 });
+
+describe("issues route", () => {
+  test("round-trips the Issues page", () => {
+    expect(parseRoute("/issues")).toEqual({ view: "issues" });
+    expect(routePath({ view: "issues" })).toBe(`${BASE_PATH}/issues`);
+  });
+});
