@@ -87,7 +87,8 @@ describe("buildRunInstructions", () => {
       "## Media",
     ]);
     expect(prompt).toContain(
-      "For PRs outside the current primary repository, write `<repo>#<number>`, never bare `#<number>`.",
+      "For PRs outside the current primary repository, write `<repo>#<number>`, never bare `#<number>`. " +
+        "A bare `#<number>` reads as a PR; write GitHub issues as `issue #<number>`.",
     );
     expect(prompt).toContain("`tella-stage` `lease_editor_fixture`");
     expect(prompt).toContain("this Open Session id as `leaseKey`");
@@ -102,7 +103,7 @@ describe("buildRunInstructions", () => {
     expect(prompt).not.toContain("open_pull_request");
     // The Media section names every block form the transcript renders live;
     // that is the one list the model cannot learn from a skill.
-    expect(prompt.length).toBeLessThan(1_950);
+    expect(prompt.length).toBeLessThan(2_000);
   });
 
   test("tells a sandboxed run where it is, in one shared paragraph", () => {

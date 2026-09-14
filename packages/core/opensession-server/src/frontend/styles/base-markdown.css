@@ -958,7 +958,8 @@ a.asset-ref::before,
 .session-link[data-session-id]::before,
 .automation-link[data-automation-id]::before,
 a.person-chip::before,
-a.pr-ref::before {
+a.pr-ref::before,
+a.issue-ref::before {
   content: "\200b";
   flex: none;
   width: 0;
@@ -981,7 +982,8 @@ a.asset-ref,
 .session-link[data-session-id],
 .automation-link[data-automation-id],
 a.person-chip,
-a.pr-ref {
+a.pr-ref,
+a.issue-ref {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1247,7 +1249,8 @@ a.person-chip:focus-visible {
    colours the surface while the full state stays in the tooltip. Not
    scoped under .markdown: the chip turns up in every surface that renders
    session markdown, and a few of those containers don't carry that class. */
-a.pr-ref {
+a.pr-ref,
+a.issue-ref {
   background: var(--hover);
   color: var(--text);
   border: 0;
@@ -1260,21 +1263,29 @@ a.pr-ref {
     background var(--dur-micro) var(--ease),
     scale var(--dur-micro) var(--ease);
 }
-a.pr-ref:hover {
+a.pr-ref:hover,
+a.issue-ref:hover {
   background: var(--hover-strong);
   /* the token lights up instead — an underline reads as a strike through
 	   its own fill (same call as the session chip) */
   text-decoration: none;
 }
-a.pr-ref:active {
+a.pr-ref:active,
+a.issue-ref:active {
   background: var(--hover-strong);
   scale: 0.96;
 }
-a.pr-ref:focus-visible {
+a.pr-ref:focus-visible,
+a.issue-ref:focus-visible {
   outline: 2px solid var(--accent-ink);
   outline-offset: 2px;
 }
-.pr-ref-icon {
+/* The issue chip (an `issue #12` mention, or a pasted GitHub issue URL)
+   shares the pill and only swaps the glyph: GitHub's circle-dot in place of
+   the branch. It never carries a tone because nothing here tracks issue
+   state, and it opens on GitHub because no issue surface exists here. */
+.pr-ref-icon,
+.issue-ref-icon {
   display: inline-grid;
   width: 16px;
   height: 16px;
@@ -1286,7 +1297,8 @@ a.pr-ref:focus-visible {
 	   session chip above. */
   transform: translateY(-1px);
 }
-.pr-ref-icon svg {
+.pr-ref-icon svg,
+.issue-ref-icon svg {
   width: 16px;
   height: 16px;
   stroke: currentColor;

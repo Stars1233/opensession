@@ -840,6 +840,87 @@ describe("renderMarkdown PR mentions", () => {
     );
   });
 
+  it("reads an `issue` cue as the issue it names, not a PR", () => {
+    setKnownRepos([
+      { id: "tella-fusion", ghRepo: "tellahq/tella-fusion" },
+      { id: "opensession", ghRepo: "tellahq/opensession" },
+    ]);
+    const html = renderMarkdown("Tracked in issue #12 for now.", fusion);
+    expect(html).toContain('class="issue-ref"');
+    expect(html).toContain(
+      'href="https://github.com/tellahq/tella-fusion/issues/12"',
+    );
+    expect(html).toContain('target="_blank"');
+    // The cue stays prose and the chip carries the number, like `PR #92`.
+    expect(html).toContain("issue <a");
+    expect(html).toContain('<span class="issue-ref-label">#12</span>');
+    expect(html).not.toContain("pr-ref");
+    expect(html).not.toContain("/pr/");
+    // Every spelling of the cue, and a four-digit number that would
+    // otherwise chip as a PR on its digits alone.
+    for (const src of ["Issue #1234", "issues #12 and", "issue#12"]) {
+      const out = renderMarkdown(src, fusion);
+      expect(out).toContain('data-issue-number="12');
+      expect(out).not.toContain("pr-ref");
+    }
+    // A qualifier picks the repo, same as it does for a PR.
+    expect(renderMarkdown("see issue opensession#7", fusion)).toContain(
+      'href="https://github.com/tellahq/opensession/issues/7"',
+    );
+    // Inside an explicit link the mention is that link's text.
+    expect(
+      renderMarkdown("[issue #12](https://example.com/x)", fusion),
+    ).not.toContain("issue-ref");
+  });
+
+  it("leaves an issue mention as text when the repo has no GitHub page", () => {
+    setKnownRepos([{ id: "local" }]);
+    const html = renderMarkdown("issue #1234 is open", { repo: "local" });
+    expect(html).not.toContain("issue-ref");
+    expect(html).not.toContain("pr-ref");
+    expect(html).toContain("issue #1234 is open");
+  });
+
+  it("labels a pasted GitHub issue URL as the issue it is", () => {
+    setKnownRepos([{ id: "tella-fusion", ghRepo: "tellahq/tella-fusion" }]);
+    const url = "https://github.com/tellahq/tella-fusion/issues/12";
+    const bare = renderMarkdown(`Filed ${url}.`, fusion);
+    expect(bare).toContain('class="issue-ref"');
+    expect(bare).toContain('<span class="issue-ref-label">issue #12</span>');
+    expect(bare).not.toContain("pr-ref");
+    // A labelled link keeps its label.
+    const labelled = renderMarkdown(`[the flicker bug](${url})`, fusion);
+    expect(labelled).toContain(
+      '<span class="issue-ref-label">the flicker bug</span>',
+    );
+    // An issue in a repo this instance doesn't serve is an ordinary link.
+    const foreign = renderMarkdown(
+      "https://github.com/vercel/next.js/issues/12",
+      fusion,
+    );
+    expect(foreign).not.toContain("issue-ref");
+  });
+
+  it("collapses an issue written twice on one line to one chip", () => {
+    setKnownRepos([{ id: "tella-fusion", ghRepo: "tellahq/tella-fusion" }]);
+    const url = "https://github.com/tellahq/tella-fusion/issues/12";
+    // The cued mention is kept, as the PR form is.
+    const cued = renderMarkdown(`issue #12 — ${url}`, fusion);
+    expect(cued.match(/class="issue-ref"/g)?.length).toBe(1);
+    expect(cued).toContain("issue <a");
+    // An uncued mention would chip as a PR, so the URL is the form that stays.
+    const uncued = renderMarkdown(
+      `#1234 (${url.replace("12", "1234")})`,
+      fusion,
+    );
+    expect(uncued.match(/class="issue-ref"/g)?.length).toBe(1);
+    expect(uncued).not.toContain("pr-ref");
+    // Cued the other way, both readings show.
+    const contradicted = renderMarkdown(`PR #12 — ${url}`, fusion);
+    expect(contradicted).toContain('class="pr-ref"');
+    expect(contradicted).toContain('class="issue-ref"');
+  });
+
   it("reads mentions as they are actually written in prose", () => {
     // Sentence-final, parenthesised, inside emphasis, at the start of a line,
     // and in a list — all the same reference.

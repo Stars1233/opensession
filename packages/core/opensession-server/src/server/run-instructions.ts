@@ -90,7 +90,8 @@ export function buildRunInstructions(input: {
   );
   parts.push(
     "## References\nFor PRs outside the current primary repository, write " +
-      "`<repo>#<number>`, never bare `#<number>`.",
+      "`<repo>#<number>`, never bare `#<number>`. A bare `#<number>` reads as a " +
+      "PR; write GitHub issues as `issue #<number>`.",
   );
   parts.push(
     "## Working directory\nRelative paths in this prompt resolve against the working " +

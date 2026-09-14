@@ -752,8 +752,15 @@ const BARE_PR_MIN_DIGITS = 4;
 // tokenizer only sees the source from its own match position on. It must be
 // followed by a space or the `#` itself, so a repo whose id merely starts
 // with those letters (`prisma#12`) is read as the qualifier it is.
+//
+// GitHub numbers issues and pull requests from one sequence, so `#1234` on
+// its own cannot say which it is, and this renderer reads it as a PR: the
+// review surface is where a transcript's numbers overwhelmingly point. An
+// `issue` cue is the author saying otherwise (the run instructions ask for
+// exactly that form), and it turns the mention into an issue chip that opens
+// the issue on GitHub rather than a review page that has nothing to show.
 const PR_MENTION_SRC =
-  `([Pp][Rr]s?(?:\\s+|(?=#)))?` +
+  `((?:[Pp][Rr]s?|[Ii]ssues?)(?:\\s+|(?=#)))?` +
   `((?:[A-Za-z0-9][\\w.-]*/)?[A-Za-z0-9][\\w.-]*)?` +
   `#(\\d{1,${PR_NUMBER_MAX_DIGITS}})(?!\\w)`;
 const PR_MENTION_EXACT = new RegExp(`^${PR_MENTION_SRC}`);
@@ -810,6 +817,11 @@ function prRefTitle(
   return `Open the review for ${repoLabel(repo)} #${number}${
     state ? ` · ${state.label}` : ""
   }`;
+}
+
+/** Whether a mention's cue word names an issue rather than a pull request. */
+function isIssueCue(cue: string): boolean {
+  return /^i/i.test(cue);
 }
 
 /**
@@ -1023,10 +1035,36 @@ function prMentionLink(
   );
 }
 
-/** A GitHub PR page that belongs to a repo this instance serves. */
-function githubPrTarget(
+/**
+ * An issue chip. There is no issue surface here, so the chip opens the issue
+ * on GitHub in a new tab; a repo with no GitHub name has nowhere to send it,
+ * and the caller leaves the mention as text. Its own class and data
+ * attributes on purpose: the document-level PR handler (useAppDocumentInteractions)
+ * keys on `data-pr-number`, and an issue must not be routed into a review.
+ */
+function issueMentionLink(
+  repo: string,
+  number: string,
+  label: string,
+): string | null {
+  const ghRepo = knownRepos.get(repo);
+  if (!ghRepo) return null;
+  const href = `https://github.com/${ghRepo}/issues/${number}`;
+  return (
+    `<a href="${attr(href)}" class="issue-ref" data-issue-repo="${attr(repo)}"` +
+    ` data-issue-number="${attr(number)}" target="_blank" rel="noopener noreferrer"` +
+    ` title="${attr(`Open issue #${number} in ${repoLabel(repo)} on GitHub`)}">` +
+    `<span class="issue-ref-icon" aria-hidden="true">` +
+    `<svg viewBox="0 0 24 24" fill="none">` +
+    `<circle cx="12" cy="12" r="8.25"/><circle cx="12" cy="12" r="2.25"/>` +
+    `</svg></span><span class="issue-ref-label">${attr(label)}</span></a>`
+  );
+}
+
+/** A GitHub PR or issue page that belongs to a repo this instance serves. */
+function githubRefTarget(
   href: string | null | undefined,
-): { repo: string; number: string } | null {
+): { repo: string; number: string; kind: "pr" | "issue" } | null {
   if (!href) return null;
   let url: URL;
   try {
@@ -1040,12 +1078,15 @@ function githubPrTarget(
     url.hash
   )
     return null;
-  const match = /^\/([^/]+)\/([^/]+)\/pull\/(\d{1,5})\/?$/.exec(url.pathname);
+  const match = /^\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d{1,5})\/?$/.exec(
+    url.pathname,
+  );
   if (!match) return null;
   const githubRepo = `${match[1]}/${match[2]}`.toLowerCase();
+  const kind = match[3] === "pull" ? "pr" : "issue";
   for (const [repo, configuredGithubRepo] of knownRepos) {
     if (configuredGithubRepo?.toLowerCase() === githubRepo)
-      return { repo, number: match[3] };
+      return { repo, number: match[4]!, kind };
   }
   return null;
 }
@@ -1061,6 +1102,12 @@ function githubPrTarget(
 // Two DIFFERENT pull requests side by side are two references and stay two
 // chips — the repo and the number both have to match, resolved through the
 // same helpers the chips themselves resolve through.
+//
+// An issue written twice collapses the same way. The URL is the one form
+// that says what the number is, so an uncued mention next to an issue URL
+// keeps the URL (which chips as the issue it is) rather than the mention
+// (which would chip as a PR); a mention cued the other way is left alone,
+// since the author contradicted themselves and both readings should show.
 const DUPLICATE_PR_PAIR = new RegExp(
   // The character in front, captured rather than looked behind: a mention glued
   // to a word (or to another `#`) is not a mention, and re-emitting the guard
@@ -1069,12 +1116,12 @@ const DUPLICATE_PR_PAIR = new RegExp(
     // Bold wraps a mention without changing what it is. A code span does: a
     // mention in backticks renders as code and never chips, so collapsing
     // there would delete the only linkable form. It is left alone.
-    `(?<mention>(?<cue>[Pp][Rr]s?[ \\t]+)?(?<wrap>\\*\\*)?` +
+    `(?<mention>(?<cue>(?:[Pp][Rr]s?|[Ii]ssues?)[ \\t]+)?(?<wrap>\\*\\*)?` +
     `(?<qualifier>(?:[A-Za-z0-9][\\w.-]*/)?[A-Za-z0-9][\\w.-]*)?` +
     `#(?<number>\\d{1,${PR_NUMBER_MAX_DIGITS}})\\k<wrap>?)` +
     // What joins the two: a dash/middot/colon, an opening paren, or just space.
     `(?<sep>[ \\t]*[—–·:|-][ \\t]*|[ \\t]*\\([ \\t]*|[ \\t]+)` +
-    `<?(?<url>https?://(?:www\\.)?github\\.com/[\\w.-]+/[\\w.-]+/pull/\\d{1,${PR_NUMBER_MAX_DIGITS}})/?>?` +
+    `<?(?<url>https?://(?:www\\.)?github\\.com/[\\w.-]+/[\\w.-]+/(?:pull|issues)/\\d{1,${PR_NUMBER_MAX_DIGITS}})/?>?` +
     `(?<close>[ \\t]*\\))?`,
   "gm",
 );
@@ -1090,7 +1137,7 @@ function outsideCodeFences(src: string, fn: (chunk: string) => string): string {
 
 /** Collapse `repo#123 — https://github.com/owner/repo/pull/123` to one chip. */
 function collapseDuplicatePrReferences(src: string): string {
-  if (!src.includes("/pull/")) return src;
+  if (!src.includes("/pull/") && !src.includes("/issues/")) return src;
   return outsideCodeFences(src, (chunk) =>
     chunk.replace(
       DUPLICATE_PR_PAIR,
@@ -1107,16 +1154,20 @@ function collapseDuplicatePrReferences(src: string): string {
         close: string | undefined,
       ) => {
         if (!mention || !number || !url) return match;
-        const target = githubPrTarget(url);
+        const target = githubRefTarget(url);
         if (!target) return match;
         const repo = prMentionRepo(qualifier);
         if (repo !== target.repo || number !== target.number) return match;
-        // A mention that wouldn't chip on its own is prose, and dropping the URL
-        // next to it would leave the reference with nothing to open.
-        if (!qualifier && !cue && !bareMentionLinks(repo, number)) return match;
         // An unbalanced parenthesis means the separator wasn't one.
         if (sep?.includes("(") && !close) return match;
         const trailing = sep?.includes("(") ? "" : (close ?? "");
+        if (target.kind === "issue") {
+          if (cue && !isIssueCue(cue)) return match;
+          if (!cue) return `${lead ?? ""}${url}${trailing}`;
+        } else if (cue && isIssueCue(cue)) return match;
+        // A mention that wouldn't chip on its own is prose, and dropping the URL
+        // next to it would leave the reference with nothing to open.
+        if (!qualifier && !cue && !bareMentionLinks(repo, number)) return match;
         return `${lead ?? ""}${mention}${trailing}`;
       },
     ),
@@ -1374,12 +1425,16 @@ md.use({
       // silently tears apart. The explicit link wins: inside it, chips degrade
       // back to the text they were written as.
       flattenChips(token.tokens);
-      const githubPr = githubPrTarget(token.href);
-      if (githubPr) {
+      const githubRef = githubRefTarget(token.href);
+      if (githubRef) {
+        const word = githubRef.kind === "pr" ? "PR" : "issue";
         const label = isBareUrlLink(token)
-          ? `PR #${githubPr.number}`
-          : String(token.text || `PR #${githubPr.number}`);
-        return prMentionLink(githubPr.repo, githubPr.number, label);
+          ? `${word} #${githubRef.number}`
+          : String(token.text || `${word} #${githubRef.number}`);
+        if (githubRef.kind === "pr")
+          return prMentionLink(githubRef.repo, githubRef.number, label);
+        const issue = issueMentionLink(githubRef.repo, githubRef.number, label);
+        if (issue) return issue;
       }
       // A pasted commit URL is the same reference written the long way, so it
       // renders as the same thing. Only a bare URL: a link someone LABELLED is
@@ -1654,6 +1709,9 @@ md.use({
         // Same for a short number with nothing but its digits to go on.
         if (!cue && !qualifier && !bareMentionLinks(repo, number))
           return { type: "text", raw, text: raw };
+        // And for an issue in a repo GitHub doesn't know: no page to open.
+        if (isIssueCue(cue) && !knownRepos.get(repo))
+          return { type: "text", raw, text: raw };
         return {
           type: "prMention",
           raw,
@@ -1666,14 +1724,16 @@ md.use({
       renderer(token: Tokens.Generic) {
         // The cue stays prose: it reads as `PR` + a chip labelled `#92`, so a
         // chip already carrying a PR icon doesn't also spell the word out.
+        const label = token.raw.slice(token.cue.length);
+        if (isIssueCue(token.cue)) {
+          return (
+            attr(token.cue) +
+            (issueMentionLink(token.repo, token.number, label) ?? attr(label))
+          );
+        }
         return (
           attr(token.cue) +
-          prMentionLink(
-            token.repo,
-            token.number,
-            token.raw.slice(token.cue.length),
-            token.unqualified,
-          )
+          prMentionLink(token.repo, token.number, label, token.unqualified)
         );
       },
     },
