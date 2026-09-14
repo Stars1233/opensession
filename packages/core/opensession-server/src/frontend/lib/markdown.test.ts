@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import {
+  markdownAffordable,
   renderMarkdown,
   renderPrCommentMarkdown,
   onSessionTitleResolutionRequested,
@@ -1617,5 +1618,50 @@ describe("session media placed in the body", () => {
       '<p><a href="https://example.com/a.png"',
     );
     expect(renderMarkdown(`See ![x](${shot})`)).toContain("<p>See <a href");
+  });
+});
+
+describe("markdownAffordable", () => {
+  const fill = (kb: number, piece: string) => {
+    let out = "";
+    while (out.length < kb * 1024) out += piece;
+    return out;
+  };
+
+  it("affords a long report made of short blocks", () => {
+    const table = `| # | Title |\n|---|---|\n${fill(
+      100,
+      "| [#6593](https://github.com/tellahq/tella-fusion/issues/6593) | Popping sound in the **editor** |\n",
+    )}`;
+    expect(markdownAffordable(table)).toBe(true);
+    expect(
+      markdownAffordable(
+        fill(100, "A paragraph with `code` and _emphasis_.\n\n"),
+      ),
+    ).toBe(true);
+  });
+
+  it("affords a giant fenced block", () => {
+    expect(
+      markdownAffordable(
+        `\`\`\`diff\n${fill(400, "+ const x = 1;\n")}\`\`\`\n`,
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses one huge inline run, even hard-wrapped", () => {
+    expect(markdownAffordable(fill(40, "word **bold** `code` "))).toBe(false);
+    expect(markdownAffordable(fill(40, "word **bold** `code`\n"))).toBe(false);
+    expect(markdownAffordable(`Intro.\n\n${fill(40, '{"id":1},')}`)).toBe(
+      false,
+    );
+  });
+
+  it("skips the lexer for anything within one run's budget", () => {
+    expect(markdownAffordable(fill(30, "x"))).toBe(true);
+  });
+
+  it("refuses past the whole-document ceiling", () => {
+    expect(markdownAffordable(fill(600, "- item\n"))).toBe(false);
   });
 });

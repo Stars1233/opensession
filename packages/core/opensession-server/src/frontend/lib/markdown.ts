@@ -1834,6 +1834,72 @@ export function renderMarkdown(src: string, ctx?: MarkdownContext): string {
   return out;
 }
 
+// marked's block pass is linear, but its inline pass is superlinear in the
+// length of one run of inline text: a single 128 KB paragraph takes ~2s and
+// 512 KB ~30s, while a 100 KB table of short rows renders in ~12ms and a
+// 500 KB fenced diff in ~6ms. So what makes a message unaffordable is one
+// giant block, not its total size. A run this long is a minified dump, a
+// base64 blob, an unfenced JSON payload: machine output, not prose. ~200ms
+// at the limit, in line with the 24 KB head every bubble already parses.
+const MD_INLINE_RUN_MAX = 32 * 1024;
+// A ceiling on the whole document so a message of many affordable blocks
+// still stays within a few hundred milliseconds.
+const MD_AFFORDABLE_MAX = 512 * 1024;
+
+/**
+ * Whether renderMarkdown can render this source without freezing the tab.
+ * Runs only marked's block pass, which is what decides how the inline pass
+ * would be split, and checks the longest piece it would hand over.
+ */
+export function markdownAffordable(src: string): boolean {
+  if (src.length > MD_AFFORDABLE_MAX) return false;
+  if (src.length <= MD_INLINE_RUN_MAX) return true;
+  let blocks: Token[];
+  try {
+    blocks = new md.Lexer(md.defaults).blockTokens(
+      src.replace(/\r\n|\r/g, "\n"),
+      [],
+    );
+  } catch {
+    return false;
+  }
+  return longestInlineRun(blocks) <= MD_INLINE_RUN_MAX;
+}
+
+/**
+ * The longest text the inline lexer would tokenize as one unit: a paragraph,
+ * a heading, a list item's line, or a table cell. Code and raw HTML never
+ * reach it, and a container's own `text` (a blockquote, a list item) is just
+ * the source of the blocks nested inside it.
+ */
+function longestInlineRun(tokens: Token[]): number {
+  let longest = 0;
+  for (const token of tokens) {
+    switch (token.type) {
+      case "code":
+      case "html":
+        continue;
+      case "paragraph":
+      case "heading":
+      case "text":
+        longest = Math.max(longest, token.text.length);
+        break;
+      case "table":
+        for (const cell of [...token.header, ...token.rows.flat()]) {
+          longest = Math.max(longest, cell.text.length);
+        }
+        continue;
+      case "list":
+        longest = Math.max(longest, longestInlineRun(token.items));
+        continue;
+    }
+    if ("tokens" in token && token.tokens) {
+      longest = Math.max(longest, longestInlineRun(token.tokens));
+    }
+  }
+  return longest;
+}
+
 /**
  * Evict the partial this render continues, and remember this one in its place.
  * Only an exact prefix counts, so two messages streaming under one context

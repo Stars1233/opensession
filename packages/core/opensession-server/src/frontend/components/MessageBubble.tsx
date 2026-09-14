@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { z } from "zod";
 import type { TranscriptEntry } from "../lib/types";
-import { renderMarkdown } from "../lib/markdown";
+import { markdownAffordable, renderMarkdown } from "../lib/markdown";
 import { MarkdownBody, useMarkdownRepo } from "./MarkdownBody";
 import { classifyEntry } from "@tellahq/opensession-protocol/notices";
 import type { NoticeIcon as NoticeIconName } from "@tellahq/opensession-protocol/notices";
@@ -65,9 +65,10 @@ import {
 // contents render their head plus a "Show full message" expander. The
 // budget lives in shared/message-preview.ts so the wire clamp matches it.
 // Near-limit messages render in full using the shared collapse threshold.
-// Expanded content still renders as markdown up to this size; past it the
-// content is machine payload, not prose — a plain <pre> shows it instantly.
-const FULL_MD_CHARS = 32 * 1024;
+// Expanded content still renders as markdown when marked can afford it: the
+// cost is in a single giant block, not the total size, so a 100 KB table or
+// report stays markdown while a message that is one huge blob shows in a
+// plain <pre> instantly.
 const sessionEntryResponseSchema = z.object({ content: z.string() });
 
 function sizeLabel(chars: number): string {
@@ -111,8 +112,8 @@ export function ClampedBody({
 
   const rawShown = showAll ? (fetched ?? content) : head;
   const shown = transformContent ? transformContent(rawShown) : rawShown;
-  // Giant expanded payloads skip markdown entirely — see FULL_MD_CHARS.
-  const asMarkdown = shown.length <= FULL_MD_CHARS;
+  // The head is always within budget; only an expanded body can be too big.
+  const asMarkdown = !showAll || markdownAffordable(shown);
   const repo = useMarkdownRepo();
   const assetPaths = useOpenAssetPaths();
   const markdown = { repo, sessionId, assetPaths };
@@ -151,7 +152,7 @@ export function ClampedBody({
         />
       ) : (
         // A <pre> only for the preserved whitespace: this branch renders a
-        // message too long for the markdown pass, which is prose, not code.
+        // message the markdown pass cannot afford, which may still be prose.
         // `font-sans` is load-bearing — the app ships no Tailwind Preflight,
         // so the UA's `pre { font-family: monospace }` applies otherwise.
         <pre
