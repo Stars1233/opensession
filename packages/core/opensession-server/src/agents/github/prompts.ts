@@ -463,6 +463,54 @@ NEVER push to PR #${opts.prNumber}'s branch and NEVER run \`gh pr merge\`.
 When finished, output the marker \`===OPENSESSION-SUMMARY===\` on its own line, then your reply as GitHub markdown — link the new PR you opened, or explain why none was needed. ONLY the text after that marker is posted as the reply — everything before it is working notes that stay private. Do not post anything yourself.`;
 }
 
+/**
+ * A plain issue's session: started by the `os` label or an @mention on the
+ * issue. Works on a fresh branch off the default branch and opens (or updates)
+ * its own PR; the same session is resumed for every later mention.
+ */
+export function buildIssuePrompt(opts: {
+  issueNumber: number;
+  title: string;
+  body: string;
+  labels?: string[];
+  author: string;
+  /** The mention comment; absent when the label started the session. */
+  commentBody?: string;
+  branch: string;
+  baseRef: string;
+  /** owner/name when the issue lives outside the default repo (multi-repo). */
+  ghRepo?: string;
+}): string {
+  const repo = opts.ghRepo || defaultRepo().ghRepo;
+  const how = opts.commentBody
+    ? `@${opts.author} mentioned you in a comment on the issue.`
+    : `@${opts.author} handed it to you with the \`os\` label.`;
+  const labels = (opts.labels || []).filter((l) => l !== "os");
+  const comment = opts.commentBody
+    ? `\nTheir comment:\n"""\n${opts.commentBody}\n"""\n`
+    : "";
+
+  return `You are ${personaName()}, working on issue #${opts.issueNumber} ("${opts.title}") in the current repository. ${how} You are on the branch \`${opts.branch}\`, cut from \`${opts.baseRef}\`, in a worktree. If you worked on this issue earlier in this conversation, continue from there: the branch keeps your commits.
+${labels.length ? `\nLabels: ${labels.join(", ")}\n` : ""}
+Issue description:
+"""
+${opts.body.slice(0, 8000) || "(no description)"}
+"""
+${comment}
+Read the whole thread first: \`gh issue view ${opts.issueNumber} --repo ${repo} --comments\`. The comments often carry decisions the description does not.
+
+Decide what they need:
+- If it's a question, triage, or discussion, investigate the code and answer directly. Make no changes and open no PR.
+- If the issue asks for a change (bug fix, feature, cleanup), implement it on this branch, scoped to the issue. Run the relevant tests or checks before you finish.
+- If the request is ambiguous or too large to do safely in one go, do the part you are confident about and ask the specific questions you need answered. The person replies by mentioning you again on the issue, and you resume from here.
+
+If you made changes, commit them with a clear message (\`git add\` specific paths, never \`git add .\`) and push with \`git push -u origin HEAD\`. Then, unless a PR already exists for this branch (\`gh pr list --repo ${repo} --head ${opts.branch}\`; a push updates an existing one), open one:
+\`gh pr create --repo ${repo} --base ${opts.baseRef} --head ${opts.branch} --title "<concise title>" --body "<what and why, ending with 'Closes #${opts.issueNumber}'>"\`.
+NEVER run \`gh pr merge\`.
+
+When finished, output the marker \`===OPENSESSION-SUMMARY===\` on its own line, then your reply as GitHub markdown for the issue: link the PR you opened or updated, answer the question, or list what you need to know. ONLY the text after that marker is posted as the reply — everything before it is working notes that stay private. Do not post anything yourself.`;
+}
+
 export function buildSimplifyPrompt(pr: PrDetails, steer?: string): string {
   return `You are ${personaName()}, simplifying PR #${pr.number} ("${pr.title}") in the current repository. You are checked out on the PR's head branch \`${pr.headRefName}\` in a worktree.
 

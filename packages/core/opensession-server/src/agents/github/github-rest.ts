@@ -633,6 +633,43 @@ export async function listOpenPrs(
 // ── Labels ───────────────────────────────────────────────────
 
 /** Remove a label from a PR (action labels are cleared when the action completes). */
+export interface IssueInfo {
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  author: string;
+  labels: string[];
+  /** Present when the number belongs to a pull request, not a plain issue. */
+  isPullRequest: boolean;
+}
+
+/** A plain issue (or PR, flagged) by number. Null when unreadable. */
+export async function getIssue(
+  issueNumber: number,
+  ghRepo: string = GITHUB_REPO,
+): Promise<IssueInfo | null> {
+  const r = await githubRequest<any>(
+    "GET",
+    `/repos/${ghRepo}/issues/${issueNumber}`,
+  );
+  if (!r.ok || !r.data || typeof r.data !== "object") return null;
+  const d = r.data;
+  return {
+    number: Number(d.number) || issueNumber,
+    title: typeof d.title === "string" ? d.title : `Issue #${issueNumber}`,
+    body: typeof d.body === "string" ? d.body : "",
+    state: d.state === "closed" ? "closed" : "open",
+    author: d.user?.login || "",
+    labels: Array.isArray(d.labels)
+      ? d.labels
+          .map((l: any) => (typeof l === "string" ? l : l?.name))
+          .filter((n: unknown): n is string => typeof n === "string")
+      : [],
+    isPullRequest: !!d.pull_request,
+  };
+}
+
 export async function removeLabel(
   prNumber: number,
   label: string,

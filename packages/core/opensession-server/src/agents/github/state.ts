@@ -146,6 +146,10 @@ export interface GithubPrState {
     author: string;
     body: string;
     kind: "issue" | "review";
+    /** The number is a plain issue, not a PR: recovery re-runs issue.ts, not
+     *  the PR mention path. (`kind: "issue"` alone means an issue_comment,
+     *  which PRs also receive.) */
+    issue?: true;
     replyToId?: number;
     inline?: { path: string; line?: number; diffHunk?: string };
     progressCommentId?: number;
@@ -160,6 +164,8 @@ export interface GithubPrState {
    */
   pendingMention?: {
     kind: "issue" | "review";
+    /** See activeMention.issue. */
+    issue?: true;
     commentId: number;
     body: string;
     author: string;

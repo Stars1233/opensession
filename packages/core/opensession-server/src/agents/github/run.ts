@@ -100,6 +100,7 @@ export async function githubFlowMcpServers(): Promise<string[]> {
  */
 async function workspaceIdForPr(
   prNumber: number,
+  kind: GithubRunKind,
   branch: string,
   title: string,
   repoId: string | null,
@@ -110,9 +111,12 @@ async function workspaceIdForPr(
     // ALL kinds for the PR, so name it PR-level: strip the kind + "PR #n" prefix
     // down to the bare PR title (fall back to the full title if it doesn't match).
     const prTitle = title.replace(/^.*?PR #\d+[:\s-]*/i, "").trim() || title;
+    // An issue run's number is an ISSUE number, not a PR's: resolve its folder
+    // by branch only, so the PR the run opens later adopts the same workspace
+    // (branch match) instead of a `ghpr-<issue>` key that names the wrong PR.
     const resolved = await resolvePrWorkspace({
       repoId,
-      number: prNumber,
+      ...(kind === "issue" ? {} : { number: prNumber }),
       branch,
       title: prTitle,
       createdBy: "GitHub (automation)",
@@ -129,7 +133,9 @@ export type GithubRunKind =
   | "simplify"
   | "mention"
   | "adversarial"
-  | "followup";
+  | "followup"
+  /** A plain issue's code session (`os` label or @mention on the issue). */
+  | "issue";
 
 /** Stable, deterministic opensession session id per PR + behavior (one resumable session each). */
 export function bksIdFor(
@@ -220,6 +226,7 @@ export async function announceGithubRun(opts: AnnouncedRun): Promise<string> {
     defaultRepo().id;
   const workspaceId = await workspaceIdForPr(
     opts.prNumber,
+    opts.kind,
     opts.branch,
     opts.title,
     repoId,
@@ -389,6 +396,7 @@ export async function runGithubAgent(
       : undefined;
   const workspaceId = await workspaceIdForPr(
     opts.prNumber,
+    opts.kind,
     opts.branch,
     opts.title,
     repoId,

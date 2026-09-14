@@ -76,6 +76,8 @@ export const LABEL_REVIEW = "os-review";
 export const LABEL_AUTOFIX = "os-auto-fix";
 export const LABEL_SIMPLIFY = "os-simplify";
 export const LABEL_ADVERSARIAL = "os-adversarial";
+/** Issue trigger label: starts a code session for a plain (non-PR) issue. */
+export const LABEL_ISSUE = "os";
 
 export function labelMatches(name: string, expected: string): boolean {
   return name === expected;

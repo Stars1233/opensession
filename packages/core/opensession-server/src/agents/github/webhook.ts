@@ -27,6 +27,7 @@ import {
   LABEL_AUTOFIX,
   LABEL_SIMPLIFY,
   LABEL_ADVERSARIAL,
+  LABEL_ISSUE,
   labelMatches,
 } from "./constants";
 import {
@@ -172,6 +173,26 @@ export async function handleGithubPrEvent(
       void handleDeployWorkflowRun(payload).catch((e) =>
         console.error("[github] handleDeployWorkflowRun failed:", e),
       );
+      return;
+    }
+
+    // `os` label on a plain issue → start (or resume) the issue's code session.
+    if (event === "issues") {
+      const { issueLabelCommand, handleIssueLabel } = await import("./issue");
+      const command = issueLabelCommand({
+        action: payload?.action || "",
+        labelName: payload?.label?.name || "",
+        isPullRequest: !!payload?.issue?.pull_request,
+        senderIsBot,
+        senderIsTrusted,
+      });
+      if (command === "untrusted") {
+        console.warn(
+          `[github] Ignoring \`${LABEL_ISSUE}\` label on issue #${payload?.issue?.number} from untrusted @${senderLogin || "unknown"}`,
+        );
+      }
+      // Persists the request synchronously, then runs in the background.
+      if (command === "start") handleIssueLabel(payload);
       return;
     }
 

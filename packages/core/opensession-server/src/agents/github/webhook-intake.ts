@@ -112,6 +112,7 @@ export async function handleGithubWebhook(req: Request): Promise<Response> {
 
     if (
       event === "pull_request" ||
+      event === "issues" ||
       event === "issue_comment" ||
       event === "pull_request_review_comment" ||
       event === "workflow_run"

@@ -269,6 +269,27 @@ async function fireRecovery(
     }
     case "mention": {
       const m = s.activeMention!;
+      if (m.issue) {
+        console.log(
+          `[github] Recovering interrupted session for issue #${s.prNumber}`,
+        );
+        const { runIssueSession } = await import("./issue");
+        void runIssueSession(
+          {
+            issueNumber: s.prNumber,
+            author: m.author,
+            body: m.body,
+            ghRepo: s.ghRepo,
+          },
+          /*recovering*/ true,
+        ).catch((e) =>
+          console.error(
+            `[github] issue session recovery failed for #${s.prNumber}:`,
+            e,
+          ),
+        );
+        return;
+      }
       console.log(
         `[github] Recovering interrupted mention for PR #${s.prNumber}`,
       );
@@ -301,6 +322,7 @@ async function fireRecovery(
       void dispatchMention({
         prNumber: s.prNumber,
         kind: p.kind,
+        issue: p.issue,
         body: p.body,
         author: p.author,
         replyToId: p.replyToId,
@@ -346,6 +368,7 @@ async function retryPendingMentions(): Promise<void> {
     await dispatchMention({
       prNumber: s.prNumber,
       kind: p.kind,
+      issue: p.issue,
       body: p.body,
       author: p.author,
       replyToId: p.replyToId,

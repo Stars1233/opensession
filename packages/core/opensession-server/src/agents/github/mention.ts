@@ -1,7 +1,9 @@
 /**
  * @mention replies. When someone mentions the bot in a PR comment — inline
  * (pull_request_review_comment) or in the conversation (issue_comment) — route it
- * to the PR's mention session and post the reply in-thread.
+ * to the PR's mention session and post the reply in-thread. A mention on a
+ * plain issue takes the same durable receipt path and then runs the issue's
+ * session (issue.ts).
  *
  * Loop-safe: we skip any comment carrying one of our hidden markers (our own
  * posts), and only act when the body actually mentions a configured handle — so
@@ -35,6 +37,7 @@ import {
 } from "./run";
 import { buildMentionPrompt, buildFollowupMentionPrompt } from "./prompts";
 import { triggerPrAction } from "./trigger";
+import { runIssueSession } from "./issue";
 import { repoForFullName } from "./constants";
 import {
   postIssueComment,
@@ -154,6 +157,8 @@ export async function handleMention(
   let prNumber: number | undefined;
   let inline: { path: string; line?: number; diffHunk?: string } | undefined;
   let replyToId: number | undefined;
+  // The number is a plain issue's, not a PR's (issue_comment fires for both).
+  let issue: true | undefined;
 
   if (kind === "review") {
     prNumber = payload.pull_request?.number;
@@ -165,7 +170,7 @@ export async function handleMention(
     // Reply at the thread root so GitHub threads it correctly.
     replyToId = comment?.in_reply_to_id || comment?.id;
   } else {
-    if (!payload.issue?.pull_request) return; // a plain issue, not a PR
+    if (!payload.issue?.pull_request) issue = true;
     prNumber = payload.issue?.number;
   }
   if (!prNumber || !comment?.id) return;
@@ -179,6 +184,7 @@ export async function handleMention(
     prNumber,
     {
       kind,
+      ...(issue ? { issue } : {}),
       commentId: comment.id,
       body,
       author: authorLogin,
@@ -210,6 +216,7 @@ Queued @${authorLogin}'s request. I'll retry automatically if GitHub metadata is
     await dispatchMention({
       prNumber,
       kind,
+      issue,
       body,
       author: authorLogin,
       replyToId,
@@ -246,6 +253,8 @@ Queued @${authorLogin}'s request. GitHub metadata is temporarily unavailable, so
 export async function dispatchMention(args: {
   prNumber: number;
   kind: MentionKind;
+  /** The number is a plain issue's: run its session instead of a PR action. */
+  issue?: true;
   body: string;
   author: string;
   replyToId?: number;
@@ -259,6 +268,12 @@ export async function dispatchMention(args: {
     console.warn(
       `[github] Ignoring recovered PR mention on #${prNumber} from untrusted @${author || "unknown"}`,
     );
+    return;
+  }
+
+  // A plain issue has no PR to review or fix; every mention resumes its session.
+  if (args.issue) {
+    await runIssueSession({ issueNumber: prNumber, author, body, ghRepo });
     return;
   }
 
