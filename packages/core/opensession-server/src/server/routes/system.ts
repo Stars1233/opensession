@@ -23,6 +23,7 @@ import { publishSessionChange, runErrors } from "../session-cache";
 import { getSessionControl } from "../session-control";
 import { MAX_UPLOAD_BYTES, stageHttpUpload } from "../uploads";
 import { systemStats } from "../system-stats";
+import { serverResourceSnapshot } from "../server-resources";
 import { BOOT_ID, broadcastToAll, broadcastToSession } from "../ws-hub";
 import {
   executorClientHealth,
@@ -104,6 +105,13 @@ export async function handleSystemRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
   const { req, url, path, publicPrefix } = ctx;
+
+  // Authenticated by the central API gate, unlike the public liveness probe.
+  if (path === "/api/system/resources" && req.method === "GET") {
+    return Response.json(await serverResourceSnapshot(), {
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
 
   if (path === "/api/system/session-kernel/dead-letters") {
     const forbidden = requireWorkspaceAdmin(ctx);
