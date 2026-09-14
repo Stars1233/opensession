@@ -45,6 +45,32 @@ const RUNNER_HOST_ENTRY = resolve(
 );
 const RUNNER_SERVICE_LABEL = "dev.tella.opensession.runner";
 export const RUNNER_TASK_NAME = "OpenSessionRunner";
+/** Set by the scheduled task's action so the Runner knows it has no console
+ * of its own to answer to. */
+export const RUNNER_SUPERVISED_ENV = "OPENSESSION_RUNNER_SUPERVISED";
+
+/** The task's console is hidden and has no keyboard, so a Ctrl+C or
+ * Ctrl+Break arriving there is never a person. It is a child of some
+ * delegated command broadcasting the event to the whole console
+ * (GenerateConsoleCtrlEvent with process group 0 reaches every process
+ * attached to it). Bun's default answer is to exit with
+ * STATUS_CONTROL_C_EXIT, which took a Runner offline twice in one afternoon
+ * with nothing in its log. Stay up and say what happened instead; a console
+ * close still terminates the process, as it should. */
+function ignoreConsoleInterrupts(): void {
+  for (const signal of ["SIGINT", "SIGBREAK"] as const) {
+    try {
+      process.on(signal, () =>
+        warn(
+          `ignored ${signal} on the hidden console`,
+          new Date().toISOString(),
+        ),
+      );
+    } catch {
+      // Bun without SIGBREAK support on this platform: nothing to guard.
+    }
+  }
+}
 
 type Identity = { server: string; id: string; token: string; name: string };
 
@@ -572,17 +598,31 @@ function windowsTaskUser(): string {
   return domain && name ? `${domain}\\${name}` : name;
 }
 
+/** Task Scheduler wants a local wall-clock StartBoundary without an offset. */
+export function scheduledTaskStartBoundary(at = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+}
+
+/** How often Task Scheduler re-checks that the Runner is up. */
+export const RUNNER_TASK_RELAUNCH_INTERVAL = "PT5M";
+
 /** Render the Windows per-user Scheduled Task (registered via
  * `schtasks /Create /XML`). Task Scheduler is the launchd/systemd-user
- * equivalent here: no admin rights, starts at sign-in, and RestartOnFailure
- * re-arms the channel if the process itself dies. The action goes through a
- * hidden PowerShell so a console window does not land on the desktop at every
- * sign-in, and `*>>` appends all streams to the runner log. */
+ * equivalent here: no admin rights and starts at sign-in. Supervision is a
+ * repeating time trigger, not RestartOnFailure: a Runner that exited with
+ * STATUS_CONTROL_C_EXIT sat dead for hours without the scheduler counting it
+ * as a failure. The trigger fires every few minutes for ever, and
+ * IgnoreNew makes each firing a no-op while the previous instance is still
+ * running. The action goes through a hidden PowerShell so a console window
+ * does not land on the desktop at every sign-in, and `*>>` appends all
+ * streams to the runner log. */
 export function runnerScheduledTaskXml(
   command: string | undefined = runnerCommandPath(),
   bun = runnerServiceExecutable(),
   user = windowsTaskUser(),
   shell = windowsPowerShellPath(),
+  startBoundary = scheduledTaskStartBoundary(),
 ): string {
   const xml = (value: string) =>
     value
@@ -592,9 +632,9 @@ export function runnerScheduledTaskXml(
       .replaceAll('"', "&quot;");
   const single = (value: string) => `'${value.replaceAll("'", "''")}'`;
   const script = command ? ` ${single(command)}` : "";
-  const action = `& ${single(bun)}${script} runner run *>> ${single(join(OPENSESSION_HOME, "runner.log"))}`;
+  const action = `$env:${RUNNER_SUPERVISED_ENV} = '1'; & ${single(bun)}${script} runner run *>> ${single(join(OPENSESSION_HOME, "runner.log"))}`;
   const args = `-NoProfile -NonInteractive -WindowStyle Hidden -Command "${action}"`;
-  return `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n  <RegistrationInfo>\n    <Description>Open Session Runner: holds the outbound control channel open.</Description>\n  </RegistrationInfo>\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n      <UserId>${xml(user)}</UserId>\n    </LogonTrigger>\n  </Triggers>\n  <Principals>\n    <Principal id="Author">\n      <UserId>${xml(user)}</UserId>\n      <LogonType>InteractiveToken</LogonType>\n      <RunLevel>LeastPrivilege</RunLevel>\n    </Principal>\n  </Principals>\n  <Settings>\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n    <StartWhenAvailable>true</StartWhenAvailable>\n    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n    <RestartOnFailure>\n      <Interval>PT1M</Interval>\n      <Count>10</Count>\n    </RestartOnFailure>\n  </Settings>\n  <Actions Context="Author">\n    <Exec>\n      <Command>${xml(shell)}</Command>\n      <Arguments>${xml(args)}</Arguments>\n    </Exec>\n  </Actions>\n</Task>\n`;
+  return `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n  <RegistrationInfo>\n    <Description>Open Session Runner: holds the outbound control channel open.</Description>\n  </RegistrationInfo>\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n      <UserId>${xml(user)}</UserId>\n    </LogonTrigger>\n    <TimeTrigger>\n      <StartBoundary>${xml(startBoundary)}</StartBoundary>\n      <Repetition>\n        <Interval>${RUNNER_TASK_RELAUNCH_INTERVAL}</Interval>\n        <StopAtDurationEnd>false</StopAtDurationEnd>\n      </Repetition>\n      <Enabled>true</Enabled>\n    </TimeTrigger>\n  </Triggers>\n  <Principals>\n    <Principal id="Author">\n      <UserId>${xml(user)}</UserId>\n      <LogonType>InteractiveToken</LogonType>\n      <RunLevel>LeastPrivilege</RunLevel>\n    </Principal>\n  </Principals>\n  <Settings>\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n    <StartWhenAvailable>true</StartWhenAvailable>\n    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n    <RestartOnFailure>\n      <Interval>PT1M</Interval>\n      <Count>10</Count>\n    </RestartOnFailure>\n  </Settings>\n  <Actions Context="Author">\n    <Exec>\n      <Command>${xml(shell)}</Command>\n      <Arguments>${xml(args)}</Arguments>\n    </Exec>\n  </Actions>\n</Task>\n`;
 }
 
 /** Install a per-user service. Runner credentials and workspaces stay owned by
@@ -955,6 +995,8 @@ export async function runnerRun(): Promise<number> {
         // close always follows; let that path do the reconnect bookkeeping.
       });
     });
+
+  if (process.env[RUNNER_SUPERVISED_ENV] === "1") ignoreConsoleInterrupts();
 
   info(
     dim(`attaching to ${identity.server} as ${identity.name} (${identity.id})`),
