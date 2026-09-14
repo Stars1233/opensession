@@ -29,6 +29,7 @@ import {
   IconPlus,
 } from "./icons";
 import { RepoTile } from "./RepoTile";
+import { GithubRepoAccess } from "./GithubRepoAccess";
 import {
   REPO_TILE_COLORS,
   REPO_TILE_INK,
@@ -961,6 +962,8 @@ function RemoteRepoPicker({
 }) {
   const [browse, setBrowse] = useState<BrowseResult | null>(null);
   const [browseFailed, setBrowseFailed] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   // code.storage list, probed alongside GitHub. Stays null until the probe
   // answers; an unconfigured integration answers `source: null` (no section).
   const [csBrowse, setCsBrowse] = useState<CsBrowseResult | null>(null);
@@ -980,13 +983,27 @@ function RemoteRepoPicker({
     const loadGithubRepos = async () => {
       try {
         const body = await setupRequest<BrowseResult>(
-          "/api/setup/github/repos",
+          refreshVersion > 0
+            ? "/api/setup/github/repos?refresh=1"
+            : "/api/setup/github/repos",
         );
-        if (!cancelled) setBrowse(body);
+        if (!cancelled) {
+          setBrowse(body);
+          setBrowseFailed(false);
+        }
       } catch {
         if (!cancelled) setBrowseFailed(true);
       }
+      if (!cancelled) setRefreshing(false);
     };
+    void loadGithubRepos();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshVersion]);
+
+  useEffect(() => {
+    let cancelled = false;
     const loadCodeStorageRepos = async () => {
       try {
         const body = await setupRequest<CsBrowseResult>(
@@ -1002,17 +1019,18 @@ function RemoteRepoPicker({
           );
       }
     };
-    void loadGithubRepos();
     void loadCodeStorageRepos();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // The list arrives after the dialog opens, so initialFocus has no field yet.
+  // Focus when the first list arrives, not on refresh: keep keyboard focus on
+  // the refresh button so it can be retried without jumping back to the filter.
+  const githubLoaded = browse !== null || browseFailed;
   useEffect(() => {
-    if (active && (browse || browseFailed)) inputRef?.current?.focus();
-  }, [active, browse, browseFailed, inputRef]);
+    if (active && githubLoaded) inputRef?.current?.focus();
+  }, [active, githubLoaded, inputRef]);
 
   /** Choose the default for GitHub calls that do not name a repository.
    * Repository browsing and repository work still use every installation. */
@@ -1135,8 +1153,7 @@ function RemoteRepoPicker({
           <div className="mt-2 text-meta text-faint">
             {browse.source === "user"
               ? "Browsing the connected account."
-              : `Browsing ${installations.length} GitHub App ${installations.length === 1 ? "installation" : "installations"}. Tokens are scoped by repository owner.`}{" "}
-            Only repositories that credential can reach are listed.
+              : "Only repositories shared with the GitHub App are listed."}
           </div>
         </>
       ) : (
@@ -1186,21 +1203,6 @@ function RemoteRepoPicker({
           {switchError && (
             <InlineAlert className="mt-2">{switchError}</InlineAlert>
           )}
-          {browse?.appConfigured && browse.appInstallUrl && (
-            <Button
-              className="mt-2.5"
-              variant="primary"
-              render={
-                <a
-                  href={browse.appInstallUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                />
-              }
-            >
-              Install GitHub App
-            </Button>
-          )}
           <div className="mt-2.5 flex items-center gap-2">
             <input
               ref={inputRef}
@@ -1224,6 +1226,22 @@ function RemoteRepoPicker({
             </Button>
           </div>
         </>
+      )}
+      {browse && browseFailed && (
+        <InlineAlert className="mt-2">
+          Couldn’t refresh GitHub repositories. Try again.
+        </InlineAlert>
+      )}
+      {(browse?.appConfigured || browse?.source === "app") && (
+        <GithubRepoAccess
+          installations={browse.installations}
+          installUrl={browse.appInstallUrl}
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            setRefreshVersion((version) => version + 1);
+          }}
+        />
       )}
       {(csConfigured || csError) && (
         <>

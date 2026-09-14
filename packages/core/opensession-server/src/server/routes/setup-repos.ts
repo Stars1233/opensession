@@ -949,33 +949,36 @@ export async function handleSetupRepoRoutes(
     } = await import("../github-app");
     const appConfigured = githubConfiguredCredential();
     const configuredOwner = configuredGithubInstallationOwner();
+    const fresh = ctx.url.searchParams.get("refresh") === "1";
     // The App's installation directory rides along whenever the App identity
     // can produce one, so the picker can name every account the App reaches
     // and mark the configured default. A just-installed App can take a moment
     // to appear in GitHub's list; retry once so onboarding does not race it.
     let appInstallations = appConfigured
-      ? await listGithubAppInstallations()
+      ? await listGithubAppInstallations({ fresh })
       : null;
     if (appConfigured && !appInstallations?.length) {
       await Bun.sleep(750);
       appInstallations = await listGithubAppInstallations({ fresh: true });
     }
-    const installationContext = appInstallations
-      ? {
-          installationOwner: configuredOwner || null,
-          installations: appInstallations.map(({ login, type }) => ({
-            login,
-            type,
-            selected: login.toLowerCase() === configuredOwner.toLowerCase(),
-          })),
-        }
-      : {};
+    const installationContext = {
+      appConfigured,
+      appInstallUrl: githubAppInstallUrl(),
+      ...(appInstallations
+        ? {
+            installationOwner: configuredOwner || null,
+            installations: appInstallations.map(({ login, type }) => ({
+              login,
+              type,
+              selected: login.toLowerCase() === configuredOwner.toLowerCase(),
+            })),
+          }
+        : {}),
+    };
     const unavailableResponse = (unavailableInstallations?: string[]) =>
       Response.json({
         source: null,
         repos: [],
-        appConfigured,
-        appInstallUrl: githubAppInstallUrl(),
         ...(unavailableInstallations?.length
           ? { unavailableInstallations }
           : {}),
@@ -994,7 +997,7 @@ export async function handleSetupRepoRoutes(
       ? `service:${installations.map((i) => i.id).join(",")}`
       : credential?.principal || "user";
     const cached = repoListCache.get(cacheKey);
-    if (cached && Date.now() - cached.at < REPO_CACHE_TTL_MS) {
+    if (!fresh && cached && Date.now() - cached.at < REPO_CACHE_TTL_MS) {
       return Response.json({ ...cached.payload, ...installationContext });
     }
     try {

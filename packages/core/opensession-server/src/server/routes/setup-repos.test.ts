@@ -191,8 +191,10 @@ describe("GET /api/setup/github/repos with several App installations", () => {
     );
   }
 
-  async function getRepos(): Promise<any> {
-    const url = new URL("http://localhost/api/setup/github/repos");
+  async function getRepos(refresh = false): Promise<any> {
+    const url = new URL(
+      `http://localhost/api/setup/github/repos${refresh ? "?refresh=1" : ""}`,
+    );
     const response = await handleSetupRepoRoutes({
       req: new Request(url),
       url,
@@ -275,6 +277,10 @@ describe("GET /api/setup/github/repos with several App installations", () => {
 
     const body = await getRepos();
     expect(body.source).toBe("app");
+    expect(body.appConfigured).toBe(true);
+    expect(body.appInstallUrl).toBe(
+      "https://github.com/apps/open-session-picker-test/installations/new",
+    );
     // The default owner sees no repositories, yet the organization's repos
     // are listed through its own installation, tagged with it.
     expect(body.repos).toEqual([
@@ -301,6 +307,8 @@ describe("GET /api/setup/github/repos with several App installations", () => {
     writeAppConfig(join(dir, "config-acme.json"), "acme-org");
     process.env.OPENSESSION_CONFIG = join(dir, "config-acme.json");
     const switched = await getRepos();
+    expect(switched.appConfigured).toBe(true);
+    expect(switched.appInstallUrl).toBe(body.appInstallUrl);
     expect(switched.installationOwner).toBe("acme-org");
     expect(switched.installations.find((i: any) => i.selected)?.login).toBe(
       "acme-org",
@@ -309,6 +317,53 @@ describe("GET /api/setup/github/repos with several App installations", () => {
       "acme-org/app",
     ]);
     expect(listCalls).toHaveLength(2);
+  });
+
+  test("refresh discovers a new personal installation and updated repository grants", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opensession-picker-refresh-"));
+    tempDirs.push(dir);
+    writeAppIdentity(dir, "acme-org");
+    const listCalls: string[] = [];
+    const baseFetch = twoInstallationFetch(listCalls);
+    let personalInstalled = false;
+    let personalRepoGranted = false;
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.startsWith("https://api.github.com/app/installations?"))
+        return Response.json(personalInstalled ? installs : [installs[1]]);
+      if (
+        personalRepoGranted &&
+        url.startsWith("https://api.github.com/installation/repositories") &&
+        (init?.headers as Record<string, string>).Authorization ===
+          "Bearer ghs_install_1"
+      )
+        return Response.json({
+          repositories: [{ full_name: "solo-dev/private", private: true }],
+        });
+      return baseFetch(input, init);
+    }) as typeof fetch;
+
+    expect((await getRepos()).installations.map((i: any) => i.login)).toEqual([
+      "acme-org",
+    ]);
+    personalInstalled = true;
+    expect((await getRepos()).installations).toHaveLength(1);
+    const installed = await getRepos(true);
+    expect(installed.installations).toHaveLength(2);
+    expect(installed.installationOwner).toBe("acme-org");
+    expect(installed.repos).toHaveLength(1);
+
+    personalRepoGranted = true;
+    expect((await getRepos()).repos).toHaveLength(1);
+    const refreshed = await getRepos(true);
+    expect(refreshed.repos.map((repo: any) => repo.fullName).sort()).toEqual([
+      "acme-org/app",
+      "solo-dev/private",
+    ]);
+    expect(refreshed.installationOwner).toBe("acme-org");
   });
 
   test("skips an installation that cannot mint instead of hiding the rest", async () => {

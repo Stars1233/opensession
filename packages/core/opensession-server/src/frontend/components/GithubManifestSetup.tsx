@@ -251,6 +251,7 @@ export function GithubManifestSetup({
           formOwner === "organization" ? "gap-5" : "gap-2",
         )}
       >
+        <div className="text-label font-medium text-dim">App owner</div>
         <Segmented
           label="GitHub App owner"
           value={owner}
@@ -297,6 +298,10 @@ export function GithubManifestSetup({
           </label>
         )}
       </div>
+      <p className="m-0 text-supporting leading-snug text-dim">
+        Ownership is separate from repository access. You can install the same
+        App on both personal and organization accounts.
+      </p>
       <div className="flex flex-col gap-2">
         <GithubSetupStep
           label="Create GitHub app"
@@ -329,7 +334,7 @@ export function GithubManifestSetup({
         <GithubSetupStep
           label="Install GitHub app"
           guide={githubInstallAppGuide}
-          caption="Choose all repositories or select the repositories Open Session can access, then click Install."
+          caption="Choose a personal or organization account and the repositories Open Session can access. Repeat to add another account without changing existing installations."
           href={installUrl}
         />
       </div>
