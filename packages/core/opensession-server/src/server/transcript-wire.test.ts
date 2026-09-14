@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SeqEntry } from "./transcript-store";
+import { MESSAGE_COLLAPSE_CHARS } from "../shared/message-preview";
 import {
   clampV2InitEntries,
   INIT_COLLAPSED_MESSAGE_CLAMP_BYTES,
@@ -75,6 +76,27 @@ describe("v2 transcript wire previews", () => {
     expect(clamped[1].content).toHaveLength(INIT_MESSAGE_CLAMP_BYTES);
   });
 
+  test.each([12_000, 12_001, 14_999])(
+    "preserves near-limit visible messages of %i characters",
+    (length) => {
+      const entries = [
+        entry("u", "user", "u".repeat(length)),
+        entry("a", "assistant", "a".repeat(length)),
+      ];
+      expect(clampV2InitEntries(entries)).toBe(entries);
+    },
+  );
+
+  test("clamps at exactly 20% hidden", () => {
+    const entries = [
+      entry("a", "assistant", "a".repeat(MESSAGE_COLLAPSE_CHARS)),
+    ];
+    const [clamped] = clampV2InitEntries(entries);
+    expect(clamped.content).toHaveLength(INIT_MESSAGE_CLAMP_BYTES);
+    expect(clamped.contentClamped).toBe(true);
+    expect(clamped.contentLength).toBe(MESSAGE_COLLAPSE_CHARS);
+  });
+
   test("cuts the uncompressed size of a long 100-message opening batch", () => {
     const entries = Array.from({ length: 100 }, (_, index) =>
       entry(`a-${index}`, "assistant", "answer ".repeat(2_600)),
@@ -97,8 +119,9 @@ describe("v2 transcript wire previews", () => {
       INIT_TOOL_RESULT_CLAMP_BYTES + 512,
     );
     expect(v2SnapshotEntryWeight("assistant", 100_000)).toBe(
-      INIT_MESSAGE_CLAMP_BYTES,
+      MESSAGE_COLLAPSE_CHARS,
     );
+    expect(v2SnapshotEntryWeight("assistant", 14_999)).toBe(14_999);
     expect(v2SnapshotEntryWeight("assistant", 900)).toBe(900);
   });
 });

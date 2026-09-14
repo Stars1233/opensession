@@ -1,9 +1,11 @@
 import type { SeqEntry } from "./transcript-store";
+import {
+  MESSAGE_COLLAPSE_CHARS,
+  MESSAGE_PREVIEW_CHARS,
+} from "../shared/message-preview";
 
-/** The web renders at most 12,000 characters of a message before its expander
- * (EAGER_MD_CHARS in MessageBubble.tsx), so sending more in an opening frame
- * only consumes transfer and parse work. Keep the two in step. */
-export const INIT_MESSAGE_CLAMP_BYTES = 12_000;
+/** Match the web's preview, allowing near-limit messages through in full. */
+export const INIT_MESSAGE_CLAMP_BYTES = MESSAGE_PREVIEW_CHARS;
 /** Tool results open folded and hydrate from the full-entry endpoint when a
  * reader expands them. The opening frame only needs a compact preview. */
 export const INIT_TOOL_RESULT_CLAMP_BYTES = 256;
@@ -50,14 +52,16 @@ export function v2SnapshotEntryWeight(
   const wireBudget =
     kind === "tool_result"
       ? INIT_TOOL_RESULT_CLAMP_BYTES + 512
-      : INIT_MESSAGE_CLAMP_BYTES;
+      : MESSAGE_COLLAPSE_CHARS;
   return Math.min(storedBytes, wireBudget);
 }
 
 function initClampBytes(entry: SeqEntry, foldedAssistant: boolean): number {
   if (entry.type === "tool_result") return INIT_TOOL_RESULT_CLAMP_BYTES;
   if (foldedAssistant) return INIT_COLLAPSED_MESSAGE_CLAMP_BYTES;
-  return INIT_MESSAGE_CLAMP_BYTES;
+  return entry.content.length < MESSAGE_COLLAPSE_CHARS
+    ? MESSAGE_COLLAPSE_CHARS
+    : INIT_MESSAGE_CLAMP_BYTES;
 }
 
 /** Assistant notes hidden by TranscriptBlocks' default work fold. */

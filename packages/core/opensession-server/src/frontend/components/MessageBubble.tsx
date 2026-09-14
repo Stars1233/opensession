@@ -52,6 +52,10 @@ import {
 import { cn } from "../ui/cn";
 import { reasoningBody, reasoningDisplay } from "../lib/reasoning-display";
 import { transcriptEnterClass } from "../lib/transcript-motion";
+import {
+  MESSAGE_COLLAPSE_CHARS,
+  MESSAGE_PREVIEW_CHARS,
+} from "../../shared/message-preview";
 
 // Only this much of a message is markdown-parsed eagerly. marked is
 // superlinear on input size (~25ms at 10KB, ~400ms at 80KB, seconds past
@@ -61,8 +65,7 @@ import { transcriptEnterClass } from "../lib/transcript-motion";
 // contents render their head plus a "Show full message" expander. 12,000
 // covers nearly every long interactive reply (a week of production had 38
 // assistant messages over 6 KB, 33 of them under 12 KB) at ~30ms worst case
-// per bubble. Keep in step with INIT_MESSAGE_CLAMP_BYTES (transcript-wire.ts).
-const EAGER_MD_CHARS = 12_000;
+// per bubble. Near-limit messages render in full using the shared wire budget.
 // Expanded content still renders as markdown up to this size; past it the
 // content is machine payload, not prose — a plain <pre> shows it instantly.
 const FULL_MD_CHARS = 32 * 1024;
@@ -93,7 +96,7 @@ export function ClampedBody({
 }) {
   const wireClamped = !!entry?.contentClamped;
   const fullLength = entry?.contentLength ?? content.length;
-  const isLong = wireClamped || content.length > EAGER_MD_CHARS;
+  const isLong = wireClamped || content.length >= MESSAGE_COLLAPSE_CHARS;
   const [showAll, setShowAll] = useState(false);
   const [fetched, setFetched] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -102,9 +105,9 @@ export function ClampedBody({
   // a diff/log as its own paragraph.
   const head = (() => {
     if (!isLong || showAll) return content;
-    const slice = content.slice(0, EAGER_MD_CHARS);
+    const slice = content.slice(0, MESSAGE_PREVIEW_CHARS);
     const nl = slice.lastIndexOf("\n");
-    return nl > EAGER_MD_CHARS / 2 ? slice.slice(0, nl) : slice;
+    return nl > MESSAGE_PREVIEW_CHARS / 2 ? slice.slice(0, nl) : slice;
   })();
 
   const rawShown = showAll ? (fetched ?? content) : head;
