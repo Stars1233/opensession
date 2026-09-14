@@ -58,8 +58,11 @@ import { transcriptEnterClass } from "../lib/transcript-motion";
 // 200KB), and a transcript can hold dozens of giant machine-written entries
 // (automation prompts embedding a full PR diff) — parsing them all on open is
 // what made "Loading transcript…" hang for minutes on such sessions. Longer
-// contents render their head plus a "Show full message" expander.
-const EAGER_MD_CHARS = 6000;
+// contents render their head plus a "Show full message" expander. 12,000
+// covers nearly every long interactive reply (a week of production had 38
+// assistant messages over 6 KB, 33 of them under 12 KB) at ~30ms worst case
+// per bubble. Keep in step with INIT_MESSAGE_CLAMP_BYTES (transcript-wire.ts).
+const EAGER_MD_CHARS = 12_000;
 // Expanded content still renders as markdown up to this size; past it the
 // content is machine payload, not prose — a plain <pre> shows it instantly.
 const FULL_MD_CHARS = 32 * 1024;

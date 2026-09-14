@@ -63,21 +63,21 @@ describe("v2 transcript wire previews", () => {
 
   test("does not send message text the UI would hide behind its expander", () => {
     const visible = entry("visible", "assistant", "a".repeat(3_000));
-    const long = entry("long", "assistant", "b".repeat(9_000));
+    const long = entry("long", "assistant", "b".repeat(18_000));
 
     const clamped = clampV2InitEntries([visible, long]);
 
     expect(clamped[0]).toBe(visible);
     expect(clamped[1]).toMatchObject({
       contentClamped: true,
-      contentLength: 9_000,
+      contentLength: 18_000,
     });
     expect(clamped[1].content).toHaveLength(INIT_MESSAGE_CLAMP_BYTES);
   });
 
   test("cuts the uncompressed size of a long 100-message opening batch", () => {
     const entries = Array.from({ length: 100 }, (_, index) =>
-      entry(`a-${index}`, "assistant", "answer ".repeat(1_300)),
+      entry(`a-${index}`, "assistant", "answer ".repeat(2_600)),
     );
     const originalBytes = Buffer.byteLength(JSON.stringify(entries));
     const clampedBytes = Buffer.byteLength(
