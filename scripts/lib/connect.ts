@@ -23,12 +23,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "fs";
 import { arch, cpus, hostname, platform, tmpdir, totalmem, userInfo } from "os";
 import { dirname, join, resolve } from "path";
-import { OPENSESSION_HOME } from "./paths";
+import { OPENSESSION_HOME, SHIM_PATH } from "./paths";
 import { bold, dim, fail, heading, info, ok, run, warn } from "./ui";
 import { localAutomationToken } from "./local-auth";
 import {
@@ -399,8 +400,38 @@ export async function connect(opts: ConnectOptions): Promise<number> {
   return 0;
 }
 
-function runnerCommandPath(): string {
+/** The script the service manager passes to the interpreter, or undefined
+ * when there is none. From source the CLI is `bun <cli.ts>`. The compiled
+ * release binary has no script: its `process.argv[1]` is the virtual
+ * `/$bunfs/root/opensession` entry, and a service that passed it along would
+ * be rejected as `unknown command` on every restart. */
+function runnerCommandPath(): string | undefined {
+  if (isCompiledBinary()) return undefined;
   return process.argv[1] || "opensession";
+}
+
+/** The executable the service runs: `bun` from source, the release binary
+ * when compiled. A release install is launched through the stable
+ * `bin/opensession` shim, so prefer that spelling when it resolves to this
+ * executable; the unit then survives an upgrade that replaces the release
+ * directory. */
+function runnerServiceExecutable(): string {
+  if (isCompiledBinary()) {
+    try {
+      if (realpathSync(SHIM_PATH) === realpathSync(process.execPath))
+        return SHIM_PATH;
+    } catch {}
+  }
+  return process.execPath;
+}
+
+/** `[executable, script?, "runner", "run"]`, the argv every service
+ * definition renders. */
+export function runnerServiceArgv(
+  command: string | undefined = runnerCommandPath(),
+  bun = runnerServiceExecutable(),
+): string[] {
+  return [bun, ...(command ? [command] : []), "runner", "run"];
 }
 
 /** Env keys a Windows child process cannot function without. PowerShell fails
@@ -509,22 +540,25 @@ function runnerEnvironment(): Record<string, string> {
 
 /** Rendered separately for a testable, deliberately narrow service contract. */
 export function runnerLaunchdPlist(
-  command = runnerCommandPath(),
-  bun = process.execPath,
+  command: string | undefined = runnerCommandPath(),
+  bun = runnerServiceExecutable(),
 ): string {
   const xml = (value: string) =>
     value
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;");
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${RUNNER_SERVICE_LABEL}</string><key>ProgramArguments</key><array><string>${xml(bun)}</string><string>${xml(command)}</string><string>runner</string><string>run</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(join(OPENSESSION_HOME, "runner.log"))}</string><key>StandardErrorPath</key><string>${xml(join(OPENSESSION_HOME, "runner.log"))}</string></dict></plist>\n`;
+  const argv = runnerServiceArgv(command, bun)
+    .map((arg) => `<string>${xml(arg)}</string>`)
+    .join("");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${RUNNER_SERVICE_LABEL}</string><key>ProgramArguments</key><array>${argv}</array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(join(OPENSESSION_HOME, "runner.log"))}</string><key>StandardErrorPath</key><string>${xml(join(OPENSESSION_HOME, "runner.log"))}</string></dict></plist>\n`;
 }
 
 export function runnerSystemdUnit(
-  command = runnerCommandPath(),
-  bun = process.execPath,
+  command: string | undefined = runnerCommandPath(),
+  bun = runnerServiceExecutable(),
 ): string {
-  return `[Unit]\nDescription=Open Session Runner\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=${bun} ${command} runner run\nRestart=always\nRestartSec=5\nEnvironment=HOME=${process.env.HOME || "/tmp"}\nEnvironment=PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Open Session Runner\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=${runnerServiceArgv(command, bun).join(" ")}\nRestart=always\nRestartSec=5\nEnvironment=HOME=${process.env.HOME || "/tmp"}\nEnvironment=PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}\n\n[Install]\nWantedBy=default.target\n`;
 }
 
 function windowsTaskUser(): string {
@@ -545,8 +579,8 @@ function windowsTaskUser(): string {
  * hidden PowerShell so a console window does not land on the desktop at every
  * sign-in, and `*>>` appends all streams to the runner log. */
 export function runnerScheduledTaskXml(
-  command = runnerCommandPath(),
-  bun = process.execPath,
+  command: string | undefined = runnerCommandPath(),
+  bun = runnerServiceExecutable(),
   user = windowsTaskUser(),
   shell = windowsPowerShellPath(),
 ): string {
@@ -557,7 +591,8 @@ export function runnerScheduledTaskXml(
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;");
   const single = (value: string) => `'${value.replaceAll("'", "''")}'`;
-  const action = `& ${single(bun)} ${single(command)} runner run *>> ${single(join(OPENSESSION_HOME, "runner.log"))}`;
+  const script = command ? ` ${single(command)}` : "";
+  const action = `& ${single(bun)}${script} runner run *>> ${single(join(OPENSESSION_HOME, "runner.log"))}`;
   const args = `-NoProfile -NonInteractive -WindowStyle Hidden -Command "${action}"`;
   return `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n  <RegistrationInfo>\n    <Description>Open Session Runner: holds the outbound control channel open.</Description>\n  </RegistrationInfo>\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n      <UserId>${xml(user)}</UserId>\n    </LogonTrigger>\n  </Triggers>\n  <Principals>\n    <Principal id="Author">\n      <UserId>${xml(user)}</UserId>\n      <LogonType>InteractiveToken</LogonType>\n      <RunLevel>LeastPrivilege</RunLevel>\n    </Principal>\n  </Principals>\n  <Settings>\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n    <StartWhenAvailable>true</StartWhenAvailable>\n    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n    <RestartOnFailure>\n      <Interval>PT1M</Interval>\n      <Count>10</Count>\n    </RestartOnFailure>\n  </Settings>\n  <Actions Context="Author">\n    <Exec>\n      <Command>${xml(shell)}</Command>\n      <Arguments>${xml(args)}</Arguments>\n    </Exec>\n  </Actions>\n</Task>\n`;
 }

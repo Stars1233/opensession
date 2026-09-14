@@ -29,6 +29,22 @@ Connect cannot install a service, it says why;
 The Runner connects outbound over the tailnet. Open Session never dials into
 the machine.
 
+## ChromeOS Runners
+
+A Chromebook's Linux container (Crostini, a Debian VM) is an ordinary Linux
+Runner: install and pair from the Terminal app with the commands above. The
+container enables lingering on its own, so the user service starts with the
+container. Three host-side limits apply:
+
+- ChromeOS does not start the container after a reboot or OS update. Open the
+  Terminal app once and the service reconnects on its own.
+- A sleeping Chromebook suspends the container. In **Settings → Device →
+  Power**, turn off **Sleep when lid is closed** and set the idle action on
+  both charger and battery to keep or turn off the display rather than sleep.
+  Keep it on the charger: ChromeOS sleeps on low battery regardless.
+- Leave `tailscaled` inside the container stopped. The ChromeOS Tailscale app
+  carries the traffic, and the Runner reports the host's tailnet address.
+
 ## Windows Runners
 
 Windows machines are supported as Runners. The Open Session server itself

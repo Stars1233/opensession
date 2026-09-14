@@ -34,6 +34,33 @@ describe("Runner service definitions", () => {
     expect(unit).not.toContain("Token=");
   });
 
+  test("the compiled binary re-invokes itself without a script argument", () => {
+    // A `bun build --compile` binary reports `/$bunfs/root/opensession` as
+    // argv[1]; passing that along made every service start exit with
+    // `unknown command` and loop under Restart=always.
+    const exe = "/home/michael/.opensession/bin/opensession";
+    expect(runnerSystemdUnit("", exe)).toContain(
+      `ExecStart=${exe} runner run\n`,
+    );
+    expect(runnerLaunchdPlist("", exe)).toContain(
+      `<array><string>${exe}</string><string>runner</string><string>run</string></array>`,
+    );
+    const xml = runnerScheduledTaskXml(
+      "",
+      "C:\\Users\\o'brien\\.opensession\\bin\\opensession.exe",
+      "OFFICE\\owner",
+    );
+    expect(xml).toContain(
+      "&amp; 'C:\\Users\\o''brien\\.opensession\\bin\\opensession.exe' runner run *&gt;&gt;",
+    );
+    for (const rendered of [
+      runnerSystemdUnit("", exe),
+      runnerLaunchdPlist("", exe),
+      xml,
+    ])
+      expect(rendered).not.toContain("$bunfs");
+  });
+
   test("the Windows scheduled task reconnects hidden without embedding a credential", () => {
     const xml = runnerScheduledTaskXml(
       "C:\\Users\\o'brien\\.opensession\\src\\scripts\\cli.ts",
