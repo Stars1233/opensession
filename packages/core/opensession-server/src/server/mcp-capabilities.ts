@@ -18,7 +18,7 @@ export const INTERNAL_MCP_CAPABILITIES = {
   "opensession-sessions": {
     summary: "See and steer other sessions, and spawn worker sessions.",
     guidance:
-      "Create, inspect, steer, or cancel visible sessions and worker tasks. Use this rather than inventing an in-process worker when the user asks for a new session.",
+      "Create, inspect, steer, or cancel visible sessions and worker tasks. Use this rather than inventing an in-process worker when the user asks for a new session. When you notice a well-scoped follow-up outside the current request, record it with suggest_task instead of starting it.",
   },
   "opensession-admin": {
     summary: "Manage automations, MCP connections and channel memory.",

@@ -30,6 +30,10 @@ import {
   productName,
 } from "../../server/config";
 import { createSdkMcpServer, tool } from "../../server/inprocess-mcp";
+import {
+  suggestedTaskLink,
+  suggestedTaskOf,
+} from "@tellahq/opensession-protocol/tool-presentation";
 import { z } from "zod";
 import { existsSync, readFileSync } from "fs";
 import {
@@ -224,6 +228,21 @@ export function buildChildSessionPrompt(input: {
     );
   }
   return parts.join("\n\n");
+}
+
+/**
+ * The public `/new` link for a suggested task: what the tool result carries so
+ * a Slack reader (or any client without the card) can still start it. Exported
+ * for the MCP contract tests.
+ */
+export function suggestedTaskUrl(
+  input: Record<string, unknown>,
+): string | null {
+  const task = suggestedTaskOf("opensession-sessions_suggest_task", input);
+  if (!task) return null;
+  const base =
+    process.env.OPENSESSION_UI_BASE || configuredServer().publicBaseUrl;
+  return `${base}${suggestedTaskLink(task)}`;
 }
 
 /** Hard ceiling on the appended evidence block — a handoff must inform the
@@ -716,6 +735,84 @@ export function createSessionsMcpServer(
         );
         parts.push(`\n*Recent transcript:*\n${fmtTranscriptTail(tail)}`);
         return text(parts.join("\n"));
+      },
+    ),
+    // Delegation the person keeps control of: the agent proposes, the card
+    // offers "Start in a new session", nothing runs until they press it. No
+    // control surface, so it sits with the observe tools rather than behind
+    // isAdmin, and a Slack reader gets the same link in the result text.
+    tool(
+      "suggest_task",
+      `Propose a well-scoped follow-up for a person to start in a new ${productName()} session, without starting it. Use it when you notice a self-contained piece of work that is worth doing but outside the current request: a bug spotted on the way, a refactor the change makes possible, a missing test, a docs gap. The suggestion renders as a card in this session with a "Start in a new session" button, so the person decides; nothing runs until they press it. Write instructions a fresh session can act on with no access to this conversation: goal, relevant files, constraints, acceptance criteria, what to report. In your reply mention the suggestion in one line and do not repeat its instructions. Do not use this for the work you were asked to do, and do not start the task yourself (spawn_task, create_session) unless asked.`,
+      {
+        title: z
+          .string()
+          .max(120)
+          .describe(
+            "Imperative one-line title, e.g. 'Avoid false failure after subagent yield handoff'.",
+          ),
+        description: z
+          .string()
+          .max(600)
+          .describe(
+            "One to three sentences: what is wrong or possible, and what done looks like.",
+          ),
+        instructions: z
+          .string()
+          .max(8000)
+          .describe(
+            "The complete prompt the new session starts on. Self-contained: file paths, constraints, acceptance criteria, what to report.",
+          ),
+        repo: z
+          .string()
+          .optional()
+          .describe(
+            "Registered repo id the task belongs to. Defaults to this session's repo.",
+          ),
+        mode: z
+          .enum(["ask", "code"])
+          .optional()
+          .describe(
+            "'code' (default) can edit files and open PRs; 'ask' is read-only investigation.",
+          ),
+        branch: z
+          .string()
+          .optional()
+          .describe("Optional branch name for a code task."),
+      },
+      async (args: {
+        title: string;
+        description: string;
+        instructions: string;
+        repo?: string;
+        mode?: "ask" | "code";
+        branch?: string;
+      }) => {
+        const input: Record<string, unknown> = { ...args };
+        if (!args.repo?.trim() && ctx.currentSessionId) {
+          try {
+            const repo = getSessionControl().getSession(
+              ctx.currentSessionId,
+            )?.repo;
+            if (repo) input.repo = repo;
+          } catch {}
+        }
+        const url = suggestedTaskUrl(input);
+        if (!url)
+          return text(
+            "A suggested task needs a title and self-contained instructions.",
+          );
+        audit({
+          msg: "task_suggested",
+          session_id: ctx.currentSessionId,
+          title: args.title.trim(),
+          repo: input.repo,
+          mode: args.mode || "code",
+          user: ctx.createdBy,
+        });
+        return text(
+          `Suggested task recorded: "${args.title.trim()}". It appears as a card in this session with a "Start in a new session" button; nothing runs until a person presses it. Link: ${url}\nMention the suggestion in one line in your reply and do not repeat its instructions.`,
+        );
       },
     ),
   ];

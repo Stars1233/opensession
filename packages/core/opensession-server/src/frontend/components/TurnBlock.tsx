@@ -11,6 +11,11 @@ import {
   useToolPathRoots,
 } from "./ToolCallBlock";
 import { ClampedBody, EntryImages, EntryVideos } from "./MessageBubble";
+import { SuggestedTaskCard } from "./SuggestedTaskCard";
+import {
+  suggestedTaskOf,
+  type SuggestedTask,
+} from "@tellahq/opensession-protocol/tool-presentation";
 import { unplacedMedia } from "../lib/placed-media";
 import { IconChevronDown, IconStack } from "./icons";
 import { cn } from "../ui/cn";
@@ -220,6 +225,10 @@ export const TurnBlock = function TurnBlock({
   const featured = expanded
     ? { images: [], videos: [] }
     : featuredTurnMedia(items, toolResults);
+  // Also survives the fold, and unlike media stays put when the fold opens:
+  // the row inside only names the suggestion, the card is the only place to
+  // read it and start it, so it never shows twice.
+  const suggested = suggestedTurnTasks(items);
 
   return (
     <div
@@ -355,6 +364,16 @@ export const TurnBlock = function TurnBlock({
         <div className="pl-[7px] pr-1">
           <EntryImages images={featured.images} sessionId={sessionId} />
           <EntryVideos videos={featured.videos} />
+        </div>
+      )}
+
+      {/* A proposal addressed to the reader: the agent suggests, the person
+          starts it. See suggestedTurnTasks. */}
+      {suggested.length > 0 && (
+        <div className="mt-1 space-y-2 pl-[7px] pr-1">
+          {suggested.map(({ id, task }) => (
+            <SuggestedTaskCard key={id} task={task} />
+          ))}
         </div>
       )}
     </div>
@@ -830,6 +849,25 @@ function featuredTurnMedia(
     }
   }
   return { images, videos };
+}
+
+/**
+ * The follow-ups a turn proposed with `suggest_task`, in call order. Like a
+ * featured screenshot, a suggestion is an artifact addressed to the reader
+ * rather than a step of the work, so the fold hides the steps and keeps the
+ * card. The proposal lives entirely in the call's input, which is why a
+ * still-pending call already renders one.
+ */
+function suggestedTurnTasks(
+  items: TranscriptEntry[],
+): Array<{ id: string; task: SuggestedTask }> {
+  const out: Array<{ id: string; task: SuggestedTask }> = [];
+  for (const entry of items) {
+    if (entry.type !== "tool_use") continue;
+    const task = suggestedTaskOf(entry.toolName || "", entry.toolInput);
+    if (task) out.push({ id: entry.id, task });
+  }
+  return out;
 }
 
 function turnBlockPropsEqual(prev: Props, next: Props): boolean {

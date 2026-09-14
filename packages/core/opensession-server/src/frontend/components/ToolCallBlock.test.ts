@@ -420,3 +420,56 @@ test("image reads show the image without the redundant engine acknowledgement", 
     "Image read successfully",
   );
 });
+
+test("a suggested task is read off the call in every spelling", async () => {
+  const { suggestedTaskLink, suggestedTaskOf } =
+    await import("@tellahq/opensession-protocol/tool-presentation");
+  const input = {
+    title: "Avoid false failure after subagent yield handoff",
+    description:
+      "A successful child's superseded notification read as a failure.",
+    instructions: "Handle the handoff without the red error.",
+    repo: "opensession",
+    mode: "code",
+  };
+  expect(
+    suggestedTaskOf("mcp__opensession-sessions__suggest_task", input),
+  ).toEqual({
+    title: input.title,
+    description: input.description,
+    instructions: input.instructions,
+    repo: "opensession",
+    mode: "code",
+  });
+  expect(
+    suggestedTaskOf("opensession-sessions_suggest_task", input)?.title,
+  ).toBe(input.title);
+  // pi's dispatcher envelope.
+  expect(
+    suggestedTaskOf("mcp_call", {
+      name: "opensession-sessions_suggest_task",
+      arguments: input,
+    })?.title,
+  ).toBe(input.title);
+  // Only this one tool, and only a complete proposal.
+  expect(
+    suggestedTaskOf("opensession-sessions_get_session", { id: "os-1" }),
+  ).toBeNull();
+  expect(
+    suggestedTaskOf("opensession-sessions_suggest_task", { title: "x" }),
+  ).toBeNull();
+  // The row inside the fold names the suggestion rather than dumping its body.
+  expect(
+    toolSummary("opensession-sessions_suggest_task", input, "", roots),
+  ).toBe(input.title);
+  // The link the card and the tool result share: a prefilled composer.
+  expect(
+    suggestedTaskLink({
+      title: "t",
+      description: "",
+      instructions: "Fix a & b",
+      repo: "opensession",
+      mode: "ask",
+    }),
+  ).toBe("/new?prompt=Fix+a+%26+b&repo=opensession&mode=ask");
+});

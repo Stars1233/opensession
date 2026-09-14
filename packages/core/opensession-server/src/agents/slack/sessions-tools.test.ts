@@ -841,3 +841,59 @@ describe("workerReportPayload", () => {
     expect(out.content.length).toBeLessThan(4200);
   });
 });
+
+describe("suggest_task", () => {
+  it("is offered without admin and answers with a prefilled /new link", async () => {
+    const previousBase = process.env.OPENSESSION_UI_BASE;
+    process.env.OPENSESSION_UI_BASE = "https://os.example";
+    const server = createSessionsMcpServer({
+      createdBy: "Reader",
+      isAdmin: false,
+    });
+    const client = new Client({
+      name: "sessions-tools-test",
+      version: "1.0.0",
+    });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("suggest_task");
+      // Proposing is not controlling: the control tools stay behind isAdmin.
+      expect(names).not.toContain("create_session");
+      expect(names).not.toContain("spawn_task");
+
+      const result = await client.callTool({
+        name: "suggest_task",
+        arguments: {
+          title: "Avoid false failure after subagent yield handoff",
+          description: "Shown as a failed main turn.",
+          instructions: "Handle a & b",
+          repo: "opensession",
+          mode: "ask",
+        },
+      });
+      const output = (
+        result as { content: Array<{ type: string; text: string }> }
+      ).content[0].text;
+      expect(output).toContain(
+        "https://os.example/new?prompt=Handle+a+%26+b&repo=opensession&mode=ask",
+      );
+      expect(output).toContain("nothing runs until a person presses it");
+
+      const empty = await client.callTool({
+        name: "suggest_task",
+        arguments: { title: " ", description: "", instructions: " " },
+      });
+      expect(
+        (empty as { content: Array<{ text: string }> }).content[0].text,
+      ).toContain("needs a title and self-contained instructions");
+    } finally {
+      await client.close();
+      if (previousBase === undefined) delete process.env.OPENSESSION_UI_BASE;
+      else process.env.OPENSESSION_UI_BASE = previousBase;
+    }
+  });
+});

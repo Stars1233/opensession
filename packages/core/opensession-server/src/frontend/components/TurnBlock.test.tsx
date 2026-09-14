@@ -300,3 +300,32 @@ describe("grouped tool run row", () => {
     expect(render(items, results)).toBe(render(items, results));
   });
 });
+
+describe("suggested task", () => {
+  test("survives the work fold as a card with a prefilled new-session link", async () => {
+    const { TurnBlock } = await import("./TurnBlock");
+    const items = [
+      toolUse("s", "opensession-sessions_suggest_task", {
+        title: "Avoid false failure after subagent yield handoff",
+        description: "Shown as a failed main turn.",
+        instructions: "Handle the handoff without the red error.",
+        repo: "opensession",
+      }),
+    ];
+    const html = renderToStaticMarkup(
+      React.createElement(TurnBlock, {
+        items,
+        toolResults: new Map(),
+        live: false,
+      }),
+    );
+    expect(html).toContain("Suggested task");
+    expect(html).toContain("Avoid false failure after subagent yield handoff");
+    expect(html).toContain("Start in a new session");
+    expect(html).toContain(
+      'href="/new?prompt=Handle+the+handoff+without+the+red+error.&amp;repo=opensession"',
+    );
+    // The fold is closed by default; the card is outside it, not behind it.
+    expect(html).toContain('aria-expanded="false"');
+  });
+});

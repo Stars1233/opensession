@@ -1044,9 +1044,25 @@ export function demoReplayScript(): Array<() => JsonlLine[]> {
       { id: "bks-demo-pr", transcript_lines: 4 },
       '🟢 *Fix flaky upload retry test*  `bks-demo-pr`\n   done · opensession · code · branch demo/fix-flaky-upload · createdBy="Alex" · 2h ago\n   PR open https://github.com/acme/acme-todo/pull/128\n\n*Recent transcript:*\n• tool:Bash: Using bash\n• tool_result: 100 pass 0 fail\n• assistant: Fixed and verified — 100/100 green.',
     ),
+    // A suggested task: the agent proposes a follow-up it will not start, and
+    // the turn renders it as a card with "Start in a new session".
+    step(
+      10,
+      "opensession-sessions_suggest_task",
+      {
+        title: "Tag gateway spans with the tenant id",
+        description:
+          "Every route span now exists but none carries the tenant, so a trace cannot be filtered per customer. Add the attribute where the middleware already resolves the tenant, and cover it with one test.",
+        instructions:
+          "In src/gateway/router.ts the registerRoute wrapper opens a span per route. Read the tenant id from the request context that src/gateway/tenant.ts resolves in middleware and set it as the `tenant.id` span attribute. Keep the wrapper the single instrumentation point; do not touch individual handlers. Add a test in src/gateway/tracing.test.ts asserting the attribute is present on a /health span. Report the files changed and the test output.",
+        repo: "acme-todo",
+        mode: "code",
+      },
+      'Suggested task recorded: "Tag gateway spans with the tenant id". It appears as a card in this session with a "Start in a new session" button; nothing runs until a person presses it.',
+    ),
     say(
       "demo-live-a4",
-      "Traces verified end-to-end on the hot paths. Next loop: tag spans with tenant id and wire the sampler config.",
+      "Traces verified end-to-end on the hot paths. I left a suggested task for tagging spans with the tenant id; the sampler config is the other follow-up.",
     ),
   ];
 }
