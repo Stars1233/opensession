@@ -1268,13 +1268,13 @@ export function parseTranscriptWindow(
 export const WIRE_CLAMP_BYTES = 32 * 1024;
 /**
  * Tighter clamp for the transcript-open payload (initial tail + history
- * pages): the UI eagerly renders only ~12KB of markdown per bubble
+ * pages): the UI eagerly renders only ~24KB of markdown per bubble
  * (EAGER_MD_CHARS) and fetches the full entry on "Show more" anyway, so
- * shipping 32KB per entry there only buys transfer + JSON.parse time — an
- * entry-heavy tail hit 1.7MB on the wire. Live appends keep the fatter clamp
- * (no extra fetch mid-conversation for a merely-large message).
+ * shipping more per entry there only buys transfer + JSON.parse time — an
+ * entry-heavy tail hit 1.7MB on the wire. Kept as its own constant so the
+ * open path can be tightened again independently of live appends.
  */
-export const INIT_WIRE_CLAMP_BYTES = 16 * 1024;
+export const INIT_WIRE_CLAMP_BYTES = 32 * 1024;
 function clampEntryForWire(e: TranscriptEntry, max: number): TranscriptEntry {
   if ((e.content?.length ?? 0) <= max) return e;
   return {

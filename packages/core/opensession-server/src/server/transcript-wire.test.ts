@@ -64,19 +64,19 @@ describe("v2 transcript wire previews", () => {
 
   test("does not send message text the UI would hide behind its expander", () => {
     const visible = entry("visible", "assistant", "a".repeat(3_000));
-    const long = entry("long", "assistant", "b".repeat(18_000));
+    const long = entry("long", "assistant", "b".repeat(36_000));
 
     const clamped = clampV2InitEntries([visible, long]);
 
     expect(clamped[0]).toBe(visible);
     expect(clamped[1]).toMatchObject({
       contentClamped: true,
-      contentLength: 18_000,
+      contentLength: 36_000,
     });
     expect(clamped[1].content).toHaveLength(INIT_MESSAGE_CLAMP_BYTES);
   });
 
-  test.each([12_000, 12_001, 14_999])(
+  test.each([24_000, 24_001, 29_999])(
     "preserves near-limit visible messages of %i characters",
     (length) => {
       const entries = [
@@ -99,7 +99,7 @@ describe("v2 transcript wire previews", () => {
 
   test("cuts the uncompressed size of a long 100-message opening batch", () => {
     const entries = Array.from({ length: 100 }, (_, index) =>
-      entry(`a-${index}`, "assistant", "answer ".repeat(2_600)),
+      entry(`a-${index}`, "assistant", "answer ".repeat(5_200)),
     );
     const originalBytes = Buffer.byteLength(JSON.stringify(entries));
     const clampedBytes = Buffer.byteLength(
@@ -121,7 +121,7 @@ describe("v2 transcript wire previews", () => {
     expect(v2SnapshotEntryWeight("assistant", 100_000)).toBe(
       MESSAGE_COLLAPSE_CHARS,
     );
-    expect(v2SnapshotEntryWeight("assistant", 14_999)).toBe(14_999);
+    expect(v2SnapshotEntryWeight("assistant", 29_999)).toBe(29_999);
     expect(v2SnapshotEntryWeight("assistant", 900)).toBe(900);
   });
 });

@@ -62,10 +62,9 @@ import {
 // 200KB), and a transcript can hold dozens of giant machine-written entries
 // (automation prompts embedding a full PR diff) — parsing them all on open is
 // what made "Loading transcript…" hang for minutes on such sessions. Longer
-// contents render their head plus a "Show full message" expander. 12,000
-// covers nearly every long interactive reply (a week of production had 38
-// assistant messages over 6 KB, 33 of them under 12 KB) at ~30ms worst case
-// per bubble. Near-limit messages render in full using the shared wire budget.
+// contents render their head plus a "Show full message" expander. The
+// budget lives in shared/message-preview.ts so the wire clamp matches it.
+// Near-limit messages render in full using the shared collapse threshold.
 // Expanded content still renders as markdown up to this size; past it the
 // content is machine payload, not prose — a plain <pre> shows it instantly.
 const FULL_MD_CHARS = 32 * 1024;

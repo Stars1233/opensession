@@ -119,7 +119,7 @@ by Open Session:
   windows must also include 50 user messages, because intermediate assistant
   notes collapse into the work fold and do not add visible conversation rows.
   Extension stops at 1,400 rows or an estimated 850,000 uncompressed wire
-  bytes. Ordinary opening content is clamped to the 12,000 characters the web
+  bytes. Ordinary opening content is clamped to the 24,000 characters the web
   client can render eagerly; folded tool results and intermediate assistant
   notes get 256-character previews. Parser-only request ids, raw notice kinds,
   and context provenance are removed after classification. Large transcript
