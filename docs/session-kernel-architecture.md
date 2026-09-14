@@ -29,8 +29,11 @@ reports process/actor liveness and `/ready` reports whether the actor handshake
 completed. Neither endpoint exposes RPC data.
 
 The network frontend and actors are separate isolates. The frontend bounds
-requests at 16 MiB, responses at 128 MiB, and outstanding calls at 1024. A
-catalog lane plus a configurable bounded pool of session Worker lanes host typed
+requests at 16 MiB, responses at 128 MiB, and outstanding calls at 1024. Actor
+calls return their first materialized result under the hard response bound;
+large reads are not executed again to negotiate a larger response buffer. The
+escaped HTTP envelope remains bounded, and an oversized mutation result never
+permits replay of the mutation. A catalog lane plus a configurable bounded pool of session Worker lanes host typed
 messages. The service owns one serial promise mailbox per canonical session ID
 and gives that actor stable lane affinity, so process-local reducer caches remain
 coherent and two turns for one session cannot overlap. Many actors share each
@@ -196,9 +199,11 @@ actor is unavailable. The direct store adapter exists only for isolated tests.
 - Blocking ask facts: question identity, content, escalation and recovery state.
 
 Delivery mutation and dispatch claim, acknowledgement or failure are short typed
-Worker reductions. Mutation replies contain only the operation result and new
-revision. They invalidate the gateway projection instead of returning or eagerly
-refetching the full attachment-bearing aggregate. Queue batching policy (solo
+Worker reductions. Actual delivery changes refresh the sparse catalog projection
+and the gateway's cached aggregate, which synchronous queue consumers still read.
+Submit-command admission, completion and failure change only the command journal:
+they keep durable command and wake bookkeeping but do not refresh the unchanged
+ask/delivery projections or fetch another attachment-bearing snapshot. Queue batching policy (solo
 interrupts, auto-continue, review handoffs, delegated reports and worker holds)
 now runs inside the same actor reduction as the claim. The gateway supplies
 only live policy facts such as whether child workers remain. The actor prepares
@@ -413,8 +418,18 @@ the file, and falls back to the file only for a session the catalog has not
 seen. Agents run inside the gateway and read the derived file directly; none
 of them may write it (the `spawn_task` depth stamp commits through
 `updateSessionFile`), and the ownership test scans `src/agents` for writers.
-The gateway confirms each export with `metadata
-exported`; a crash in between leaves `exported_rev < rev`, and boot repairs
+The gateway exports the committed document with asynchronous atomic file I/O and
+builds its list row directly from that same document, preserving alias overlays
+without reading the export back. Slack and Linear rows combine their
+asynchronously read source with the already committed sidecar, using the same
+row constructors as ordinary reads. Projection is ordered under the row owner's
+session mutex; an alias write releases its own mutex before acquiring the
+canonical row's, so locks do not nest and a delayed alias cannot overwrite a
+newer canonical row. Export receipts retain their exact revision. The run consumer awaits
+engine-identity and model-switch writes before attaching watchers or advancing to
+the next prompt, so asynchronous file exports cannot leave resume inputs behind.
+The gateway confirms each
+export with `metadata exported`; a crash in between leaves `exported_rev < rev`, and boot repairs
 exactly those sessions (`reconcileSessionMetadataExports`) instead of
 scanning the directory. A session written before the actor owned metadata
 seeds from its file on its first write. Direct session JSON writes outside

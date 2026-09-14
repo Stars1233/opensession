@@ -98,11 +98,15 @@ a reset, and are retained until atomic session deletion removes both transcript
 rows and receipts. The destination-only method is internal and must be called
 after short SessionKernel admission; it is not an HTTP route.
 
-After each commit, the store publishes a wake-up on
-`packages/core/opensession-server/src/server/transcript-bus.ts`. Seq-mode
-watchers reconcile from SQLite by `changeSeq`; the in-process notification is
-not itself the replay buffer. This avoids polling for server-owned sessions and
-makes delayed or duplicate notifications harmless.
+After each commit, the gateway drains the actor's durable pending wake through
+`packages/core/opensession-server/src/server/transcript-bus.ts`. One drain owns a
+session at a time: concurrent callers wait until their required wake cursor is
+covered instead of independently reading and publishing the same pending span.
+A caller arriving during acknowledgement extends the drain; failures leave the
+durable wake retryable. Publication remains at least once across crashes.
+Seq-mode watchers reconcile from SQLite by `changeSeq`; the in-process
+notification is not itself the replay buffer. This avoids polling for
+server-owned sessions and makes delayed or duplicate notifications harmless.
 
 ## Serving to clients
 

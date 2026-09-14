@@ -16,8 +16,12 @@
  * The target server must serve the current frontend bundle. Without
  * OPENSESSION_URL an isolated fixture server starts on an ephemeral port.
  *
- * usage: OPENSESSION_URL=http://127.0.0.1:3850 bun packages/core/opensession-server/src/frontend/tools/transcript-scroll-regression.ts
+ * usage: bun run test:transcript-scroll
+ * OPENSESSION_SCROLL_REDUCED_MOTION=1 also exercises reduced-motion behavior.
+ * OPENSESSION_SCROLL_PROOF_DIR saves viewport screenshots and accessibility trees.
  */
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import {
   acquireCdpBrowser,
   cdpSender,
@@ -107,6 +111,8 @@ if (!app) {
   app = match[1];
 }
 const APP = app;
+const reducedMotion = process.env.OPENSESSION_SCROLL_REDUCED_MOTION === "1";
+const proofDir = process.env.OPENSESSION_SCROLL_PROOF_DIR;
 const lease = await acquireCdpBrowser();
 const results: ViewportResult[] = [];
 
@@ -277,6 +283,10 @@ try {
       await send("Page.enable");
       await send("Network.enable");
       await send("Runtime.enable");
+      if (reducedMotion)
+        await send("Emulation.setEmulatedMedia", {
+          features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+        });
       await send("Page.addScriptToEvaluateOnNewDocument", {
         source: TRANSCRIPT_SCROLL_PROBE_SOURCE,
       });
@@ -298,7 +308,7 @@ try {
           userAgent: viewport.userAgent,
           platform: "iPhone",
         });
-      const token = localAutomationToken();
+      const token = fixtureServer ? undefined : localAutomationToken();
       if (token)
         await send("Network.setCookie", {
           name: "opensession_auth",
@@ -702,6 +712,23 @@ try {
         fling = { travel, growth, correction };
       }
 
+      if (proofDir) {
+        await mkdir(proofDir, { recursive: true });
+        const name = `${viewport.width}-${viewport.userAgent ? "ios" : "chrome"}${reducedMotion ? "-reduced" : ""}`;
+        const screenshot = await send("Page.captureScreenshot", {
+          format: "png",
+        });
+        await Bun.write(
+          join(proofDir, `${name}.png`),
+          Buffer.from(screenshot.data, "base64"),
+        );
+        const accessibility = await send("Accessibility.getFullAXTree");
+        await Bun.write(
+          join(proofDir, `${name}.aria.json`),
+          JSON.stringify(accessibility, null, 2),
+        );
+      }
+
       results.push({
         width: viewport.width,
         userAgent: viewport.userAgent ? "ios" : "chrome",
@@ -729,4 +756,4 @@ try {
   }
 }
 
-console.log(JSON.stringify({ passed: true, results }, null, 2));
+console.log(JSON.stringify({ passed: true, reducedMotion, results }, null, 2));

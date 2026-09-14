@@ -1,39 +1,62 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "fs";
+import * as fsp from "fs/promises";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import {
+import type {
+  HostConnection,
+  HostConnectionHandlers,
+  HostLauncher,
+} from "./host-client";
+import type { RunHostMeta, RunHostSpec } from "../runner-host/protocol";
+import type { ActiveRunRecord } from "./run-journal";
+
+// Isolate every path the host client and its journal/kernel dependencies
+// resolve at import time, so nothing here touches operator state.
+const scratch = mkdtempSync(join(tmpdir(), "host-client-test-env-"));
+const previousEnv = {
+  HOME: process.env.HOME,
+  OPENSESSION_STATE_DIR: process.env.OPENSESSION_STATE_DIR,
+  OPENSESSION_SESSIONS_DIR: process.env.OPENSESSION_SESSIONS_DIR,
+};
+process.env.HOME = scratch;
+process.env.OPENSESSION_STATE_DIR = scratch;
+process.env.OPENSESSION_SESSIONS_DIR = join(scratch, "sessions");
+mkdirSync(process.env.OPENSESSION_SESSIONS_DIR, { recursive: true });
+
+const {
   HostHandle,
   hostedEventsWithJournal,
   localRunHostsSupported,
   reconcileUncertainHostEvents,
   retryHostedKernelCall,
   resolveInactiveHostRecovery,
-  type HostConnectionHandlers,
-  type HostLauncher,
-} from "./host-client";
-import { SessionKernelActorError } from "./session-kernel/actor-client";
-import type { RunHostMeta, RunHostSpec } from "../runner-host/protocol";
-import {
-  TranscriptStore,
-  __setTranscriptStoreForTest,
-} from "./transcript-store";
-import {
-  transcriptLineAssistantText,
-  transcriptLineUser,
-} from "./transcript-persistence";
-import {
+} = await import("./host-client");
+const { ExecutorProtocolError } = await import("./executor-client");
+const { SessionKernelActorError } =
+  await import("./session-kernel/actor-client");
+const { TranscriptStore, __setTranscriptStoreForTest } =
+  await import("./transcript-store");
+const { transcriptLineAssistantText, transcriptLineUser } =
+  await import("./transcript-persistence");
+const {
   SessionKernelStore,
   __setSessionKernelStoreForTest,
   __sessionKernelStoreForTest,
-} from "./session-kernel";
-import { hostRunBusy } from "./host-registry";
-import {
-  __setActiveRunsPathForTest,
-  activeRunRecords,
-  takeInterruptedRuns,
-  type ActiveRunRecord,
-} from "./run-journal";
+} = await import("./session-kernel");
+const { hostInterruptSteer, hostRetractSteer, hostRunBusy, hostSteer } =
+  await import("./host-registry");
+const { __setActiveRunsPathForTest, activeRunRecords, takeInterruptedRuns } =
+  await import("./run-journal");
+
+afterAll(() => {
+  for (const [key, value] of Object.entries(previousEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  rmSync(scratch, { recursive: true, force: true });
+});
 
 const roots: string[] = [];
 
@@ -282,7 +305,7 @@ describe("uncertain host reconciliation", () => {
 });
 
 describe("local run-host capability", () => {
-  test("busy checks consume an offline terminal host receipt", async () => {
+  test("registry busy checks are pure and offline receipts finish asynchronously", async () => {
     const root = mkdtempSync(join(tmpdir(), "host-terminal-test-"));
     roots.push(root);
     const hostId = `rh-${crypto.randomUUID()}`;
@@ -293,13 +316,15 @@ describe("local run-host capability", () => {
       osSessionId: `os-${crypto.randomUUID()}`,
       prompt: "run once",
       cwd: "/tmp",
+      model: "pi/anthropic/claude-sonnet-5",
     };
+    let alive = true;
     const handle = new HostHandle(
       dir,
       spec,
       {},
       {
-        alive: () => true,
+        alive: () => alive,
         newRunDir: (id) => join(root, id),
         launch: async () => {},
       },
@@ -315,12 +340,1197 @@ describe("local run-host capability", () => {
       } satisfies RunHostMeta),
     );
 
+    // A receipt on disk is invisible to the registry until the handle itself
+    // observes it: busy/steer/cancel lookups read cached state only.
+    const spies = [
+      spyOn(fs, "existsSync"),
+      spyOn(fs, "readFileSync"),
+      spyOn(fs, "rmSync"),
+      spyOn(fs, "statSync"),
+      spyOn(fsp, "readFile"),
+      spyOn(fsp, "access"),
+      spyOn(fsp, "rm"),
+      spyOn(fsp, "stat"),
+    ];
+    try {
+      for (let i = 0; i < 3; i++) {
+        expect(hostRunBusy(hostId)).toBe(true);
+        expect(hostRunBusy(spec.osSessionId)).toBe(true);
+        expect(hostSteer(hostId, "nudge")).toBe(false);
+        expect(hostInterruptSteer(hostId, "nudge")).toBe(false);
+        expect(await hostRetractSteer([hostId], "steer-1")).toBe(false);
+      }
+      for (const spy of spies) expect(spy).toHaveBeenCalledTimes(0);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+
+    // The explicit observation is the same fenced path the disconnect loop
+    // runs: a receipt on disk never completes a host that is still alive.
+    expect(await handle.observeOfflineTerminal()).toBe(false);
+    expect(handle.ended).toBe(false);
+    expect(hostRunBusy(hostId)).toBe(true);
+    expect(existsSync(join(dir, "meta.json"))).toBe(true);
+
+    // Once the host is positively absent, the observation (deduped across
+    // callers) consumes the receipt.
+    alive = false;
+    const first = handle.observeOfflineTerminal();
+    const second = handle.observeOfflineTerminal();
+    expect(await Promise.all([first, second])).toEqual([true, true]);
     expect(hostRunBusy(hostId)).toBe(false);
+    expect(hostRunBusy(spec.osSessionId)).toBe(false);
     expect((await handle.events().next()).value).toMatchObject({
       type: "done",
       result: "completed while disconnected",
     });
     expect(handle.ended).toBe(true);
+    await handle.whenFinalized();
+    expect(existsSync(dir)).toBe(false);
+    expect(await handle.observeOfflineTerminal()).toBe(true);
+  });
+
+  test("notices a terminal receipt while disconnected without any query", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-offline-terminal-test-"));
+    roots.push(root);
+    const hostId = "rh-offline-terminal";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-offline-terminal",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    let handlers: HostConnectionHandlers | undefined;
+    let connects = 0;
+    let alive = true;
+    const launcher: HostLauncher = {
+      alive: () => alive,
+      newRunDir: (id) => join(root, id),
+      launch: async () => {},
+      connector: () => ({
+        connect: async (nextHandlers) => {
+          if (connects++ > 0) throw new Error("host gone");
+          handlers = nextHandlers;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    // The socket drops mid-run; the host finishes and exits while detached.
+    handlers!.onClose();
+    expect(hostRunBusy(hostId)).toBe(true);
+    writeFileSync(
+      join(dir, "meta.json"),
+      JSON.stringify({
+        hostId,
+        pid: 1,
+        osSessionId: spec.osSessionId,
+        startedAt: new Date().toISOString(),
+        done: { type: "done", result: "finished offline" },
+      } satisfies RunHostMeta),
+    );
+    alive = false;
+
+    expect((await events.next()).value).toMatchObject({
+      type: "done",
+      result: "finished offline",
+    });
+    expect((await events.next()).done).toBe(true);
+    expect(handle.ended).toBe(true);
+    expect(hostRunBusy(hostId)).toBe(false);
+    await handle.whenFinalized();
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  test("keeps a live but unreachable host busy with its receipt unread", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-unreachable-terminal-test-"));
+    roots.push(root);
+    const hostId = "rh-unreachable-terminal";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-unreachable-terminal",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    let handlers: HostConnectionHandlers | undefined;
+    let connects = 0;
+    let alive = true;
+    const launcher: HostLauncher = {
+      alive: () => alive,
+      newRunDir: (id) => join(root, id),
+      launch: async () => {},
+      connector: () => ({
+        connect: async (nextHandlers) => {
+          if (connects++ > 0) throw new Error("transport broken");
+          handlers = nextHandlers;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    writeFileSync(
+      join(dir, "meta.json"),
+      JSON.stringify({
+        hostId,
+        pid: 1,
+        osSessionId: spec.osSessionId,
+        startedAt: new Date().toISOString(),
+        done: { type: "done", result: "lingering" },
+      } satisfies RunHostMeta),
+    );
+    handlers!.onClose();
+
+    // A broken transport is not proof the catch-up is undrainable: the handle
+    // keeps reconnecting, stays busy, and leaves the spool untouched.
+    await Bun.sleep(60);
+    expect(connects).toBeGreaterThan(5);
+    expect(handle.ended).toBe(false);
+    expect(hostRunBusy(hostId)).toBe(true);
+    expect(existsSync(join(dir, "meta.json"))).toBe(true);
+
+    // Only a positively absent host releases the offline receipt.
+    alive = false;
+    expect((await events.next()).value).toMatchObject({
+      type: "done",
+      result: "lingering",
+    });
+    expect((await events.next()).done).toBe(true);
+    expect(hostRunBusy(hostId)).toBe(false);
+  });
+
+  test("re-reads the receipt a host wrote while liveness was being checked", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-late-receipt-test-"));
+    roots.push(root);
+    const hostId = "rh-late-receipt";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-late-receipt",
+      prompt: "test",
+      cwd: "/tmp",
+      engineSessionId: "engine-late",
+    };
+    let handlers: HostConnectionHandlers | undefined;
+    let launches = 0;
+    const launcher: HostLauncher = {
+      alive: (_dir, meta) => {
+        // The host writes its receipt and exits during the liveness probe,
+        // after the loop's metadata read saw nothing.
+        expect(meta?.done).toBeUndefined();
+        writeFileSync(
+          join(dir, "meta.json"),
+          JSON.stringify({
+            hostId,
+            pid: 1,
+            osSessionId: spec.osSessionId,
+            startedAt: new Date().toISOString(),
+            done: { type: "done", result: "written during probe" },
+          } satisfies RunHostMeta),
+        );
+        return false;
+      },
+      newRunDir: (id) => join(root, id),
+      launch: async () => {
+        launches++;
+      },
+      connector: () => ({
+        connect: async (nextHandlers) => {
+          handlers = nextHandlers;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    handlers!.onClose();
+
+    expect((await events.next()).value).toMatchObject({
+      type: "done",
+      result: "written during probe",
+    });
+    expect((await events.next()).done).toBe(true);
+    expect(launches).toBe(0);
+    expect(hostRunBusy(hostId)).toBe(false);
+  });
+
+  test("ignores a receipt left by a different host id", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-foreign-receipt-test-"));
+    roots.push(root);
+    const hostId = "rh-foreign-receipt";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-foreign-receipt",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    let handlers: HostConnectionHandlers | undefined;
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      launch: async () => {},
+      connector: () => ({
+        connect: async (nextHandlers) => {
+          handlers = nextHandlers;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    writeFileSync(
+      join(dir, "meta.json"),
+      JSON.stringify({
+        hostId: "rh-someone-else",
+        pid: 1,
+        osSessionId: spec.osSessionId,
+        startedAt: new Date().toISOString(),
+        done: { type: "done", result: "not ours" },
+      } satisfies RunHostMeta),
+    );
+    handlers!.onClose();
+
+    const delivered: unknown[] = [];
+    for await (const event of events) delivered.push(event);
+    expect(delivered).toEqual([
+      {
+        type: "error",
+        content: "Run host process died unexpectedly and could not be resumed.",
+      },
+    ]);
+    expect(handle.takeObservedTerminal()).toBeUndefined();
+  });
+
+  test("offline receipt cleanup waits behind pending projections", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-pending-projection-test-"));
+    roots.push(root);
+    const hostId = "rh-pending-projection";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-pending-projection",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      {
+        alive: () => false,
+        newRunDir: (id) => join(root, id),
+        launch: async () => {},
+      },
+    );
+    writeFileSync(
+      join(dir, "meta.json"),
+      JSON.stringify({
+        hostId,
+        pid: 1,
+        osSessionId: spec.osSessionId,
+        startedAt: new Date().toISOString(),
+        done: { type: "done", result: "after projection" },
+      } satisfies RunHostMeta),
+    );
+    const gate = Promise.withResolvers<void>();
+    (handle as any).enqueueProjectionFrame(() => gate.promise);
+
+    const observed = handle.observeOfflineTerminal();
+    await Bun.sleep(20);
+    expect(handle.ended).toBe(false);
+    expect(hostRunBusy(hostId)).toBe(true);
+    expect(existsSync(dir)).toBe(true);
+
+    gate.resolve();
+    expect(await observed).toBe(true);
+    expect(handle.ended).toBe(true);
+    expect(hostRunBusy(hostId)).toBe(false);
+    await handle.whenFinalized();
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  test("offline receipt still closes after a failed projection", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-failed-projection-test-"));
+    roots.push(root);
+    const hostId = "rh-failed-projection";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-failed-projection",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      {
+        alive: () => false,
+        newRunDir: (id) => join(root, id),
+        launch: async () => {},
+      },
+    );
+    const events = handle.events();
+    writeFileSync(
+      join(dir, "meta.json"),
+      JSON.stringify({
+        hostId,
+        pid: 1,
+        osSessionId: spec.osSessionId,
+        startedAt: new Date().toISOString(),
+        done: { type: "done", result: "finished" },
+      } satisfies RunHostMeta),
+    );
+    (handle as any).enqueueProjectionFrame(() => {
+      throw new Error("projection rejected");
+    });
+
+    expect(await handle.observeOfflineTerminal()).toBe(true);
+    expect((await events.next()).value).toMatchObject({
+      type: "error",
+      content: "Run host projection failed: projection rejected",
+    });
+    expect((await events.next()).value).toMatchObject({
+      type: "done",
+      result: "finished",
+    });
+    expect((await events.next()).done).toBe(true);
+    await expect(handle.waitForPendingProjections()).rejects.toThrow(
+      "projection rejected",
+    );
+    expect(handle.ended).toBe(true);
+  });
+
+  test("terminal metadata does not finish a connected ended host before catch-up", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-catchup-fence-test-"));
+    roots.push(root);
+    const hostId = "rh-catchup-fence";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const kernelStore = new SessionKernelStore(join(root, "kernel.db"));
+    const previousKernel = __setSessionKernelStoreForTest(kernelStore);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-catchup-fence",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    registerTestRun(spec.osSessionId, spec.hostId);
+    const sent: unknown[] = [];
+    const launcher: HostLauncher = {
+      alive: () => true,
+      newRunDir: (id) => join(root, id),
+      launch: async () => {},
+      connector: () => ({
+        connect: async () => ({
+          send: (message) => {
+            sent.push(message);
+            return true;
+          },
+          close: () => {},
+        }),
+      }),
+    };
+    const handle = new HostHandle(dir, spec, {}, launcher);
+    try {
+      await handle.connectWithWait(100);
+      writeFileSync(
+        join(dir, "meta.json"),
+        JSON.stringify({
+          hostId,
+          pid: 1,
+          osSessionId: spec.osSessionId,
+          startedAt: new Date().toISOString(),
+          done: { type: "done", result: "finished while detached" },
+        } satisfies RunHostMeta),
+      );
+      (handle as any).handleMsg({
+        t: "hello",
+        hostId: spec.hostId,
+        pid: 1,
+        osSessionId: spec.osSessionId,
+        state: "ended",
+        pendingAsks: [],
+        done: { type: "done", result: "finished while detached" },
+      });
+
+      expect(await handle.observeOfflineTerminal()).toBe(false);
+      expect(handle.ended).toBe(false);
+      expect(sent).not.toContainEqual({ t: "shutdown" });
+
+      (handle as any).handleMsg({ t: "catchup_complete" });
+      await handle.waitForPendingProjections();
+      expect(handle.ended).toBe(true);
+      expect(sent).toContainEqual({ t: "shutdown" });
+    } finally {
+      (handle as any).finish();
+      __setSessionKernelStoreForTest(previousKernel);
+      kernelStore.close();
+    }
+  });
+
+  test("rejects offline evidence captured before a respawn replaced the host", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-evidence-respawn-test-"));
+    roots.push(root);
+    const oldDir = join(root, "rh-old");
+    mkdirSync(oldDir);
+    const spec: RunHostSpec = {
+      hostId: "rh-old",
+      osSessionId: "os-evidence-respawn",
+      prompt: "test",
+      cwd: "/tmp",
+      model: "model-a",
+      selectedModel: "model-a",
+    };
+    const kernelStore = new SessionKernelStore(join(root, "kernel.db"));
+    const previousKernel = __setSessionKernelStoreForTest(kernelStore);
+    registerTestRun(spec.osSessionId, spec.hostId);
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      writeSpec: async () => {},
+      launch: async () => {},
+      connector: (_dir, nextSpec) => ({
+        connect: async (handlers) => {
+          handlers.onMsg(hello(nextSpec, nextSpec.selectedModel!));
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(oldDir, spec, {}, launcher);
+    try {
+      writeFileSync(
+        join(oldDir, "meta.json"),
+        JSON.stringify({
+          hostId: spec.hostId,
+          pid: 1,
+          osSessionId: spec.osSessionId,
+          startedAt: new Date().toISOString(),
+          done: { type: "done", result: "stale receipt" },
+        } satisfies RunHostMeta),
+      );
+      const gate = Promise.withResolvers<void>();
+      (handle as any).enqueueProjectionFrame(() => gate.promise);
+      const observed = handle.observeOfflineTerminal();
+      await Bun.sleep(10);
+
+      // Ownership moves to a replacement host while the evidence is fenced.
+      await (handle as any).respawn("engine-1", null);
+      expect(handle.currentHostId).not.toBe(spec.hostId);
+      gate.resolve();
+
+      expect(await observed).toBe(false);
+      expect(handle.ended).toBe(false);
+      expect(hostRunBusy(spec.hostId)).toBe(true);
+      expect(handle.takeObservedTerminal()).toBeUndefined();
+    } finally {
+      (handle as any).finish();
+      __setSessionKernelStoreForTest(previousKernel);
+      kernelStore.close();
+    }
+  });
+
+  test("delivers one terminal and one cleanup across racing completions", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-terminal-race-test-"));
+    roots.push(root);
+    const hostId = "rh-terminal-race";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-terminal-race",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    let handlers: HostConnectionHandlers | undefined;
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      launch: async () => {},
+      connector: () => ({
+        connect: async (nextHandlers) => {
+          handlers = nextHandlers;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(dir, spec, {}, launcher);
+    await handle.connectWithWait(100);
+    writeFileSync(
+      join(dir, "meta.json"),
+      JSON.stringify({
+        hostId,
+        pid: 1,
+        osSessionId: spec.osSessionId,
+        startedAt: new Date().toISOString(),
+        done: { type: "done", result: "raced" },
+      } satisfies RunHostMeta),
+    );
+    const removals = spyOn(fsp, "rm");
+    try {
+      handlers!.onClose();
+      const observations = [
+        handle.observeOfflineTerminal(),
+        handle.observeOfflineTerminal(),
+      ];
+      handlers!.onMsg({ t: "end", done: { type: "done", result: "raced" } });
+      expect(await Promise.all(observations)).toEqual([true, true]);
+      expect(await handle.observeOfflineTerminal()).toBe(true);
+      const delivered: unknown[] = [];
+      for await (const event of handle.events()) delivered.push(event);
+      expect(delivered).toEqual([{ type: "done", result: "raced" }]);
+      await handle.whenFinalized();
+      expect(removals).toHaveBeenCalledTimes(1);
+      expect(existsSync(dir)).toBe(false);
+    } finally {
+      removals.mockRestore();
+    }
+  });
+
+  test("a cancel during a blocked spec export finishes once and launches nothing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-blocked-export-test-"));
+    roots.push(root);
+    const oldDir = join(root, "rh-export-old");
+    mkdirSync(oldDir);
+    const spec: RunHostSpec = {
+      hostId: "rh-export-old",
+      osSessionId: "os-blocked-export",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    const exportGate = Promise.withResolvers<void>();
+    const stops: string[] = [];
+    let launches = 0;
+    let exportedDir = "";
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      writeSpec: async (dir) => {
+        exportedDir = dir;
+        await exportGate.promise;
+      },
+      launch: async () => {
+        launches++;
+      },
+      stop: async (hostId) => {
+        stops.push(hostId);
+      },
+      connector: () => ({
+        connect: async () => ({ send: () => true, close: () => {} }),
+      }),
+    };
+    const handle = new HostHandle(oldDir, spec, {}, launcher, spec.hostId, 0);
+    const events = handle.events();
+    const respawn = (handle as any).respawn("engine-1") as Promise<void>;
+    await Bun.sleep(5);
+    // Ownership of the successor was reserved before the export started.
+    expect(handle.currentHostId).not.toBe(spec.hostId);
+    expect(hostRunBusy(spec.hostId)).toBe(true);
+
+    expect(handle.requestCancel()).toBe(true);
+    await Bun.sleep(5);
+    expect(handle.ended).toBe(true);
+    // The stop targeted the reserved successor, the only host that could
+    // exist from here on.
+    expect(stops).toEqual([handle.currentHostId]);
+
+    exportGate.resolve();
+    await expect(respawn).rejects.toThrow(
+      "respawn abandoned after spec export",
+    );
+    expect(launches).toBe(0);
+    expect(hostRunBusy(spec.hostId)).toBe(false);
+    expect(hostRunBusy(handle.currentHostId)).toBe(false);
+    expect((await events.next()).done).toBe(true);
+    await handle.whenFinalized();
+    expect(existsSync(exportedDir)).toBe(false);
+  });
+
+  test("a cancel during a blocked launch proves the successor absent", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-blocked-launch-test-"));
+    roots.push(root);
+    const oldDir = join(root, "rh-launch-old");
+    mkdirSync(oldDir);
+    const spec: RunHostSpec = {
+      hostId: "rh-launch-old",
+      osSessionId: "os-blocked-launch",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    const launchGate = Promise.withResolvers<void>();
+    const stops: string[] = [];
+    let connects = 0;
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      writeSpec: async () => {},
+      launch: async () => {
+        await launchGate.promise;
+      },
+      stop: async (hostId) => {
+        stops.push(hostId);
+      },
+      connector: () => ({
+        connect: async () => {
+          connects++;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(oldDir, spec, {}, launcher, spec.hostId, 0);
+    const respawn = (handle as any).respawn("engine-1") as Promise<void>;
+    await Bun.sleep(5);
+    const successor = handle.currentHostId;
+    expect(handle.requestCancel()).toBe(true);
+    await Bun.sleep(20);
+    // The dispatch is still in flight: nothing may be proven absent or
+    // finalized while the launch can still create the host.
+    expect(handle.ended).toBe(false);
+    expect(hostRunBusy(spec.osSessionId)).toBe(true);
+    expect(stops).toEqual([]);
+
+    launchGate.resolve();
+    await expect(respawn).rejects.toThrow("respawn abandoned after launch");
+    await Bun.sleep(5);
+    expect(handle.ended).toBe(true);
+    // Both the cancel backstop and the abandoned respawn proved the launched
+    // successor absent; neither attached to it.
+    expect(stops).toEqual([successor, successor]);
+    expect(connects).toBe(0);
+    expect(hostRunBusy(spec.osSessionId)).toBe(false);
+  });
+
+  test("a zero-grace stop during a blocked launch settles only after dispatch", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-blocked-launch-stop-test-"));
+    roots.push(root);
+    const oldDir = join(root, "rh-launch-stop-old");
+    mkdirSync(oldDir);
+    const spec: RunHostSpec = {
+      hostId: "rh-launch-stop-old",
+      osSessionId: "os-blocked-launch-stop",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    const launchGate = Promise.withResolvers<void>();
+    const stops: string[] = [];
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      writeSpec: async () => {},
+      launch: async () => {
+        await launchGate.promise;
+      },
+      stop: async (hostId) => {
+        stops.push(hostId);
+      },
+    };
+    const handle = new HostHandle(oldDir, spec, {}, launcher);
+    const respawn = (handle as any).respawn("engine-1") as Promise<void>;
+    await Bun.sleep(5);
+    const successor = handle.currentHostId;
+    let stopped: boolean | undefined;
+    const stopping = handle.stopAndWait(0, true).then((ok) => (stopped = ok));
+    await Bun.sleep(30);
+    expect(stopped).toBeUndefined();
+    expect(handle.ended).toBe(false);
+    expect(stops).toEqual([]);
+
+    launchGate.resolve();
+    await expect(respawn).rejects.toThrow("respawn abandoned after launch");
+    expect(await stopping).toBe(true);
+    expect(handle.ended).toBe(true);
+    expect(stops).toEqual([successor, successor]);
+    expect(hostRunBusy(spec.osSessionId)).toBe(false);
+    expect(hostRunBusy(spec.hostId)).toBe(false);
+  });
+
+  test("a rejected replacement launch still reports failure and closes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-rejected-launch-test-"));
+    roots.push(root);
+    const dir = join(root, "rh-rejected-launch");
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId: "rh-rejected-launch",
+      osSessionId: "os-rejected-launch",
+      prompt: "test",
+      cwd: "/tmp",
+      engineSessionId: "engine-rejected",
+    };
+    let handlers: HostConnectionHandlers | undefined;
+    let launches = 0;
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      writeSpec: async () => {},
+      launch: async () => {
+        launches++;
+        throw new Error("executor rejected the launch");
+      },
+      connector: () => ({
+        connect: async (nextHandlers) => {
+          handlers = nextHandlers;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    handlers!.onClose();
+
+    const delivered: unknown[] = [];
+    for await (const event of events) delivered.push(event);
+    expect(delivered).toEqual([
+      {
+        type: "error",
+        content: "Run host process died unexpectedly and could not be resumed.",
+      },
+    ]);
+    expect(launches).toBe(1);
+    expect(handle.ended).toBe(true);
+    expect(hostRunBusy(spec.hostId)).toBe(false);
+    expect(hostRunBusy(handle.currentHostId)).toBe(false);
+  });
+
+  test("an ambiguous replacement launch attaches to the replacement it reserved", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-ambiguous-launch-test-"));
+    roots.push(root);
+    const dir = join(root, "rh-ambiguous-launch");
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId: "rh-ambiguous-launch",
+      osSessionId: "os-ambiguous-launch",
+      prompt: "test",
+      cwd: "/tmp",
+      engineSessionId: "engine-ambiguous",
+    };
+    const connections = new Map<string, HostConnectionHandlers>();
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      writeSpec: async () => {},
+      launch: async () => {
+        throw new ExecutorProtocolError("dispatch outcome unknown", true);
+      },
+      connector: (_dir, nextSpec) => ({
+        connect: async (nextHandlers) => {
+          connections.set(nextSpec.hostId, nextHandlers);
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    connections.get(spec.hostId)!.onClose();
+    await Bun.sleep(40);
+
+    const replacement = handle.currentHostId;
+    expect(replacement).not.toBe(spec.hostId);
+    expect(connections.has(replacement)).toBe(true);
+    expect(handle.ended).toBe(false);
+    expect(hostRunBusy(spec.osSessionId)).toBe(true);
+
+    connections
+      .get(replacement)!
+      .onMsg({ t: "end", done: { type: "done", result: "resumed" } });
+    expect((await events.next()).value).toMatchObject({
+      type: "done",
+      result: "resumed",
+    });
+    expect((await events.next()).done).toBe(true);
+    expect(hostRunBusy(spec.osSessionId)).toBe(false);
+  });
+
+  test("refuses to respawn once a stop is in progress", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-stop-refuses-respawn-test-"));
+    roots.push(root);
+    const dir = join(root, "rh-stopping");
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId: "rh-stopping",
+      osSessionId: "os-stopping",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    const stopGate = Promise.withResolvers<void>();
+    let launches = 0;
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      writeSpec: async () => {},
+      launch: async () => {
+        launches++;
+      },
+      stop: async () => {
+        await stopGate.promise;
+      },
+    };
+    const handle = new HostHandle(dir, spec, {}, launcher, spec.hostId, 0);
+    const stopping = handle.stopAndWait(1, true);
+    await Bun.sleep(5);
+    await expect((handle as any).respawn("engine-1")).rejects.toThrow(
+      "respawn refused",
+    );
+    stopGate.resolve();
+    expect(await stopping).toBe(true);
+    expect(handle.ended).toBe(true);
+    expect(launches).toBe(0);
+    // preserveEvidence: abandoned, the run dir is kept for reconciliation.
+    expect(existsSync(dir)).toBe(true);
+  });
+
+  test("a dead host found during a blocked stop is not resumed or reported", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-blocked-stop-test-"));
+    roots.push(root);
+    const dir = join(root, "rh-blocked-stop");
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId: "rh-blocked-stop",
+      osSessionId: "os-blocked-stop",
+      prompt: "test",
+      cwd: "/tmp",
+      engineSessionId: "engine-blocked-stop",
+    };
+    const stopGate = Promise.withResolvers<void>();
+    const stops: string[] = [];
+    let handlers: HostConnectionHandlers | undefined;
+    let launches = 0;
+    const launcher: HostLauncher = {
+      alive: () => false,
+      newRunDir: (id) => join(root, id),
+      writeSpec: async () => {},
+      launch: async () => {
+        launches++;
+      },
+      stop: async (hostId) => {
+        stops.push(hostId);
+        await stopGate.promise;
+      },
+      connector: () => ({
+        connect: async (nextHandlers) => {
+          handlers = nextHandlers;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    handlers!.onClose();
+    const stopping = handle.stopAndWait(1, true);
+    // The disconnect loop finds the host dead while the stop is in flight.
+    await Bun.sleep(150);
+    expect(launches).toBe(0);
+    expect(handle.ended).toBe(false);
+    expect(stops).toEqual([spec.hostId]);
+
+    stopGate.resolve();
+    expect(await stopping).toBe(true);
+    expect(handle.ended).toBe(true);
+    const delivered: unknown[] = [];
+    for await (const event of events) delivered.push(event);
+    expect(delivered).toEqual([]);
+    expect(launches).toBe(0);
+  });
+
+  test("a stalled reconnect attempt neither wedges the loop nor is adopted late", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-stalled-connect-test-"));
+    roots.push(root);
+    const dir = join(root, "rh-stalled");
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId: "rh-stalled",
+      osSessionId: "os-stalled",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    const lateConnection = Promise.withResolvers<HostConnection>();
+    let lateHandlers: HostConnectionHandlers | undefined;
+    let liveHandlers: HostConnectionHandlers | undefined;
+    const closed: string[] = [];
+    const sent: Array<{ via: string; msg: unknown }> = [];
+    let connects = 0;
+    const launcher: HostLauncher = {
+      alive: () => true,
+      newRunDir: (id) => join(root, id),
+      launch: async () => {},
+      connector: () => ({
+        connect: async (handlers) => {
+          connects++;
+          if (connects === 1) {
+            liveHandlers = handlers;
+            return {
+              send: (msg) => {
+                sent.push({ via: "first", msg });
+                return true;
+              },
+              close: () => closed.push("first"),
+            };
+          }
+          if (connects === 2) {
+            // Never settles within the attempt budget.
+            lateHandlers = handlers;
+            return lateConnection.promise;
+          }
+          liveHandlers = handlers;
+          return {
+            send: (msg) => {
+              sent.push({ via: "third", msg });
+              return true;
+            },
+            close: () => closed.push("third"),
+          };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+      10,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    liveHandlers!.onClose();
+    // Attempt 2 stalls past its budget; attempt 3 must still happen.
+    await Bun.sleep(60);
+    expect(connects).toBe(3);
+    expect((handle as any).up).toBe(true);
+
+    // The stalled attempt settles late: closed, not adopted, callbacks dead.
+    lateConnection.resolve({
+      send: (msg) => {
+        sent.push({ via: "late", msg });
+        return true;
+      },
+      close: () => closed.push("late"),
+    });
+    await Bun.sleep(5);
+    expect(closed).toEqual(["late"]);
+    lateHandlers!.onMsg({ t: "end", done: { type: "done", result: "stale" } });
+    lateHandlers!.onClose();
+    expect(handle.ended).toBe(false);
+    expect((handle as any).up).toBe(true);
+
+    // The adopted connection still owns the fence.
+    liveHandlers!.onMsg({ t: "end", done: { type: "done", result: "live" } });
+    expect((await events.next()).value).toMatchObject({
+      type: "done",
+      result: "live",
+    });
+    expect(sent.filter((s) => s.via === "late")).toEqual([]);
+    expect(sent.find((s) => s.via === "third")?.msg).toEqual({ t: "shutdown" });
+  });
+
+  test("a connection closed while establishing is never adopted", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-closed-establishing-test-"));
+    roots.push(root);
+    const hostId = "rh-closed-establishing";
+    const dir = join(root, hostId);
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId,
+      osSessionId: "os-closed-establishing",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    let liveHandlers: HostConnectionHandlers | undefined;
+    const closed: string[] = [];
+    let alive = true;
+    let connects = 0;
+    const launcher: HostLauncher = {
+      alive: () => alive,
+      newRunDir: (id) => join(root, id),
+      launch: async () => {},
+      connector: () => ({
+        connect: async (handlers) => {
+          connects++;
+          if (connects === 1) {
+            liveHandlers = handlers;
+            return { send: () => true, close: () => closed.push("first") };
+          }
+          // The transport drops before the connect promise settles; the host
+          // then exits with its receipt.
+          handlers.onClose();
+          alive = false;
+          writeFileSync(
+            join(dir, "meta.json"),
+            JSON.stringify({
+              hostId,
+              pid: 1,
+              osSessionId: spec.osSessionId,
+              startedAt: new Date().toISOString(),
+              done: { type: "done", result: "after drop" },
+            } satisfies RunHostMeta),
+          );
+          return { send: () => true, close: () => closed.push("second") };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    liveHandlers!.onClose();
+
+    // The dead connection is closed, not adopted, so the disconnect loop keeps
+    // observing and finds the receipt of the now-absent host.
+    expect((await events.next()).value).toMatchObject({
+      type: "done",
+      result: "after drop",
+    });
+    expect((await events.next()).done).toBe(true);
+    expect(closed).toEqual(["second"]);
+    expect(connects).toBe(2);
+    expect((handle as any).up).toBe(false);
+    expect(hostRunBusy(hostId)).toBe(false);
+  });
+
+  test("late callbacks from a rejected connect attempt are ignored", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-rejected-connect-test-"));
+    roots.push(root);
+    const dir = join(root, "rh-rejected-connect");
+    mkdirSync(dir);
+    const spec: RunHostSpec = {
+      hostId: "rh-rejected-connect",
+      osSessionId: "os-rejected-connect",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    let liveHandlers: HostConnectionHandlers | undefined;
+    let rejectedHandlers: HostConnectionHandlers | undefined;
+    let connects = 0;
+    const launcher: HostLauncher = {
+      alive: () => true,
+      newRunDir: (id) => join(root, id),
+      launch: async () => {},
+      connector: () => ({
+        connect: async (handlers) => {
+          connects++;
+          if (connects === 2) {
+            rejectedHandlers = handlers;
+            throw new Error("transport refused");
+          }
+          liveHandlers = handlers;
+          return { send: () => true, close: () => {} };
+        },
+      }),
+    };
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {},
+      launcher,
+      spec.hostId,
+      5_000,
+      1,
+    );
+    await handle.connectWithWait(100);
+    const events = handle.events();
+    liveHandlers!.onClose();
+    await Bun.sleep(40);
+    expect(connects).toBe(3);
+    expect((handle as any).up).toBe(true);
+
+    // The rejected attempt's transport speaks up late: nothing listens.
+    rejectedHandlers!.onMsg({
+      t: "end",
+      done: { type: "done", result: "stale" },
+    });
+    rejectedHandlers!.onClose();
+    await Bun.sleep(20);
+    expect(handle.ended).toBe(false);
+    expect((handle as any).up).toBe(true);
+    expect(connects).toBe(3);
+
+    liveHandlers!.onMsg({ t: "end", done: { type: "done", result: "live" } });
+    expect((await events.next()).value).toMatchObject({
+      type: "done",
+      result: "live",
+    });
+    expect((await events.next()).done).toBe(true);
   });
 
   test("requires Linux, a booted systemd, systemctl, and sudo", () => {

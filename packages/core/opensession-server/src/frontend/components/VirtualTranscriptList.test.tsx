@@ -25,6 +25,24 @@ function item(index: number): VirtualTranscriptItem {
   };
 }
 
+/** Count every property read on each item: the diff can only compare rows by
+ * reading them, so zero reads means the scan did not run. */
+function counted(items: VirtualTranscriptItem[]) {
+  let reads = 0;
+  const wrapped = items.map(
+    (row) =>
+      new Proxy(row, {
+        get(target, property) {
+          reads++;
+          // SAFETY: the proxy forwards whichever field the diff reads from
+          // the same row; the fixture only declares item fields.
+          return target[property as keyof VirtualTranscriptItem];
+        },
+      }),
+  );
+  return { items: wrapped, reads: () => reads };
+}
+
 // The adapter's scrolling contract (the reader anchor captured before the DOM
 // mutates and settled as a delta, prepends and external growth included, one
 // writer per commit, touch deferral, rows that never glide) is asserted in a
@@ -182,6 +200,49 @@ describe("VirtualTranscriptList", () => {
     ]).toEqual(["block-0"]);
     expect(
       committedTranscriptMeasureKeys(before, [item(0), item(1)]).size,
+    ).toBe(0);
+  });
+
+  test("skips the measurement diff when the committed list is unchanged", () => {
+    const { items, reads } = counted([item(0), item(1), item(2)]);
+    // A scroll, resize, or nested measurement commit re-renders against the
+    // same immutable list: nothing to remeasure and no row is even read.
+    expect(committedTranscriptMeasureKeys(items, items).size).toBe(0);
+    expect(reads()).toBe(0);
+    // A new list is still diffed row by row.
+    expect(
+      committedTranscriptMeasureKeys(items, [...items, item(3)]).size,
+    ).toBe(1);
+    expect(reads()).toBeGreaterThan(0);
+  });
+
+  test("finds moved rows after a history prepend and an append", () => {
+    const before = [item(2), item(3)];
+    const extended = { ...item(3), entryIds: ["entry-3", "tool-result-3"] };
+    expect([
+      ...committedTranscriptMeasureKeys(before, [
+        item(0),
+        item(1),
+        item(2),
+        extended,
+        item(4),
+      ]),
+    ]).toEqual(["block-0", "block-1", "block-3", "block-4"]);
+    // Rows that only changed position are still matched by key.
+    expect(
+      committedTranscriptMeasureKeys(before, [item(3), item(2)]).size,
+    ).toBe(0);
+    expect(
+      committedTranscriptMeasureKeys(before, [item(2), item(3)]).size,
+    ).toBe(0);
+  });
+
+  test("leaves estimate-only rows out of the synchronous measurement", () => {
+    expect(
+      committedTranscriptMeasureKeys(
+        [item(0)],
+        [item(0), { ...item(1), measure: false }],
+      ).size,
     ).toBe(0);
   });
 

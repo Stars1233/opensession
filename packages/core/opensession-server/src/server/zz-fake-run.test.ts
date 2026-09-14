@@ -138,6 +138,56 @@ async function waitForLastRunError(id: string): Promise<{ message: string }> {
 }
 
 describe("fake-engine session runs (consumer loop end-to-end)", () => {
+  test("recovery exports rotated engine identity before announcing idle", async () => {
+    if (!redirected) return;
+    const sid = "bks-zz-recovered-identity";
+    writeSessionFile(sid);
+    sessionCache.invalidateSessionsCache();
+    await runSession.recordRecoveredRunEvent(sid, {
+      type: "init",
+      provider: "pi",
+      sessionId: "ses_recovered_initial",
+    });
+    expect(sessionJson(sid).piSessionId).toBe("ses_recovered_initial");
+
+    const { onSessionStateChange } = await import("./session-state-events");
+    const idleEngineIds: string[] = [];
+    const unsubscribe = onSessionStateChange((event) => {
+      if (event.sessionId === sid && !event.isRunning)
+        idleEngineIds.push(sessionJson(sid).piSessionId);
+    });
+    try {
+      await runSession.recordRecoveredRunEvent(sid, {
+        type: "done",
+        provider: "pi",
+        sessionId: "ses_recovered_rotated",
+        result: "completed",
+      });
+      expect(idleEngineIds.length).toBeGreaterThan(0);
+      expect(idleEngineIds.every((id) => id === "ses_recovered_rotated")).toBe(
+        true,
+      );
+      expect(sessionJson(sid).piSessionId).toBe("ses_recovered_rotated");
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  test("recovery awaits automatic model selection persistence", async () => {
+    if (!redirected) return;
+    const sid = "bks-zz-recovered-model";
+    writeSessionFile(sid, { model: "pi/openai/gpt-5.6-sol" });
+    sessionCache.invalidateSessionsCache();
+    await runSession.recordRecoveredRunEvent(sid, {
+      type: "model_switch",
+      fromModel: "pi/openai/gpt-5.6-sol",
+      toModel: "pi/openai/gpt-6-astra",
+      switchReason: "out of credits",
+    });
+    expect(sessionJson(sid).model).toBe("pi/openai/gpt-6-astra");
+    expect(sessionJson(sid).autoFallbackModel).toBe("pi/openai/gpt-5.6-sol");
+  });
+
   test("clean run: engine id + usage persisted, FSM idle, settled", async () => {
     if (!redirected) return;
     const sid = "bks-zz-clean";

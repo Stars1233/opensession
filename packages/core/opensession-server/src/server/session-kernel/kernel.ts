@@ -15,9 +15,10 @@ import {
   type SessionActorEffectFor,
   type SessionActorEffectKind,
 } from "./lifecycle-protocol";
-import type {
-  DeliveryActorRequest,
-  DeliveryActorResult,
+import {
+  deliveryProjectionEffect,
+  type DeliveryActorRequest,
+  type DeliveryActorResult,
 } from "./delivery-protocol";
 import type { TurnActorRequest, TurnActorResult } from "./turn-protocol";
 import type { TimerActorRequest, TimerActorResult } from "./timer-protocol";
@@ -480,7 +481,12 @@ export async function sessionDelivery<T extends DeliveryActorRequest>(
             : { dispatch: value }),
       } as DurableDeliveryState);
     }
-  } else if ("sessionId" in request) {
+  } else if (
+    "sessionId" in request &&
+    // A submit receipt changes only the command journal; the cached delivery
+    // projection is still exact, so no snapshot round trip is owed.
+    deliveryProjectionEffect(request) === "session"
+  ) {
     try {
       const snapshot = actor
         ? await actor.decideDeliveryAsync({

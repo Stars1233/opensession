@@ -6,16 +6,18 @@ import {
 import {
   SESSION_KERNEL_ACTOR_VERSION,
   SESSION_KERNEL_MAX_RESPONSE_BYTES,
+  boundCallResult,
   isCriticalSettlementCommand,
   type KernelActorAsyncRequest,
+  type KernelActorCallResult,
   type KernelActorClientCallRequest,
   type KernelActorServiceCall,
   type KernelActorResponse,
 } from "./actor-protocol";
-import { isDeliveryReadRequest } from "./delivery-protocol";
+import { deliveryProjectionEffect } from "./delivery-protocol";
 import type { SessionActorReducerCommand } from "./lifecycle-protocol";
 import { isReadReducer, sessionActorReducerRoute } from "./actor-routing";
-import { READ_METHODS, sessionKernelStoreRoute } from "./store-routing";
+import { sessionKernelStoreRoute } from "./store-routing";
 import { assertTranscriptActorRequest } from "./transcript-protocol";
 import { assertMetadataActorRequest } from "./metadata-protocol";
 import { assertCatalogDocumentRequest } from "./catalog-document-protocol";
@@ -42,12 +44,19 @@ function reducerSessionId(
   return undefined;
 }
 
+/**
+ * Whether a reducer changes what the central sparse projection mirrors. This is
+ * narrower than "not a read": a submit receipt mutates the durable command
+ * journal, so it still marks the session for a runtime wake and is fenced by
+ * quarantine, but it leaves the ask and delivery rows untouched and owes no
+ * projection refresh.
+ */
 function reducerMutatesSparseProjection(
   command: SessionActorReducerCommand,
 ): boolean {
   if (command.kind === "ask") return !isReadReducer(command);
   if (command.kind === "delivery")
-    return !isDeliveryReadRequest(command.request);
+    return deliveryProjectionEffect(command.request) === "session";
   return (
     command.kind === "core" &&
     (command.request.op === "clear" || command.request.op === "tombstone")
@@ -78,10 +87,10 @@ export function startSessionKernelActorWorker(): void {
     self.postMessage({ ...message, workerMetrics: host.metrics() });
   }
 
+  /** Executes the call exactly once and bounds its encoded result. */
   function executeCall(
     request: KernelActorServiceCall["request"],
-    outputBytes: number,
-  ): { status: -1 | 1 | 2; length: number; body: string } {
+  ): KernelActorCallResult {
     let store = host.central;
     let requestSessionId: string | undefined;
     try {
@@ -209,18 +218,14 @@ export function startSessionKernelActorWorker(): void {
               delivery.sessionId,
               delivery.promptEntryId,
             );
-          if (!isDeliveryReadRequest(delivery) && "sessionId" in delivery)
+          const effect = deliveryProjectionEffect(delivery);
+          if (effect === "session" && "sessionId" in delivery) {
             host.refreshSessionProjections(delivery.sessionId);
-          if (!isDeliveryReadRequest(delivery))
             result = {
               result,
-              ...("sessionId" in delivery
-                ? {
-                    revision: store.deliverySnapshot(delivery.sessionId)
-                      .revision,
-                  }
-                : {}),
+              revision: store.deliverySnapshot(delivery.sessionId).revision,
             };
+          } else if (effect !== "read") result = { result };
         } else if (command.kind === "gateway") {
           const gateway = command.request;
           if (gateway.op === "request")
@@ -409,9 +414,7 @@ export function startSessionKernelActorWorker(): void {
         }
         result = host.call(request.method, request.args);
       }
-      const body = JSON.stringify({ ok: true, result });
-      const length = Buffer.byteLength(body);
-      return { status: length > outputBytes ? 2 : 1, length, body };
+      return boundCallResult(JSON.stringify({ ok: true, result }), true);
     } catch (error) {
       host.recordSqliteBusy(error);
       let failStop = false;
@@ -486,36 +489,12 @@ export function startSessionKernelActorWorker(): void {
         ...(responseSessionId ? { sessionId: responseSessionId } : {}),
       });
       if (failStop) queueMicrotask(() => self.close());
-      return { status: -1, length: Buffer.byteLength(body), body };
+      return boundCallResult(body, false);
     }
   }
 
   function asyncCall(request: KernelActorClientCallRequest): void {
-    const retryableRead =
-      request.t === "reduce"
-        ? isReadReducer(request.command)
-        : READ_METHODS.has(request.method);
-    let outputBytes = 256 * 1024;
-    for (;;) {
-      const result = executeCall(request, outputBytes);
-      if (
-        result.status === 2 &&
-        retryableRead &&
-        result.length > outputBytes &&
-        result.length <= SESSION_KERNEL_MAX_RESPONSE_BYTES
-      ) {
-        outputBytes = result.length;
-        continue;
-      }
-      post({
-        t: "call_result",
-        rpcId: request.rpcId,
-        status: result.status === 2 && !retryableRead ? 1 : result.status,
-        length: result.length,
-        ...(result.status === 2 && retryableRead ? {} : { body: result.body }),
-      });
-      return;
-    }
+    post({ t: "call_result", rpcId: request.rpcId, ...executeCall(request) });
   }
 
   function serviceCall(request: KernelActorServiceCall): void {
@@ -528,17 +507,10 @@ export function startSessionKernelActorWorker(): void {
       });
       return;
     }
-    const retryableRead =
-      request.request.t === "reduce"
-        ? isReadReducer(request.request.command)
-        : READ_METHODS.has(request.request.method);
-    const result = executeCall(request.request, outputBytes);
     post({
       t: "call_result",
       rpcId: request.rpcId,
-      status: result.status === 2 && !retryableRead ? 1 : result.status,
-      length: result.length,
-      ...(result.status === 2 && retryableRead ? {} : { body: result.body }),
+      ...executeCall(request.request),
     });
   }
 

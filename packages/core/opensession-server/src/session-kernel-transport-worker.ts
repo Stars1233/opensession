@@ -1,6 +1,7 @@
 import {
   SESSION_KERNEL_ACTOR_VERSION,
   SESSION_KERNEL_MAX_REQUEST_BYTES,
+  SESSION_KERNEL_MAX_RESPONSE_BYTES,
   SESSION_KERNEL_MAX_TRANSPORT_REQUESTS,
   SESSION_KERNEL_TRANSPORT_VERSION,
   type KernelActorAsyncRequest,
@@ -10,8 +11,6 @@ import {
   type KernelActorServiceResponse,
   type KernelActorTransportEnvelope,
 } from "./server/session-kernel/actor-protocol";
-import { isReadReducer } from "./server/session-kernel/actor-routing";
-import { READ_METHODS } from "./server/session-kernel/store-routing";
 import {
   readSessionKernelCredential,
   sessionKernelServiceUrl,
@@ -161,28 +160,26 @@ async function rpc(
   }
 }
 
-const ASYNC_DEFAULT_OUTPUT_BYTES = 8 * 1024 * 1024;
-const ASYNC_MAX_OUTPUT_BYTES = 128 * 1024 * 1024;
-
 self.onmessage = (event: MessageEvent<KernelActorClientRequest>) => {
   const request = event.data;
   if (request.t === "store" || request.t === "reduce") {
     // Every gateway call carries an rpcId and settles asynchronously.
     if ("rpcId" in request) {
       const rpcId = request.rpcId;
-      const buildCall = (outputBytes: number): KernelActorServiceCall => ({
+      // One exchange per call. The actor executes the work exactly once and
+      // answers under the hard response bound, so an oversized result is a
+      // definitive failure body rather than a reason to repeat the query.
+      const call: KernelActorServiceCall = {
         t: "call",
         rpcId,
-        outputBytes,
+        outputBytes: SESSION_KERNEL_MAX_RESPONSE_BYTES,
         request:
           request.t === "store"
             ? { t: "store", method: request.method, args: request.args }
             : { t: "reduce", command: request.command },
-      });
-      void (async () => {
-        let outputBytes = ASYNC_DEFAULT_OUTPUT_BYTES;
-        for (;;) {
-          const response = await rpc(buildCall(outputBytes));
+      };
+      void rpc(call)
+        .then((response) => {
           if (response.t !== "call_result") {
             self.postMessage({
               t: "error",
@@ -191,36 +188,19 @@ self.onmessage = (event: MessageEvent<KernelActorClientRequest>) => {
             } satisfies KernelActorAsyncResponse);
             return;
           }
-          const retryableRead =
-            request.t === "reduce"
-              ? isReadReducer(request.command)
-              : READ_METHODS.has(request.method);
-          if (
-            retryableRead &&
-            response.status === 2 &&
-            typeof response.length === "number" &&
-            response.length > outputBytes &&
-            response.length <= ASYNC_MAX_OUTPUT_BYTES
-          ) {
-            // Exactly-sized retry for provable reads. A mutation may already
-            // have committed before its encoded response overflowed.
-            outputBytes = response.length;
-            continue;
-          }
           self.postMessage(response);
-          return;
-        }
-      })().catch((error: unknown) => {
-        self.postMessage({
-          t: "error",
-          rpcId,
-          error: error instanceof Error ? error.message : String(error),
-          retryable:
-            !!error &&
-            typeof error === "object" &&
-            (error as { retryable?: boolean }).retryable === true,
+        })
+        .catch((error: unknown) => {
+          self.postMessage({
+            t: "error",
+            rpcId,
+            error: error instanceof Error ? error.message : String(error),
+            retryable:
+              !!error &&
+              typeof error === "object" &&
+              (error as { retryable?: boolean }).retryable === true,
+          });
         });
-      });
       return;
     }
   }

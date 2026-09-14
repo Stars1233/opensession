@@ -138,6 +138,62 @@ export function isDeliveryReadRequest(
   return request.op === "snapshot" || request.op === "entries";
 }
 
+/**
+ * What a delivery operation changes in the sparse projection, as distinct from
+ * whether it reads or writes the actor store.
+ *
+ * - `read`: no durable change.
+ * - `receipt`: only the durable command journal changes. The session's
+ *   delivery row, its revision and the central sparse projection are
+ *   untouched, so no projection refresh or snapshot is owed.
+ * - `session`: the named session's delivery row changes; refresh its sparse
+ *   projection and report the new revision.
+ * - `global`: every session's delivery row may change; the host refreshes
+ *   each affected projection itself.
+ */
+export type DeliveryProjectionEffect =
+  | "read"
+  | "receipt"
+  | "session"
+  | "global";
+
+export function deliveryProjectionEffect(
+  request: DeliveryActorRequest,
+): DeliveryProjectionEffect {
+  switch (request.op) {
+    case "snapshot":
+    case "entries":
+      return "read";
+    case "request_submit_command":
+    case "complete_submit_command":
+    case "fail_submit_command":
+      return "receipt";
+    case "set":
+    case "enqueue":
+    case "promote_queued":
+    case "delete":
+    case "prepare_steer":
+    case "accept_steer":
+    case "reject_steer":
+    case "requeue_steers":
+    case "prepare_interrupt":
+    case "begin_interrupt_effect":
+    case "settle_interrupt":
+    case "claim_next_dispatch":
+    case "claim_dispatch":
+    case "ack_dispatch":
+    case "fail_dispatch":
+      return "session";
+    case "clear_slot":
+    case "settle_pending_steers":
+      return "global";
+    default: {
+      const exhaustive: never = request;
+      return exhaustive;
+    }
+  }
+}
+
 export type DeliveryActorResult<T extends DeliveryActorRequest> = T extends {
   op: "snapshot";
 }

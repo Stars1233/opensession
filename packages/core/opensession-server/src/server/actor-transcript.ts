@@ -4,6 +4,7 @@ import type {
 } from "./session-kernel/transcript-protocol";
 import type { TranscriptEntry } from "./types";
 import { publishTranscript } from "./transcript-bus";
+import { createTranscriptWakeDrainer } from "./transcript-wake-drain";
 import { v2SnapshotEntryWeight } from "./transcript-wire";
 import {
   notifyTranscriptAppendHook,
@@ -48,56 +49,25 @@ async function callTranscript<T extends TranscriptActorRequest>(
   ) as import("./session-kernel").TranscriptActorResult<T>;
 }
 
-async function reconcilePendingWake(
-  sessionId: string,
-  minimumCursor = 0,
-): Promise<void> {
-  const wake = await callTranscript({ op: "pending_wake", sessionId });
-  if (!wake || wake.cursor < minimumCursor) return;
-  const reset = wake.resetEpoch > wake.ackedResetEpoch;
-  let changeSeq = Math.max(0, wake.firstChangeSeq - 1);
-  let published = false;
-  while (changeSeq < wake.lastChangeSeq) {
-    const page = await callTranscript({
-      op: "changes_since",
-      sessionId,
-      changeSeq,
-      limit: 200,
-    });
-    if (page.entries.length === 0) break;
-    publishTranscript(sessionId, {
-      entries: page.entries,
-      firstSeq: page.firstSeq,
-      lastSeq: page.lastSeq,
-      ...(reset && !published ? { reset: true } : {}),
-    });
-    notifyTranscriptAppendHook(sessionId, page.entries);
-    published = true;
-    const next = Math.max(...page.entries.map((entry) => entry.changeSeq ?? 0));
-    if (next <= changeSeq) break;
-    changeSeq = next;
-  }
-  if (!published)
-    publishTranscript(sessionId, {
-      entries: [],
-      firstSeq: 0,
-      lastSeq: 0,
-      ...(reset ? { reset: true } : {}),
-    });
-  await callTranscript({ op: "ack_wake", sessionId, cursor: wake.cursor });
-}
+/** One in-flight drain per canonical session: overlapping mutation replies
+ * and startup passes share a single pending read, publication and ack. The
+ * durable wake row stays the only authority; see transcript-wake-drain.ts. */
+const wakeDrainer = createTranscriptWakeDrainer({
+  pendingWake: (sessionId) => callTranscript({ op: "pending_wake", sessionId }),
+  changesSince: (sessionId, changeSeq) =>
+    callTranscript({ op: "changes_since", sessionId, changeSeq, limit: 200 }),
+  ackWake: (sessionId, cursor) =>
+    callTranscript({ op: "ack_wake", sessionId, cursor }),
+  publish: publishTranscript,
+  appendHook: notifyTranscriptAppendHook,
+});
 
 export async function drainPendingTranscriptWakesForSessions(
   sessionIds: Iterable<string>,
 ): Promise<number> {
   let drained = 0;
-  for (const sessionId of sessionIds) {
-    const pending = await callTranscript({ op: "pending_wake", sessionId });
-    if (pending) {
-      await reconcilePendingWake(sessionId, pending.cursor);
-      drained++;
-    }
-  }
+  for (const sessionId of sessionIds)
+    if (await wakeDrainer.require(sessionId, 0)) drained++;
   return drained;
 }
 
@@ -136,7 +106,7 @@ async function mutate<T>(
   const mutation = (await callTranscript(
     request,
   )) as TranscriptMutationResult<T>;
-  await reconcilePendingWake(request.sessionId, mutation.wakeCursor);
+  await wakeDrainer.require(request.sessionId, mutation.wakeCursor);
   return mutation.result;
 }
 
@@ -261,7 +231,7 @@ export async function importLegacyTranscript(
     finalMutation = mutation;
   }
   if (finalMutation)
-    await reconcilePendingWake(sessionId, finalMutation.wakeCursor);
+    await wakeDrainer.require(sessionId, finalMutation.wakeCursor);
   return { inserted, updated };
 }
 

@@ -33,7 +33,8 @@ import {
   isRetryableSessionCommandError,
   sessionKernel,
 } from "./session-kernel";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { access, mkdir, readFile, rm } from "fs/promises";
 import {
   runAgent,
   recoveryKind,
@@ -58,7 +59,7 @@ import { sameProcess } from "./process-identity";
 import type { GitIdentity } from "./shared/user-mappings";
 import { modelSupportsSteer, providerFor } from "./models";
 import { OPENSESSION_SESSIONS_DIR } from "./paths";
-import { writeJsonAtomic } from "./shared/atomic-write";
+import { writeJsonAtomicAsync } from "./shared/atomic-write";
 import {
   registerHostRun,
   addHostRunKey,
@@ -102,6 +103,13 @@ const HOSTED_KERNEL_RETRY_DELAY_MS = 10_100;
 // immediately after an ended hello. Keep that rolling-deploy path open long
 // enough to consume the local replay instead of closing on the hello itself.
 const ENDED_HELLO_CATCHUP_FALLBACK_MS = 2_000;
+// Disconnected handles poll the host at this cadence: one metadata read, one
+// liveness check, one reconnect attempt per iteration.
+const HOST_RECONNECT_DELAY_MS = 2_000;
+// A single connect attempt is abandoned after this long: a transport whose
+// connect promise never settles must not wedge the reconnect loops. A late
+// success is closed, never adopted.
+const CONNECT_ATTEMPT_TIMEOUT_MS = 5_000;
 
 export async function retryHostedKernelCall<T>(
   call: () => T | Promise<T>,
@@ -593,7 +601,14 @@ async function spawnHostRun(
 ): Promise<{ handle: HostHandle; spec: RunHostSpec }> {
   const hostId = opts.startToken || `rh-${Bun.randomUUIDv7()}`;
   const dir = `${HOSTS_DIR}/${hostId}`;
-  mkdirSync(dir, { recursive: true });
+  // Reserve the run key before the first await (see activeHostedRunKeys).
+  if (lifecycle === "session") activeHostedRunKeys.add(hostId);
+  try {
+    await mkdir(dir, { recursive: true });
+  } catch (error) {
+    if (lifecycle === "session") activeHostedRunKeys.delete(hostId);
+    throw error;
+  }
 
   const rpcToken = opts.proxyMcpServers?.length
     ? crypto.randomUUID()
@@ -641,7 +656,12 @@ async function spawnHostRun(
     resumeAttempts: opts.resumeAttempts,
     lastResumeAt: opts.lastResumeAt,
   };
-  writeJsonAtomic(`${dir}/${HOST_SPEC_NAME}`, spec);
+  try {
+    await writeJsonAtomicAsync(`${dir}/${HOST_SPEC_NAME}`, spec);
+  } catch (error) {
+    if (lifecycle === "session") activeHostedRunKeys.delete(hostId);
+    throw error;
+  }
   if (rpcToken)
     registerRunToken(rpcToken, {
       sessionId: opts.osSessionId,
@@ -651,10 +671,10 @@ async function spawnHostRun(
 
   let handle: HostHandle | undefined;
   let launchCompleted = false;
-  // Session-owned hosts enter the shared recovery journal. Auxiliary workers
-  // are owned by their caller's workflow journal instead: registering them as
-  // the parent session's physical run would race its real run generation.
-  if (lifecycle === "session") activeHostedRunKeys.add(hostId);
+  // Session-owned hosts enter the shared recovery journal (the key was
+  // reserved above). Auxiliary workers are owned by their caller's workflow
+  // journal instead: registering them as the parent session's physical run
+  // would race its real run generation.
   try {
     if (lifecycle === "session") {
       // Persist before launch. If opensession restarts between systemd-run and
@@ -703,9 +723,7 @@ async function spawnHostRun(
       handle?.abandon();
       if (lifecycle === "session") journalClear(spec.hostId);
       unregisterRunToken(rpcToken);
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {}
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
     }
     throw error;
   }
@@ -742,7 +760,7 @@ async function stopAndVerifyHostAbsent(
   const deadline = Date.now() + 10_000;
   do {
     try {
-      const meta = readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
+      const meta = await readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
       let processAlive = false;
       if (meta?.pid) {
         const matches = sameProcess(meta);
@@ -854,13 +872,15 @@ export interface HostConnector {
 }
 
 /** The default transport: opensession dials the host's unix socket. Behavior is
- *  identical to the pre-seam inline code — the existsSync guard preserves the
- *  old "poll for the socket file" cadence, and open/close/error map 1:1. */
+ *  identical to the pre-seam inline code — the socket-presence guard preserves
+ *  the old "poll for the socket file" cadence, and open/close/error map 1:1. */
 function unixSocketConnector(sockPath: string): HostConnector {
   return {
-    connect(handlers: HostConnectionHandlers): Promise<HostConnection> {
-      if (!existsSync(sockPath)) {
-        return Promise.reject(new Error(`socket ${sockPath} not present yet`));
+    async connect(handlers: HostConnectionHandlers): Promise<HostConnection> {
+      try {
+        await access(sockPath);
+      } catch {
+        throw new Error(`socket ${sockPath} not present yet`);
       }
       return new Promise((resolve, reject) => {
         let settled = false;
@@ -913,8 +933,8 @@ function unixSocketConnector(sockPath: string): HostConnector {
 
 /** Default launcher: transient systemd units on this host. */
 const systemdHostLauncher: HostLauncher = {
-  alive(dir) {
-    const meta = readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
+  async alive(dir, meta) {
+    meta ??= await readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
     if (!meta?.pid) return false;
     const matches = sameProcess(meta);
     if (matches !== undefined) return matches;
@@ -928,9 +948,9 @@ const systemdHostLauncher: HostLauncher = {
   newRunDir: (hostId) => `${HOSTS_DIR}/${hostId}`,
   launch: launchHostUnit,
   stop: stopAndVerifyHostAbsent,
-  evidence(dir) {
-    const meta = readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
-    const privateRun = readHostJournal(dir);
+  async evidence(dir) {
+    const meta = await readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
+    const privateRun = await readHostJournal(dir);
     return {
       started: !!meta?.pid || !!privateRun,
       ...(meta?.engineSessionId
@@ -977,6 +997,15 @@ class AsyncEventQueue {
   }
 }
 
+interface HostObservation {
+  /** The handle ended (from this observation or any earlier path). */
+  ended: boolean;
+  /** The host still lives (or a live connection owns the fence). */
+  alive: boolean;
+  /** For an absent host: its identity-checked metadata, if any. */
+  meta: RunHostMeta | null;
+}
+
 export interface HandleCallbacks {
   onAskUser?: RunAgentOpts["onAskUser"];
   onEngineSession?: (engineSessionId: string) => void;
@@ -1010,7 +1039,19 @@ export class HostHandle {
    * lets the new gateway rewrite it to the already-visible prompt entry id. */
   private pendingSteerTranscripts: Array<{ id: string; text: string }> = [];
   private respawns = 0;
+  /** Bumped by every respawn. Evidence read against an older generation is
+   *  about a host this handle no longer owns and is rejected. */
+  private hostGeneration = 0;
+  /** Latest connect attempt; older attempts that settle late are obsolete. */
+  private connectAttempt = 0;
+  private terminalObservation?: Promise<HostObservation>;
+  private readonly finalized = Promise.withResolvers<void>();
   private stopRequested = false;
+  /** A stopAndWait is proving the host absent; no successor may be launched. */
+  private stopping = false;
+  /** A respawn's `launcher.launch` that has started and not yet settled. A
+   *  stop must not report the host absent while this can still create it. */
+  private dispatching?: Promise<void>;
   private cancelledCompletion = false;
   private projectionTail: Promise<void> | undefined;
   private projectionFailure: unknown;
@@ -1025,6 +1066,8 @@ export class HostHandle {
     private launcher: HostLauncher = systemdHostLauncher,
     private readonly logicalRunId: string = spec.hostId,
     private readonly cancelGraceMs = 5_000,
+    private readonly reconnectDelayMs = HOST_RECONNECT_DELAY_MS,
+    private readonly connectAttemptTimeoutMs = CONNECT_ATTEMPT_TIMEOUT_MS,
   ) {
     this.connector =
       launcher.connector?.(dir, spec) ??
@@ -1037,7 +1080,7 @@ export class HostHandle {
       osSessionId: spec.osSessionId,
       steerable: modelSupportsSteer(spec.model),
       connected: () => this.up,
-      reconcileTerminal: () => this.reconcileTerminalEvidence(),
+      ended: () => this.endedClean,
 
       steer: (text, images, steerId) => {
         const sent = this.send({ t: "steer", text, images, steerId });
@@ -1085,20 +1128,121 @@ export class HostHandle {
     return terminal;
   }
 
-  /** Reconcile a terminal receipt that may have landed after the socket was
-   * lost. Registry busy/steer checks call this synchronously so a completed
-   * detached owner cannot remain steerable until another gateway restart. */
-  reconcileTerminalEvidence(): boolean {
-    if (this.endedClean) return true;
-    const meta = readJsonSafe<RunHostMeta>(`${this.dir}/${HOST_META_NAME}`);
-    if (!meta?.done) return false;
-    if (!this.sawTerminal) {
-      this.sawTerminal = true;
-      this.terminalEvent = meta.done;
-      this.queue.push(meta.done);
+  /** Resolves once the handle finished or was abandoned and its run-dir
+   *  cleanup (if any) settled. */
+  whenFinalized(): Promise<void> {
+    return this.finalized.promise;
+  }
+
+  /**
+   * Observe a terminal receipt the host left in meta.json after the live
+   * socket was lost, and finish the handle from it. Resolves true once the
+   * handle has ended (from this receipt or any earlier path). This is the
+   * same observation the disconnect loop runs each iteration, so a host that
+   * finishes while detached is noticed without any caller asking; there is no
+   * second, differently-authorized completion path. Registry busy/steer
+   * checks never call this: they read cached state only.
+   */
+  async observeOfflineTerminal(): Promise<boolean> {
+    return (await this.observeHost()).ended;
+  }
+
+  /**
+   * One fenced observation of the owned host: a metadata read feeding the
+   * liveness check, and only for a positively absent host a fresh read of the
+   * receipt it may have written while exiting, accepted through the
+   * projection-serialized finalization. A live host is never completed from
+   * disk (its connected catch-up is the only fence) and a live connection
+   * owns the terminal fence outright. Deduped: concurrent callers share one
+   * in-flight observation.
+   */
+  private observeHost(): Promise<HostObservation> {
+    if (this.endedClean)
+      return Promise.resolve({ ended: true, alive: false, meta: null });
+    if (!this.terminalObservation) {
+      const owned = this.captureOwnership();
+      const moved = () => this.endedClean || this.ownershipMoved(owned);
+      const observation: Promise<HostObservation> = (async () => {
+        const standDown = (): HostObservation => ({
+          ended: this.endedClean,
+          alive: true,
+          meta: null,
+        });
+        if (this.up) return standDown();
+        const probe = await this.readMeta();
+        if (moved()) return standDown();
+        const alive = await this.launcher.alive(this.dir, probe);
+        if (moved()) return standDown();
+        if (alive) return { ended: false, alive: true, meta: null };
+        // Positively absent. Re-read: the receipt may have landed between the
+        // probe and the liveness check. Metadata about another host id is not
+        // evidence about this one.
+        let meta = await this.readMeta();
+        if (moved()) return standDown();
+        if (meta?.hostId && meta.hostId !== owned.hostId) meta = null;
+        const ended = await this.acceptOfflineTerminal(meta, owned);
+        return { ended, alive: false, meta };
+      })().finally(() => {
+        if (this.terminalObservation === observation)
+          this.terminalObservation = undefined;
+      });
+      this.terminalObservation = observation;
     }
-    this.finish();
-    return true;
+    return this.terminalObservation;
+  }
+
+  private captureOwnership(): { hostId: string; generation: number } {
+    return { hostId: this.ctl.hostId, generation: this.hostGeneration };
+  }
+
+  /** True when evidence captured under `owned` no longer describes the host
+   *  this handle drives, or a live connection took over meanwhile. */
+  private ownershipMoved(owned: { hostId: string; generation: number }) {
+    return (
+      this.up ||
+      this.hostGeneration !== owned.generation ||
+      this.ctl.hostId !== owned.hostId
+    );
+  }
+
+  private readMeta(): Promise<RunHostMeta | null> {
+    return readJsonSafe<RunHostMeta>(`${this.dir}/${HOST_META_NAME}`);
+  }
+
+  private acceptTerminal(done: StreamEvent): void {
+    if (this.sawTerminal) return;
+    this.sawTerminal = true;
+    this.terminalEvent = done;
+    this.queue.push(done);
+  }
+
+  /**
+   * Finish from an offline terminal receipt. Terminal metadata proves the host
+   * finished, not that every projection it forwarded landed: finalization is
+   * serialized behind the transcript frames already accepted, and still runs
+   * after a projection failure so the stream closes (the failure was already
+   * reported as an error event). Evidence about a replaced host or one whose
+   * connection came back meanwhile is rejected.
+   */
+  private async acceptOfflineTerminal(
+    meta: RunHostMeta | null,
+    owned: { hostId: string; generation: number },
+  ): Promise<boolean> {
+    if (this.endedClean) return true;
+    const done = meta?.done;
+    if (!done) return false;
+    if (this.ownershipMoved(owned)) return false;
+    if (meta.hostId && meta.hostId !== owned.hostId) return false;
+    await new Promise<void>((resolve) =>
+      this.enqueueProjectionFrame(() => {
+        if (!this.endedClean && !this.ownershipMoved(owned)) {
+          this.acceptTerminal(done);
+          this.finish();
+        }
+        resolve();
+      }, true),
+    );
+    return this.endedClean;
   }
 
   /** The host id currently serving this run (respawn mints a fresh one). */
@@ -1134,7 +1278,7 @@ export class HostHandle {
 
   async executionEvidence(): Promise<HostExecutionEvidence> {
     if (this.launcher.evidence) return this.launcher.evidence(this.dir);
-    const meta = readJsonSafe<RunHostMeta>(`${this.dir}/${HOST_META_NAME}`);
+    const meta = await this.readMeta();
     return {
       started: !!meta?.pid,
       ...(meta?.engineSessionId
@@ -1144,24 +1288,64 @@ export class HostHandle {
     };
   }
 
+  /**
+   * Cooperative cancel, then prove the host absent. From the first line no
+   * successor may be launched (`stopping` blocks respawn), and the stop is
+   * fenced on the exact host and generation it targeted: finalization only
+   * follows a stop that proved the host this handle still owns absent.
+   */
   async stopAndWait(
     timeoutMs = 10_000,
     preserveEvidence = false,
   ): Promise<boolean> {
     if (this.ended) return true;
+    this.stopping = true;
     this.send({ t: "cancel" });
     const deadline = Date.now() + timeoutMs;
     while (!this.ended && Date.now() < deadline) await Bun.sleep(50);
     if (this.ended) return true;
     if (!this.launcher.stop) return false;
     try {
-      await this.launcher.stop(this.ctl.hostId, this.dir);
+      if (await this.stopOwnedHost()) return true;
       if (preserveEvidence) this.abandon();
       else this.finish();
       return true;
     } catch (error) {
       console.error(`[host-client] could not stop ${this.ctl.hostId}:`, error);
       return false;
+    }
+  }
+
+  /**
+   * Stop the host this handle owns right now and prove it absent. Returns true
+   * when the handle ended meanwhile (nothing left to finalize). If ownership
+   * moved to a successor while the stop was in flight, the successor is the
+   * live host and is stopped too; respawn refuses to start once a stop is
+   * requested, so this settles after at most one extra round. Throws when a
+   * stop could not prove absence.
+   */
+  private async stopOwnedHost(): Promise<boolean> {
+    for (;;) {
+      if (this.endedClean) return true;
+      // A launch already dispatched for the owned host may still materialize
+      // it: proving absence before that settles would finalize a handle whose
+      // host then appears with no owner.
+      while (this.dispatching) {
+        await this.dispatching;
+        if (this.endedClean) return true;
+      }
+      const owned = this.captureOwnership();
+      const dir = this.dir;
+      await this.launcher.stop!(owned.hostId, dir);
+      if (this.endedClean) return true;
+      if (
+        this.hostGeneration === owned.generation &&
+        this.ctl.hostId === owned.hostId
+      )
+        return false;
+      console.warn(
+        `[host-client] ${owned.hostId} stopped but ownership moved to ${this.ctl.hostId}; stopping the successor too`,
+      );
     }
   }
 
@@ -1181,7 +1365,7 @@ export class HostHandle {
         await Bun.sleep(this.cancelGraceMs);
       if (this.endedClean) return;
       try {
-        await this.launcher.stop!(this.ctl.hostId, this.dir);
+        if (await this.stopOwnedHost()) return;
         this.cancelledCompletion = true;
         this.finish();
       } catch (error) {
@@ -1230,20 +1414,10 @@ export class HostHandle {
     for (;;) {
       attempts++;
       try {
-        // BOUNDED attempt: a connector whose promise never settles (a stalled
-        // transport/SDK call) must not freeze the whole wait loop silently —
-        // treat a >5s attempt as failed and keep polling until the deadline.
-        const r = await Promise.race([
-          this.connectOnce().then(() => "ok" as const),
-          new Promise<"stall">((res) => setTimeout(() => res("stall"), 5_000)),
-        ]);
-        if (r === "ok") return;
-        lastErr = new Error(
-          "connect attempt stalled >5s (promise never settled)",
-        );
-        console.warn(
-          `[host-client] ${this.spec.hostId.slice(0, 11)}: connect attempt ${attempts} stalled >5s`,
-        );
+        // Every attempt is bounded (see connectOnce): a connector whose
+        // promise never settles must not freeze the whole wait loop silently.
+        await this.connectOnce();
+        return;
       } catch (e) {
         lastErr = e;
       }
@@ -1256,15 +1430,93 @@ export class HostHandle {
     }
   }
 
+  /**
+   * One bounded connect attempt against the host this handle owns now. The
+   * attempt is fenced by its sequence number and the captured host identity:
+   * a connection that settles after the deadline, after a newer attempt, after
+   * a respawn, or after the handle ended is closed instead of adopted, and its
+   * callbacks are ignored. Frames delivered while the connector is still
+   * establishing (an ended hello sent before the promise resolves) belong to
+   * the current attempt and are handled as before.
+   */
   private async connectOnce(): Promise<void> {
-    const conn = await this.connector.connect({
-      onMsg: (m) => this.handleMsg(m),
+    const attempt = ++this.connectAttempt;
+    const owned = this.captureOwnership();
+    const connector = this.connector;
+    let adopted: HostConnection | null = null;
+    let obsolete = false;
+    const stale = () =>
+      obsolete ||
+      this.endedClean ||
+      this.hostGeneration !== owned.generation ||
+      this.ctl.hostId !== owned.hostId ||
+      (adopted ? this.conn !== adopted : this.connectAttempt !== attempt);
+    const connecting = connector.connect({
+      onMsg: (m) => {
+        if (stale()) return;
+        this.handleMsg(m);
+      },
       onClose: () => {
+        if (stale()) return;
+        if (!adopted) {
+          // Closed while still establishing: whatever this attempt resolves
+          // to is already dead and must never be adopted. The attempt fails
+          // and its caller's loop keeps observing and reconnecting.
+          obsolete = true;
+          return;
+        }
         this.up = false;
         this.conn = null;
         void this.onDisconnect();
       },
     });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(
+        () => resolve("timeout"),
+        this.connectAttemptTimeoutMs,
+      );
+    });
+    const closeLate = () => {
+      obsolete = true;
+      void connecting.then((conn) => conn.close()).catch(() => {});
+    };
+    let conn: HostConnection;
+    try {
+      const result = await Promise.race([connecting, timedOut]);
+      if (result === "timeout") {
+        closeLate();
+        console.warn(
+          `[host-client] ${owned.hostId.slice(0, 11)}: connect attempt ${attempt} stalled >${this.connectAttemptTimeoutMs}ms`,
+        );
+        throw new Error(
+          `connect attempt stalled >${this.connectAttemptTimeoutMs}ms (promise never settled)`,
+        );
+      }
+      conn = result;
+    } catch (e) {
+      // A rejected attempt owns nothing: its late callbacks are ignored.
+      obsolete = true;
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (this.endedClean) {
+      // The host finished while the transport was still establishing (an
+      // `end` frame delivered before the connect promise settled): nothing
+      // left to attach to.
+      obsolete = true;
+      conn.close();
+      return;
+    }
+    if (stale()) {
+      obsolete = true;
+      conn.close();
+      throw new Error(
+        "connect attempt superseded or closed before it was adopted",
+      );
+    }
+    adopted = conn;
     this.conn = conn;
     this.up = true;
   }
@@ -1457,11 +1709,7 @@ export class HostHandle {
           for (const ask of msg.pendingAsks)
             this.handleAsk(ask.askId, ask.input);
         if (msg.state === "ended") {
-          if (msg.done && !this.sawTerminal) {
-            this.sawTerminal = true;
-            this.terminalEvent = msg.done;
-            this.queue.push(msg.done);
-          }
+          if (msg.done) this.acceptTerminal(msg.done);
           // A detached host sends hello before replaying transcript frames.
           // Finishing here closes the socket and discards summaries produced
           // while the gateway was down. catchup_complete is the exact fence;
@@ -1533,11 +1781,7 @@ export class HostHandle {
       }
       case "end": {
         if (!msg.done && this.stopRequested) this.cancelledCompletion = true;
-        if (msg.done && !this.sawTerminal) {
-          this.sawTerminal = true;
-          this.terminalEvent = msg.done;
-          this.queue.push(msg.done);
-        }
+        if (msg.done) this.acceptTerminal(msg.done);
         this.finish();
         break;
       }
@@ -1592,9 +1836,12 @@ export class HostHandle {
     unregisterHostRun(this.ctl);
     unregisterRunToken(this.spec.rpcToken);
     this.connector.dispose?.();
+    this.finalized.resolve();
   }
 
-  /** Clean end: ack the host, close out the generator, drop registrations + files. */
+  /** Clean end: ack the host, close out the generator, drop registrations +
+   *  files. The registry sees `ended()` synchronously; the run-dir removal is
+   *  asynchronous and idempotent (`whenFinalized` settles after it). */
   private finish(): void {
     if (this.endedClean) return;
     this.endedClean = true;
@@ -1605,49 +1852,72 @@ export class HostHandle {
     unregisterHostRun(this.ctl);
     unregisterRunToken(this.spec.rpcToken);
     this.connector.dispose?.();
-    try {
-      rmSync(this.dir, { recursive: true, force: true });
-    } catch {}
+    void rm(this.dir, { recursive: true, force: true })
+      .catch(() => {})
+      .finally(() => this.finalized.resolve());
   }
 
-  private async hostAlive(): Promise<boolean> {
-    const meta = readJsonSafe<RunHostMeta>(`${this.dir}/${HOST_META_NAME}`);
-    return this.launcher.alive(this.dir, meta);
-  }
-
-  /** Socket dropped without a clean end: reconnect while the host lives, else
-   *  consume its final state — or respawn a crashed host to resume the run. */
+  /**
+   * Socket dropped without a clean end. Each bounded iteration runs one host
+   * observation (see observeHost) and, while the host lives, one bounded
+   * reconnect attempt: a live host's ended hello plus transcript catch-up is
+   * the only completion fence, and an unreachable live host stays busy with
+   * its receipt unread (a broken transport is not proof that the catch-up is
+   * undrainable; it can recover, or the host exits). Once the host is
+   * positively absent the observation has already consumed any receipt it
+   * left; otherwise a crashed host is respawned to resume the run, or the
+   * failure is reported. Nothing else has to ask for a finished detached host
+   * to be noticed. Every await re-checks the ownership this loop holds (its
+   * own reserved replacement after a respawn) so an external finish,
+   * reconnect, or takeover makes it stand down.
+   */
   private async onDisconnect(): Promise<void> {
-    while (!this.endedClean) {
-      await new Promise((r) => setTimeout(r, 2000));
-      if (this.endedClean) return;
-      if (!(await this.hostAlive())) break;
+    let owned = this.captureOwnership();
+    const standDown = () => this.endedClean || this.ownershipMoved(owned);
+    let meta: RunHostMeta | null = null;
+    for (;;) {
+      await Bun.sleep(this.reconnectDelayMs);
+      if (standDown()) return;
+      const observed = await this.observeHost();
+      if (observed.ended || standDown()) return;
+      if (!observed.alive) {
+        meta = observed.meta;
+        break;
+      }
       try {
         await this.connectOnce();
         return;
       } catch {}
+      if (standDown()) return;
     }
-    if (this.endedClean) return;
-
-    const meta = readJsonSafe<RunHostMeta>(`${this.dir}/${HOST_META_NAME}`);
-    if (this.reconcileTerminalEvidence()) return;
+    // A stop is proving this host absent and owns finalization (finish or
+    // evidence-preserving abandon); a crashed host must not be resumed under
+    // its feet.
+    if (this.stopping) return;
 
     // Crashed mid-run. If the run had an engine session, respawn a fresh host
     // to resume it — transparent to whoever is consuming events().
-    const journal = readHostJournal(this.dir);
+    const journal = await readHostJournal(this.dir);
+    if (standDown() || this.stopping) return;
     const engineId =
       journal?.claudeSessionId ||
       this.engineSessionId ||
       this.spec.engineSessionId;
-    if (engineId && this.respawns < 2) {
+    if (engineId && this.respawns < 2 && !this.stopRequested) {
       this.respawns++;
       console.warn(
         `[host-client] run host ${this.spec.hostId} died mid-run — respawning to resume ${this.spec.osSessionId}`,
       );
       try {
-        await this.respawn(engineId, meta);
+        // The replacement this loop reserves is its own ownership from then
+        // on: a failed launch must still reach the ambiguity/error handling
+        // below instead of looking like an external takeover.
+        await this.respawn(engineId, meta, (reserved) => {
+          owned = reserved;
+        });
         return;
       } catch (e) {
+        if (standDown() || this.stopping) return;
         console.error("[host-client] respawn failed:", e);
         if (e instanceof ExecutorProtocolError && e.ambiguousLaunch) {
           try {
@@ -1676,10 +1946,23 @@ export class HostHandle {
     this.finish();
   }
 
+  /**
+   * Replace a dead host with a fresh one resuming the same engine session.
+   * Ownership of the replacement (host id, run dir, generation) is reserved
+   * synchronously before the first await, so a cancel or stop that lands while
+   * the spec is being exported or the host launched targets the successor and
+   * finishes the handle exactly once. Every awaited step re-checks that the
+   * handle still owns the replacement and is not ending; otherwise the
+   * replacement is torn down (proved absent when already launched) and the
+   * respawn fails instead of leaving an unregistered host running.
+   */
   private async respawn(
     engineId: string,
     meta?: RunHostMeta | null,
+    onReserved?: (owned: { hostId: string; generation: number }) => void,
   ): Promise<void> {
+    if (this.endedClean || this.stopRequested || this.stopping)
+      throw new Error("respawn refused: handle is ending");
     const oldDir = this.dir;
     const hostId = `rh-${Bun.randomUUIDv7()}`;
     const dir = this.launcher.newRunDir(hostId);
@@ -1700,19 +1983,44 @@ export class HostHandle {
       resumeSessionAt: undefined,
       journalKind: recoveryKind(this.spec.journalKind, "resume"),
     };
-    if (this.launcher.writeSpec) {
-      await this.launcher.writeSpec(dir, spec);
-    } else {
-      mkdirSync(dir, { recursive: true });
-      writeJsonAtomic(`${dir}/${HOST_SPEC_NAME}`, spec);
-    }
+    // Reserve the replacement before the first await. Evidence captured
+    // against the old host is stale from here on, and a concurrent stop
+    // targets the successor.
+    this.hostGeneration++;
+    const generation = this.hostGeneration;
     this.dir = dir;
     this.spec = spec;
     this.connectedBefore = false;
     this.effectiveModel = spec.model;
     this.transientFallback = spec.transientFallback === true;
     this.ctl.hostId = hostId;
+    onReserved?.({ hostId, generation });
+    const lost = () =>
+      this.endedClean ||
+      this.stopRequested ||
+      this.stopping ||
+      this.hostGeneration !== generation ||
+      this.ctl.hostId !== hostId;
+    const refuse = async (stage: string, launched: boolean) => {
+      if (launched) {
+        // Whoever is stopping this handle targets this host id too; proving
+        // absence twice is idempotent.
+        await (this.launcher.stop ?? stopAndVerifyHostAbsent)(hostId, dir);
+      } else {
+        await rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
+      throw new Error(`respawn abandoned after ${stage}: handle is ending`);
+    };
+
+    if (this.launcher.writeSpec) {
+      await this.launcher.writeSpec(dir, spec);
+    } else {
+      await mkdir(dir, { recursive: true });
+      await writeJsonAtomicAsync(`${dir}/${HOST_SPEC_NAME}`, spec);
+    }
+    if (lost()) await refuse("spec export", false);
     await this.onHostChanged?.(hostId);
+    if (lost()) await refuse("host change", false);
     // The old host id's transport registration (WS token/conn) is dead with
     // the old host — swap in a connector for the new id (same wsToken; the
     // launcher re-registered it under the new host id in launch()).
@@ -1720,15 +2028,26 @@ export class HostHandle {
     this.connector =
       this.launcher.connector?.(dir, spec) ??
       unixSocketConnector(`${dir}/${HOST_SOCK_NAME}`);
-    await this.launcher.launch(hostId, dir);
+    // Expose the dispatch so a concurrent stop waits for it to settle before
+    // proving this host absent (see stopOwnedHost).
+    const dispatch = this.launcher.launch(hostId, dir);
+    const settled = dispatch.then(
+      () => {},
+      () => {},
+    );
+    this.dispatching = settled;
     try {
-      rmSync(oldDir, { recursive: true, force: true });
-    } catch {}
+      await dispatch;
+    } finally {
+      if (this.dispatching === settled) this.dispatching = undefined;
+    }
+    if (lost()) await refuse("launch", true);
+    await rm(oldDir, { recursive: true, force: true }).catch(() => {});
     try {
       await this.connectWithWait(20_000);
     } catch (cause) {
       try {
-        await stopAndVerifyHostAbsent(hostId, dir);
+        await (this.launcher.stop ?? stopAndVerifyHostAbsent)(hostId, dir);
       } catch (cleanupError) {
         throw cleanupError;
       }
@@ -1797,17 +2116,16 @@ export async function* reconcileUncertainHostEvents(
   }
 }
 
-function readJsonSafe<T>(path: string): T | null {
+async function readJsonSafe<T>(path: string): Promise<T | null> {
   try {
-    if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, "utf-8")) as T;
+    return JSON.parse(await readFile(path, "utf-8")) as T;
   } catch {
     return null;
   }
 }
 
-function readHostJournal(dir: string): ActiveRunRecord | null {
-  const j = readJsonSafe<Record<string, ActiveRunRecord>>(
+async function readHostJournal(dir: string): Promise<ActiveRunRecord | null> {
+  const j = await readJsonSafe<Record<string, ActiveRunRecord>>(
     `${dir}/${HOST_JOURNAL_NAME}`,
   );
   if (!j) return null;
@@ -1849,8 +2167,8 @@ export async function resumeLocalHostRun(
 ): Promise<AsyncGenerator<StreamEvent> | "uncertain" | null> {
   if (!run.hostId) return null;
   const dir = `${HOSTS_DIR}/${run.hostId}`;
-  let meta = readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
-  const spec = readJsonSafe<RunHostSpec>(`${dir}/${HOST_SPEC_NAME}`);
+  let meta = await readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
+  const spec = await readJsonSafe<RunHostSpec>(`${dir}/${HOST_SPEC_NAME}`);
   if (!spec) {
     try {
       if (await hostUnitActive(run.hostId)) return "uncertain";
@@ -1859,7 +2177,7 @@ export async function resumeLocalHostRun(
     }
     const recovery = resolveInactiveHostRecovery(
       meta,
-      readHostJournal(dir),
+      await readHostJournal(dir),
       run.claudeSessionId,
     );
     if (recovery.kind === "uncertain") return "uncertain";
@@ -1872,16 +2190,14 @@ export async function resumeLocalHostRun(
   let alive = await systemdHostLauncher.alive(dir, meta);
   if (!alive && !meta?.done) {
     await waitForLocalHost(dir, 30_000);
-    meta = readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
+    meta = await readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
     alive = await systemdHostLauncher.alive(dir, meta);
   }
   if (!alive) {
     if (meta?.done) {
       const done = meta.done;
       unregisterRunToken(spec.rpcToken);
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {}
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
       return (async function* () {
         yield done;
       })();
@@ -1893,7 +2209,7 @@ export async function resumeLocalHostRun(
     }
     const recovery = resolveInactiveHostRecovery(
       meta,
-      readHostJournal(dir),
+      await readHostJournal(dir),
       run.claudeSessionId,
     );
     if (recovery.kind === "uncertain") return "uncertain";
@@ -1936,7 +2252,7 @@ export async function resumeLocalHostRun(
     } catch {
       return "uncertain";
     }
-    meta = readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
+    meta = await readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
     if (meta?.done) {
       return (async function* () {
         yield meta.done!;
@@ -1944,7 +2260,7 @@ export async function resumeLocalHostRun(
     }
     const recovery = resolveInactiveHostRecovery(
       meta,
-      readHostJournal(dir),
+      await readHostJournal(dir),
       run.claudeSessionId,
     );
     if (recovery.kind === "uncertain") return "uncertain";

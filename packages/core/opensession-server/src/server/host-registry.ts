@@ -8,6 +8,13 @@
  *
  * Kept import-free of agent-runner/host-client (they both import this) and
  * parked on globalThis so `bun --hot` reloads keep live handles reachable.
+ *
+ * Every lookup here is a pure read of cached handle state: no filesystem,
+ * database, or subprocess I/O. Busy/steer checks run on the gateway thread
+ * (WS handlers, journal probes, admission counters), so terminal evidence
+ * that only exists on disk is observed by the HostHandle itself
+ * (`observeOfflineTerminal`, its disconnect loop) and reflected through
+ * `ended()` plus unregistration.
  */
 
 import type { ImageInput } from "./run-events";
@@ -19,8 +26,8 @@ export interface HostRunControl {
   steerable: boolean;
   /** True while the socket to the host is up (steers need a live connection). */
   connected: () => boolean;
-  /** Consume a terminal receipt written after the live socket was lost. */
-  reconcileTerminal?: () => boolean;
+  /** Cached: true once the handle finished or was abandoned. Never does I/O. */
+  ended: () => boolean;
 
   steer: (text: string, images?: ImageInput[], steerId?: string) => boolean;
   retractSteer: (steerId: string) => Promise<boolean>;
@@ -56,8 +63,7 @@ export function unregisterHostRun(ctl: HostRunControl): void {
 
 export function hostRunBusy(id: string): boolean {
   const ctl = hostRuns.get(id);
-  if (!ctl) return false;
-  return !ctl.reconcileTerminal?.();
+  return !!ctl && !ctl.ended();
 }
 
 export function hostRunCount(): number {
@@ -72,8 +78,7 @@ export function hostSteer(
   steerId?: string,
 ): boolean {
   const ctl = hostRuns.get(id);
-  if (!ctl || ctl.reconcileTerminal?.() || !ctl.steerable || !ctl.connected())
-    return false;
+  if (!ctl || ctl.ended() || !ctl.steerable || !ctl.connected()) return false;
   return ctl.steer(text, images, steerId);
 }
 
@@ -85,7 +90,7 @@ export async function hostRetractSteer(
     ids.flatMap((id) => (id && hostRuns.get(id) ? [hostRuns.get(id)!] : [])),
   );
   for (const ctl of controls) {
-    if (ctl.reconcileTerminal?.()) continue;
+    if (ctl.ended()) continue;
     if (ctl.steerable && ctl.connected() && (await ctl.retractSteer(steerId)))
       return true;
   }
@@ -98,13 +103,12 @@ export function hostInterruptSteer(
   images?: ImageInput[],
 ): boolean {
   const ctl = hostRuns.get(id);
-  if (!ctl || ctl.reconcileTerminal?.() || !ctl.steerable || !ctl.connected())
-    return false;
+  if (!ctl || ctl.ended() || !ctl.steerable || !ctl.connected()) return false;
   return ctl.interruptSteer(text, images);
 }
 
 export function hostCancel(id: string): boolean {
   const ctl = hostRuns.get(id);
-  if (!ctl || ctl.reconcileTerminal?.()) return false;
+  if (!ctl || ctl.ended()) return false;
   return ctl.cancel();
 }

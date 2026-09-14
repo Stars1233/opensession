@@ -69,7 +69,7 @@ export function turnMountKey(
 /** How many tail positions count as the live edge for arrival animation. A
  * turn block, its answer, and its footer can mount in one build, so the window
  * covers the trio; anything further back is history, not an arrival. */
-const TAIL_ARRIVAL_WINDOW = 3;
+export const TAIL_ARRIVAL_WINDOW = 3;
 
 /**
  * Keys of blocks that mounted at the live edge since the previous build, and so

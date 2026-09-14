@@ -53,22 +53,6 @@ import {
 import { isReadReducer } from "./actor-routing";
 import { READ_METHODS } from "./store-routing";
 
-const SMALL_OUTPUT_BYTES = 256 * 1024;
-const LARGE_OUTPUT_BYTES = 8 * 1024 * 1024;
-const MAX_DYNAMIC_OUTPUT_BYTES = 128 * 1024 * 1024;
-const LARGE_STORE_RESPONSES = new Set([
-  "askEntries",
-  "askSnapshot",
-  "changesSince",
-  "creationState",
-  "deliveryEntries",
-  "deliverySnapshot",
-  "pendingOutbox",
-  "dueTimers",
-  "runStates",
-  "turnSnapshot",
-]);
-
 export class SessionKernelActorError extends Error {
   constructor(
     message: string,
@@ -290,6 +274,13 @@ export class SessionKernelActorClient {
           body?: string;
           length?: number;
         };
+        // A legacy actor reports an oversized result as a bodyless status 2.
+        // It already executed the call once and re-running it would not
+        // shrink the result, so fail definitively instead of retrying.
+        if (response.status === 2)
+          throw new SessionKernelActorError(
+            `Session kernel ${label} result exceeds the response bound (${response.length ?? "unknown"} bytes)`,
+          );
         if (!response.body)
           throw new SessionKernelActorError(
             `Session kernel ${label} returned no result`,

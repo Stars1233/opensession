@@ -7,7 +7,11 @@ import {
   TranscriptStore,
 } from "./transcript-store";
 import { subscribeTranscript, type TranscriptBusEvent } from "./transcript-bus";
-import { drainPendingTranscriptWakesForSessions } from "./actor-transcript";
+import {
+  appendTranscriptEvents,
+  drainPendingTranscriptWakesForSessions,
+  importLegacyTranscript,
+} from "./actor-transcript";
 import {
   assertTranscriptActorRequest,
   assertTranscriptActorResponse,
@@ -372,6 +376,83 @@ describe("actor transcript wake crash recovery", () => {
       }
     });
   }
+
+  test("overlapping facade appends share one publication and one durable ack", async () => {
+    const { path, sessionId } = fixture();
+    const store = new TranscriptStore(path, { actorOwned: true });
+    const counts = { pending: 0, changes: 0, ack: 0 };
+    const applyActorRequest = store.applyActorRequest.bind(store);
+    store.applyActorRequest = ((request: { op: string }) => {
+      if (request.op === "pending_wake") counts.pending++;
+      if (request.op === "changes_since") counts.changes++;
+      if (request.op === "ack_wake") counts.ack++;
+      return applyActorRequest(request as never);
+    }) as typeof store.applyActorRequest;
+    const previous = __setTranscriptStoreForTest(store);
+    const events: TranscriptBusEvent[] = [];
+    const unsubscribe = subscribeTranscript(sessionId, (event) =>
+      events.push(event),
+    );
+    try {
+      const entry = (id: string) => ({
+        id,
+        type: "user" as const,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        content: id,
+      });
+      // Both commits land before the first pending read completes, so the
+      // second caller joins the running drain instead of starting its own.
+      await Promise.all([
+        appendTranscriptEvents(sessionId, [entry("one")]),
+        appendTranscriptEvents(sessionId, [entry("two")]),
+      ]);
+      await Bun.sleep(0);
+      expect(store.pendingActorWake(sessionId)).toBeNull();
+      expect(store.pendingActorWake(sessionId, true)).toMatchObject({
+        cursor: 2,
+        ackedCursor: 2,
+      });
+      expect(counts).toEqual({ pending: 1, changes: 1, ack: 1 });
+      expect(events).toHaveLength(1);
+      expect(events[0]!.entries.map((e) => e.id)).toEqual(["one", "two"]);
+      // A following startup pass finds nothing: one read, no extra ack.
+      expect(await drainPendingTranscriptWakesForSessions([sessionId])).toBe(0);
+      expect(counts).toEqual({ pending: 2, changes: 1, ack: 1 });
+    } finally {
+      unsubscribe();
+      __setTranscriptStoreForTest(previous);
+      store.close();
+    }
+  });
+
+  test("a chunked import drains once after its final receipt", async () => {
+    const { path, sessionId } = fixture();
+    const store = new TranscriptStore(path, { actorOwned: true });
+    const previous = __setTranscriptStoreForTest(store);
+    const events: TranscriptBusEvent[] = [];
+    const unsubscribe = subscribeTranscript(sessionId, (event) =>
+      events.push(event),
+    );
+    try {
+      const entries = Array.from({ length: 501 }, (_, index) => ({
+        id: `history-${index}`,
+        type: "user" as const,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        content: "history",
+      }));
+      expect(
+        await importLegacyTranscript(sessionId, entries, "merged", 42),
+      ).toEqual({ inserted: 501, updated: 0 });
+      await Bun.sleep(0);
+      expect(store.needsImport(sessionId)).toBe(false);
+      expect(store.pendingActorWake(sessionId)).toBeNull();
+      expect(events.flatMap((event) => event.entries)).toHaveLength(501);
+    } finally {
+      unsubscribe();
+      __setTranscriptStoreForTest(previous);
+      store.close();
+    }
+  });
 
   test("marks a chunked import complete only after the final actor receipt", () => {
     const { path, sessionId } = fixture();

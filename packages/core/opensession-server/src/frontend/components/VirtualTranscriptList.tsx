@@ -17,10 +17,7 @@ import {
   seededBlockEstimate,
   type TranscriptSizes,
 } from "../lib/transcript-sizes";
-import {
-  newTailBlockKeys,
-  shouldAnimateTranscriptItemArrival,
-} from "../lib/transcript-block-identity";
+import { TranscriptArrivalTracker } from "../lib/transcript-arrival";
 import { transcriptEnterClass } from "../lib/transcript-motion";
 import { TranscriptTopApproachGate } from "../lib/transcript-top-approach";
 import {
@@ -85,11 +82,12 @@ interface Props {
 }
 
 /** A block that just arrived at the live edge fades up into place instead of
- *  popping. One-shot: callers only set `enter` on keys their previous build had
- *  not mounted, and the class stays on across re-renders (a finished CSS
- *  animation does not restart when its element re-renders). The transform
- *  lives on this inner wrapper because the virtualized row itself positions
- *  with an inline translateY that the keyframe must not fight. */
+ *  popping. One-shot and stateless: the adapter sets `enter` only in the
+ *  render that reconciled a new item list against what it had mounted; every
+ *  later render of that list, including a row virtualized out and mounted
+ *  back in, renders without it. The transform lives on this inner wrapper
+ *  because the virtualized row itself positions with an inline translateY
+ *  that the keyframe must not fight. */
 function EnterRow({
   enter,
   children,
@@ -176,14 +174,11 @@ class TranscriptVirtualizer extends React.Component<
   private topApproachGate = new TranscriptTopApproachGate();
   private rowObserver: ResizeObserver | null = null;
   private rowRefs = new Map<string, (node: HTMLDivElement | null) => void>();
-  /** Every block key this adapter instance has ever mounted. The first build
-   *  seeds it (opening a session is not an arrival); afterwards, a tail key
-   *  missing from the set just arrived live and plays the entrance fade. Keys
-   *  stay in the set once seen, so a virtualizer remount never replays it. */
-  private mountedKeys: Set<string> | null = null;
-  /** Entry identities already painted inside those blocks. Unlike block keys,
-   * these survive an optimistic row becoming a new durable transcript range. */
-  private mountedEntryIds = new Set<string>();
+  /** Block keys and entry identities this adapter instance has mounted, and
+   * which tail blocks arrived live since the previous item list. Keyed on the
+   * immutable `items` identity: scroll, measurement, and geometry renders
+   * reuse the list and cost no reconciliation. */
+  private arrivals = new TranscriptArrivalTracker();
   private seeded: { session: string; sizes?: TranscriptSizes } | null = null;
   /** The offset callback TanStack registered through `observeElementOffset`.
    * A scrollTop write made here hands the virtualizer its new offset in the
@@ -904,25 +899,10 @@ class TranscriptVirtualizer extends React.Component<
     // Tail-arrival detection runs here, in the imperative adapter, because
     // "mounted by the previous build" is virtualizer knowledge: the function
     // component above is compiler-managed and may re-render without a new
-    // item list, and a ref-based previous-set there is a compile error.
-    const itemsByKey = new Map(
-      this.props.items.map((item) => [item.key, item]),
-    );
-    const entering = newTailBlockKeys(
-      this.mountedKeys,
-      this.props.items.map((item) => item.key),
-    ).filter((key) => {
-      const item = itemsByKey.get(key);
-      return (
-        !item || shouldAnimateTranscriptItemArrival(item, this.mountedEntryIds)
-      );
-    });
-    if (this.mountedKeys === null) this.mountedKeys = new Set();
-    for (const item of this.props.items) {
-      this.mountedKeys.add(item.key);
-      for (const entryId of item.entryIds) this.mountedEntryIds.add(entryId);
-    }
-    const enteringSet = new Set(entering);
+    // item list, and a ref-based previous-set there is a compile error. The
+    // tracker walks the list once per identity; a same-list render (scroll,
+    // remeasure, resize) gets an empty set and does no reconciliation.
+    const enteringSet = this.arrivals.reconcile(this.props.items);
     const result = (
       <div
         ref={this.setRoot}
@@ -962,15 +942,31 @@ class TranscriptVirtualizer extends React.Component<
   }
 }
 
+const NO_MEASURE_KEYS: ReadonlySet<string> = new Set();
+
+/** Rows whose semantic content changed between two committed item lists. The
+ * lists are immutable snapshots, so the same reference means nothing to
+ * remeasure and the scan is skipped outright: geometry and scroll commits
+ * reuse the list and must not pay for it. Rows usually keep their position
+ * between lists (append, regroup, remeasure), so a positional lookup serves
+ * first; the keyed map is built only once a row has moved (history prepend). */
 export function committedTranscriptMeasureKeys(
-  previous: VirtualTranscriptItem[],
-  next: VirtualTranscriptItem[],
-): Set<string> {
-  const previousItems = new Map(previous.map((item) => [item.key, item]));
+  previous: readonly VirtualTranscriptItem[],
+  next: readonly VirtualTranscriptItem[],
+): ReadonlySet<string> {
+  if (previous === next) return NO_MEASURE_KEYS;
+  let previousByKey: Map<string, VirtualTranscriptItem> | undefined;
+  const previousFor = (index: number, key: string) => {
+    const aligned = previous[index];
+    if (aligned?.key === key) return aligned;
+    previousByKey ??= new Map(previous.map((item) => [item.key, item]));
+    return previousByKey.get(key);
+  };
   const changed = new Set<string>();
-  for (const item of next) {
+  for (let index = 0; index < next.length; index++) {
+    const item = next[index]!;
     if (item.measure === false) continue;
-    const before = previousItems.get(item.key);
+    const before = previousFor(index, item.key);
     const beforeVersion = before?.measureVersion;
     const nextVersion = item.measureVersion;
     if (

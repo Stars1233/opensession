@@ -1247,7 +1247,7 @@ export async function recordRecoveredRunEvent(
           (t) => t.channel === post.channel && t.threadTs === post.threadTs,
         )
       ) {
-        touchNativeSession(osSessionId, {
+        await touchNativeSession(osSessionId, {
           slackThreads: [
             ...threads,
             { channel: post.channel, threadTs: post.threadTs },
@@ -1269,7 +1269,7 @@ export async function recordRecoveredRunEvent(
     const reason = `auto-switch — ${modelLabel(event.fromModel)} ${event.switchReason || "out of credits"}`;
     // Conditional: a /model sent while this recovered run was in flight must
     // not be reverted by its fallback (see persistAutoModelSwitch).
-    void persistAutoModelSwitch({
+    await persistAutoModelSwitch({
       sessionId: osSessionId,
       expectedModel: session.model,
       model: to,
@@ -1281,6 +1281,30 @@ export async function recordRecoveredRunEvent(
       },
     }).then(() => publishSessionChange(osSessionId));
     return;
+  }
+
+  if (event.type === "init" || event.type === "done") {
+    const engineSessionId = event.sessionId || "";
+    const model = event.model || session.model;
+    const provider = event.provider || providerFor(model);
+    // Recovery must export a rotated engine id before announcing completion
+    // or releasing queued prompts that resume from the session file.
+    await touchNativeSession(osSessionId, {
+      ...(engineSessionId ? engineSessionPatch(provider, engineSessionId) : {}),
+      ...(engineSessionId && event.provider
+        ? { lastEngineProvider: event.provider }
+        : {}),
+      ...(event.model ? { lastEngineModel: event.model } : {}),
+    });
+    if (engineSessionId && session.worktreeDir) {
+      attachSessionWatchersToEngineTranscript(
+        osSessionId,
+        provider,
+        session.worktreeDir,
+        engineSessionId,
+      );
+    }
+    publishSessionChange(osSessionId);
   }
 
   if (event.type === "done" || event.type === "error") {
@@ -1306,29 +1330,7 @@ export async function recordRecoveredRunEvent(
       isRunning: false,
     });
     onHumanAsksSessionIdle(osSessionId);
-    if (event.type === "error") return;
   }
-
-  if (event.type !== "init" && event.type !== "done") return;
-  const engineSessionId = event.sessionId || "";
-  const model = event.model || session.model;
-  const provider = event.provider || providerFor(model);
-  touchNativeSession(osSessionId, {
-    ...(engineSessionId ? engineSessionPatch(provider, engineSessionId) : {}),
-    ...(engineSessionId && event.provider
-      ? { lastEngineProvider: event.provider }
-      : {}),
-    ...(event.model ? { lastEngineModel: event.model } : {}),
-  });
-  if (engineSessionId && session.worktreeDir) {
-    attachSessionWatchersToEngineTranscript(
-      osSessionId,
-      provider,
-      session.worktreeDir,
-      engineSessionId,
-    );
-  }
-  publishSessionChange(osSessionId);
 }
 
 /**
@@ -3339,7 +3341,7 @@ async function runSessionPromptInner(
           // watching yet. Persist + attach NOW — waiting for the run to end
           // (the old behavior) left the entire turn invisible to viewers.
           if (session.source === "opensession") {
-            touchNativeSession(session.id, {
+            await touchNativeSession(session.id, {
               ...engineSessionPatch(effectiveProvider, finalSessionId),
               lastEngineProvider: effectiveProvider,
               ...(effectiveModel
@@ -3406,7 +3408,7 @@ async function runSessionPromptInner(
           });
         }
         if (persistSwitch && session.source === "opensession") {
-          void persistAutoModelSwitch({
+          await persistAutoModelSwitch({
             sessionId: session.id,
             expectedModel: lastPersistedModel,
             model: to,
@@ -3627,7 +3629,9 @@ async function runSessionPromptInner(
       session.branch && !isSharedCheckoutDir(session.worktreeDir)
         ? worktreeHeadBranch(session.worktreeDir)
         : null;
-    touchNativeSession(session.id, {
+    // Export the engine identity and usage before settling or draining the
+    // next prompt, whose resume inputs can still come from the session file.
+    await touchNativeSession(session.id, {
       ...engineSessionPatch(effectiveProvider, finalSessionId),
       lastEngineProvider: effectiveProvider,
       ...(effectiveModel ? { lastEngineModel: effectiveModel } : {}),

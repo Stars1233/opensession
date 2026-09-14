@@ -113,6 +113,13 @@ The executor is not the parent of active run hosts. Hosts run in transient
 systemd units, so restarting `opensession-executor.service` affects only launch
 requests currently crossing the control socket.
 
+Registry busy and control lookups only observe cached handle state. `HostHandle`
+owns asynchronous terminal reconciliation for its known host, including offline
+completion evidence. Terminal observations must respect run identity and the
+transcript projection/catch-up fence before finalization. Cleanup runs once and
+uses asynchronous filesystem removal; a status query cannot acknowledge a host
+or delete its recovery files.
+
 ## Deployment
 
 Linux system scope installs three units:

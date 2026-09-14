@@ -91,9 +91,17 @@ export type KernelActorServiceCall = {
   request:
     | { t: "store"; method: string; args: unknown[] }
     | { t: "reduce"; command: SessionActorReducerCommand };
+  /** Compatibility field. The actor validates it against
+   * `SESSION_KERNEL_MAX_RESPONSE_BYTES` but every call is executed exactly once
+   * and answered under that single hard bound; there is no sized retry. */
   outputBytes: number;
 };
 
+/** `status` 1 carries the encoded result and -1 an encoded failure. Status 2
+ * is a legacy "result exceeded the caller's hint" reply that current actors no
+ * longer emit: every call executes exactly once under the single hard bound,
+ * and an oversized result becomes an ordinary non-retryable failure body that
+ * legacy and current transports alike settle without re-requesting. */
 export type KernelActorResponse =
   | KernelActorAsyncResponse
   | {
@@ -103,6 +111,52 @@ export type KernelActorResponse =
       length: number;
       body?: string;
     };
+
+export type KernelActorCallResult = {
+  status: -1 | 1;
+  length: number;
+  body: string;
+};
+
+export const SESSION_KERNEL_RESPONSE_TOO_LARGE = "response_too_large";
+
+/**
+ * JSON string escaping never shrinks a body and expands a byte at most sixfold
+ * (`\u00XX` for a control character), so a body whose raw size fits six times
+ * over needs no second pass to prove its escaped size fits.
+ */
+const MAX_JSON_ESCAPE_EXPANSION = 6;
+
+/**
+ * Bound one materialized call result by the bytes it occupies once embedded as
+ * a JSON string in the transport envelope. The body is returned exactly when
+ * that escaped size stays within `maxBytes`; otherwise the reply is a small
+ * definitive failure. The work already executed once and re-running it would
+ * not shrink the result, so the failure carries no retryable code.
+ */
+export function boundCallResult(
+  body: string,
+  ok: boolean,
+  maxBytes = SESSION_KERNEL_MAX_RESPONSE_BYTES,
+): KernelActorCallResult {
+  const length = Buffer.byteLength(body);
+  const status = ok ? 1 : -1;
+  if (length * MAX_JSON_ESCAPE_EXPANSION <= maxBytes)
+    return { status, length, body };
+  // Envelope quotes are two bytes; the envelope's other fields are covered by
+  // the service's fixed slack above the same bound.
+  if (
+    length <= maxBytes &&
+    Buffer.byteLength(JSON.stringify(body)) - 2 <= maxBytes
+  )
+    return { status, length, body };
+  const failure = JSON.stringify({
+    ok: false,
+    error: `Session kernel result exceeds the response bound (${length} bytes)`,
+    code: SESSION_KERNEL_RESPONSE_TOO_LARGE,
+  });
+  return { status: -1, length: Buffer.byteLength(failure), body: failure };
+}
 
 /** HTTP service responses are fenced after the actor worker replies. */
 export type KernelActorServiceResponse = KernelActorResponse & {
