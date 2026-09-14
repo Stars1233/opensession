@@ -14,6 +14,7 @@ import { cn } from "../ui/cn";
 import { Tooltip } from "../ui/tooltip";
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
+import { ServerHealthMonitor } from "./ServerHealthMonitor";
 
 interface AppSidebarProps {
   data: {
@@ -201,6 +202,11 @@ export function AppSidebar({
               </button>
             </Tooltip>
           </div>
+          {!isPhone && !sidebarCollapsed && (
+            <div className="@container/server-health flex min-w-0 flex-1 items-center">
+              <ServerHealthMonitor />
+            </div>
+          )}
           <TitleBar onSearch={() => commandMenuRef.current?.open()} />
         </div>
         <Sidebar

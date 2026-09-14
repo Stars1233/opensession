@@ -74,11 +74,15 @@ export function ServerHealthMonitor({
           "shrink-0 gap-3 min-h-10 font-normal [-webkit-app-region:no-drag] [app-region:no-drag]",
           compact
             ? cn(MOBILE_TOP_BAR_CONTROL, "size-11 p-0")
-            : "@max-[900px]:w-10 @max-[900px]:p-0",
+            : "px-1 @max-[200px]/server-health:w-10 @max-[200px]/server-health:p-0",
         )}
       >
-        {/* Preserve room for session actions in a narrow desktop pane. */}
-        <span className={compact ? "flex" : "hidden @max-[900px]:flex"}>
+        {/* The sidebar slot measures space left after traffic lights and navigation. */}
+        <span
+          className={
+            compact ? "flex" : "hidden @max-[200px]/server-health:flex"
+          }
+        >
           {latest?.cpu != null ? (
             <ResourceGraph
               samples={samples}
@@ -90,19 +94,19 @@ export function ServerHealthMonitor({
           )}
         </span>
         {!compact && (
-          <span className="flex gap-3 @max-[900px]:hidden">
+          <span className="flex gap-2 @max-[200px]/server-health:hidden">
             {RESOURCE_METRICS.map(({ key, shortLabel }) => (
-              <span key={key} className="flex items-center gap-1.5">
-                <span className="flex flex-col items-start text-meta leading-tight">
+              <span key={key} className="flex w-14 flex-col gap-0.5">
+                <span className="flex items-center justify-between text-meta leading-tight">
                   <span className="text-faint">{shortLabel}</span>
-                  <span className="w-8 text-left tabular-nums text-dim">
+                  <span className="tabular-nums text-dim">
                     {formatResourcePercent(resourcePercent(latest, key))}
                   </span>
                 </span>
                 <ResourceGraph
                   samples={samples}
                   metric={key}
-                  className="h-6 w-9 text-dim"
+                  className="h-4 w-full text-dim"
                 />
               </span>
             ))}

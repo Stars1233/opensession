@@ -43,7 +43,6 @@ import { SupportPreview } from "./components/SupportPreview";
 import { SupportTinder } from "./components/SupportTinder";
 import { Tasks } from "./components/Tasks";
 import { UpdatePill } from "./components/UpdatePill";
-import { ServerHealthMonitor } from "./components/ServerHealthMonitor";
 import {
   UserGate,
   getCurrentUser,
@@ -1425,50 +1424,42 @@ export function AppContent({
                   {/* Top bar: session name + actions (portaled in by SessionViewer)
 						    on session routes, a plain title otherwise. Sits above the tab
 						    strip so the session identity reads first, tabs below it. */}
-                  <TopBar
-                    className={cn(
-                      DETAIL_TOPBAR,
-                      "@container flex-row items-center desktop:min-h-[var(--desktop-header-h)] desktop:pr-3",
-                    )}
-                  >
-                    <div ref={setTopbarEl} className="min-w-0 flex-1">
-                      {route.view !== "session" &&
-                        // A workspace portals in the same header row a session
-                        // does (WorkspacePane) rather than taking the plain title.
-                        !(route.view === "workspace" && routeWorkspace) &&
-                        topbarTitle && (
-                          // Where you are, not the page's heading: these routes are
-                          // pages, and a page keeps its name in its body. The bar picks
-                          // that name up once it has scrolled out of sight, the way the
-                          // chat header names the session. See hooks/useLargeTitle.ts.
-                          <TopBarTitle
-                            className={cn(
-                              DETAIL_TOPBAR_TITLE,
-                              (route.view === "prs" || route.view === "feed") &&
-                                PR_PAGE_COLUMN,
-                              route.view === "archived" && ARCHIVED_PAGE_COLUMN,
-                            )}
+                  <TopBar className={DETAIL_TOPBAR} ref={setTopbarEl}>
+                    {route.view !== "session" &&
+                      // A workspace portals in the same header row a session
+                      // does (WorkspacePane) rather than taking the plain title.
+                      !(route.view === "workspace" && routeWorkspace) &&
+                      topbarTitle && (
+                        // Where you are, not the page's heading: these routes are
+                        // pages, and a page keeps its name in its body. The bar picks
+                        // that name up once it has scrolled out of sight, the way the
+                        // chat header names the session. See hooks/useLargeTitle.ts.
+                        <TopBarTitle
+                          className={cn(
+                            DETAIL_TOPBAR_TITLE,
+                            (route.view === "prs" || route.view === "feed") &&
+                              PR_PAGE_COLUMN,
+                            route.view === "archived" && ARCHIVED_PAGE_COLUMN,
+                          )}
+                        >
+                          <span
+                            className={DETAIL_TOPBAR_TITLE_TEXT}
+                            data-shown={titleHandedOver || undefined}
                           >
-                            <span
-                              className={DETAIL_TOPBAR_TITLE_TEXT}
-                              data-shown={titleHandedOver || undefined}
-                            >
-                              {topbarTitle}
-                            </span>
-                            {/* Filled by the page, if it has controls to put here. */}
-                            <TopBarActions
-                              className={cn(
-                                DETAIL_TOPBAR_ACTIONS,
-                                (route.view === "prs" ||
-                                  route.view === "archived") &&
-                                  "ml-4 flex-1 pl-0",
-                              )}
-                              ref={setTopbarActionsEl}
-                            />
-                          </TopBarTitle>
-                        )}
-                    </div>
-                    {!isPhone && <ServerHealthMonitor />}
+                            {topbarTitle}
+                          </span>
+                          {/* Filled by the page, if it has controls to put here. */}
+                          <TopBarActions
+                            className={cn(
+                              DETAIL_TOPBAR_ACTIONS,
+                              (route.view === "prs" ||
+                                route.view === "archived") &&
+                                "ml-4 flex-1 pl-0",
+                            )}
+                            ref={setTopbarActionsEl}
+                          />
+                        </TopBarTitle>
+                      )}
                   </TopBar>
                   {!activeTabSplit && tabStripVisible && renderTabBar(null)}
                   {splitDropSide && (
