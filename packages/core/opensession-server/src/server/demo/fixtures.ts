@@ -1045,7 +1045,7 @@ export function demoReplayScript(): Array<() => JsonlLine[]> {
       '🟢 *Fix flaky upload retry test*  `bks-demo-pr`\n   done · opensession · code · branch demo/fix-flaky-upload · createdBy="Alex" · 2h ago\n   PR open https://github.com/acme/acme-todo/pull/128\n\n*Recent transcript:*\n• tool:Bash: Using bash\n• tool_result: 100 pass 0 fail\n• assistant: Fixed and verified — 100/100 green.',
     ),
     // A suggested task: the agent proposes a follow-up it will not start, and
-    // the turn renders it as a card with "Start in a new session".
+    // the turn renders it as a card with "Start session".
     step(
       10,
       "opensession-sessions_suggest_task",
@@ -1058,7 +1058,7 @@ export function demoReplayScript(): Array<() => JsonlLine[]> {
         repo: "acme-todo",
         mode: "code",
       },
-      'Suggested task recorded: "Tag gateway spans with the tenant id". It appears as a card in this session with a "Start in a new session" button; nothing runs until a person presses it.',
+      'Suggested task recorded: "Tag gateway spans with the tenant id". It appears as a card in this session with a "Start session" button; nothing runs until a person presses it.',
     ),
     say(
       "demo-live-a4",

@@ -372,6 +372,27 @@ type NewSessionRequest = {
   duplicate?: true;
 };
 
+/**
+ * Create a session from a prompt and start its opening run, the REST create
+ * the native apps use. It skips the composer, so it fits a control whose
+ * prompt is already written: a suggested task's Start. `requestId` makes a
+ * repeated press land on the one session instead of two.
+ */
+export async function createSessionApi(input: {
+  prompt: string;
+  user: string;
+  requestId: string;
+  repo?: string;
+  branch?: string;
+  mode?: "ask" | "code";
+}): Promise<{ id: string }> {
+  return request<{ id: string }>("/sessions", {
+    method: "POST",
+    body: input,
+    label: "Could not start the session",
+  });
+}
+
 /** Create an idle sibling tab. The first prompt starts its engine run. */
 export async function newSessionApi(
   sourceId: string,

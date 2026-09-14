@@ -321,7 +321,7 @@ describe("suggested task", () => {
     );
     expect(html).toContain("Suggested task");
     expect(html).toContain("Avoid false failure after subagent yield handoff");
-    expect(html).toContain("Start in a new session");
+    expect(html).toContain("Start session");
     expect(html).toContain(
       'href="/new?prompt=Handle+the+handoff+without+the+red+error.&amp;repo=opensession"',
     );

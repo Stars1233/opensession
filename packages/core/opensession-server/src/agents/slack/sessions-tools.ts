@@ -738,12 +738,12 @@ export function createSessionsMcpServer(
       },
     ),
     // Delegation the person keeps control of: the agent proposes, the card
-    // offers "Start in a new session", nothing runs until they press it. No
+    // offers "Start session", nothing runs until they press it. No
     // control surface, so it sits with the observe tools rather than behind
     // isAdmin, and a Slack reader gets the same link in the result text.
     tool(
       "suggest_task",
-      `Propose a well-scoped follow-up for a person to start in a new ${productName()} session, without starting it. Use it when you notice a self-contained piece of work that is worth doing but outside the current request: a bug spotted on the way, a refactor the change makes possible, a missing test, a docs gap. The suggestion renders as a card in this session with a "Start in a new session" button, so the person decides; nothing runs until they press it. Write instructions a fresh session can act on with no access to this conversation: goal, relevant files, constraints, acceptance criteria, what to report. In your reply mention the suggestion in one line and do not repeat its instructions. Do not use this for the work you were asked to do, and do not start the task yourself (spawn_task, create_session) unless asked.`,
+      `Propose a well-scoped follow-up for a person to start in a new ${productName()} session, without starting it. Use it when you notice a self-contained piece of work that is worth doing but outside the current request: a bug spotted on the way, a refactor the change makes possible, a missing test, a docs gap. The suggestion renders as a card in this session with a "Start session" button that creates a new session from your instructions, so the person decides; nothing runs until they press it. Write instructions a fresh session can act on with no access to this conversation: goal, relevant files, constraints, acceptance criteria, what to report. In your reply mention the suggestion in one line and do not repeat its instructions. Do not use this for the work you were asked to do, and do not start the task yourself (spawn_task, create_session) unless asked.`,
       {
         title: z
           .string()
@@ -811,7 +811,7 @@ export function createSessionsMcpServer(
           user: ctx.createdBy,
         });
         return text(
-          `Suggested task recorded: "${args.title.trim()}". It appears as a card in this session with a "Start in a new session" button; nothing runs until a person presses it. Link: ${url}\nMention the suggestion in one line in your reply and do not repeat its instructions.`,
+          `Suggested task recorded: "${args.title.trim()}". It appears as a card in this session with a "Start session" button; nothing runs until a person presses it. Link: ${url}\nMention the suggestion in one line in your reply and do not repeat its instructions.`,
         );
       },
     ),
