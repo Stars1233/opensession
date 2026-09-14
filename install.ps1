@@ -146,6 +146,25 @@ Good "opensession -> $Dir\scripts\cli.ts"
 
 # -- PATH --------------------------------------------------------------------
 
+function Broadcast-EnvironmentChange {
+  try {
+    if (-not ("OpenSession.NativeMethods" -as [type])) {
+      Add-Type -Namespace OpenSession -Name NativeMethods -MemberDefinition @'
+[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+    }
+    $HWND_BROADCAST = [IntPtr]0xffff
+    $WM_SETTINGCHANGE = 0x001A
+    $SMTO_ABORTIFHUNG = 0x0002
+    [UIntPtr]$result = [UIntPtr]::Zero
+    $sent = [OpenSession.NativeMethods]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [UIntPtr]::Zero, "Environment", $SMTO_ABORTIFHUNG, 5000, [ref]$result)
+    return $sent -ne [IntPtr]::Zero
+  } catch {
+    return $false
+  }
+}
+
 if (-not $NoModifyPath) {
   # Registry, not setx: setx truncates values over 1024 characters, which on a
   # developer machine is a real risk of destroying the PATH.
@@ -157,7 +176,16 @@ if (-not $NoModifyPath) {
       $next = if ($current) { "$current;$BinDir" } else { $BinDir }
       # ExpandString keeps any %VAR% entries other tools wrote expandable.
       $key.SetValue("Path", $next, [Microsoft.Win32.RegistryValueKind]::ExpandString)
-      Good "added to the user PATH (new terminals pick it up)"
+      # A registry write alone is not enough: Explorer launches every new
+      # terminal from its own cached environment block, which only refreshes on
+      # WM_SETTINGCHANGE (what setx broadcasts) or at sign-out. Without this a
+      # freshly opened terminal still has no opensession until the next logon.
+      if (Broadcast-EnvironmentChange) {
+        Good "added to the user PATH (new terminals pick it up)"
+      } else {
+        Good "added to the user PATH"
+        Muted "  could not notify running programs; sign out and back in before opening a new terminal"
+      }
     } else {
       Good "already on the user PATH"
     }
