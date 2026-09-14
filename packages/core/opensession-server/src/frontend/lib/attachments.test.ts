@@ -68,10 +68,13 @@ const {
   attachToDraft,
   dropStagingAttachments,
   removeDraftImage,
+  addDraftPastedText,
+  removeDraftPastedText,
   attachingLabel,
   countStaging,
 } = await import("./attachments");
-const { loadDraft, saveDraft, clearDraft } = await import("./drafts");
+const { loadDraft, saveDraft, clearDraft, onDraftsChanged } =
+  await import("./drafts");
 
 const KEY = "test-attachments";
 const realFetch = globalThis.fetch;
@@ -185,6 +188,43 @@ test("removing an image goes through the store", async () => {
   expect(loadDraft(KEY).images).toEqual([
     `/media?path=${encodeURIComponent("/uploads/staged/b.png")}`,
   ]);
+});
+
+// The palette's paste handler is built during a render. Two pastes served by
+// the same handler must still land as two chips, so each append reads the
+// store rather than the list the handler was built with.
+test("pastes accumulate in the store, however stale the caller", () => {
+  addDraftPastedText(KEY, "first");
+  addDraftPastedText(KEY, "second");
+  addDraftPastedText(KEY, "third");
+
+  const stored = loadDraft(KEY).pastedTexts;
+  expect(stored.map((item) => item.text)).toEqual(["first", "second", "third"]);
+  expect(new Set(stored.map((item) => item.id)).size).toBe(3);
+
+  removeDraftPastedText(KEY, stored[1]!.id);
+  expect(loadDraft(KEY).pastedTexts.map((item) => item.text)).toEqual([
+    "first",
+    "third",
+  ]);
+});
+
+// A second composer mirroring the same key learns about every paste, not just
+// the first: the store announces a pasted-text change the way it does an image
+// or a file, not only the edge from empty to non-empty.
+test("every pasted-text change is announced", () => {
+  const keys: (string | undefined)[] = [];
+  const stop = onDraftsChanged((key) => keys.push(key));
+  try {
+    saveDraft(KEY, { text: "hello" });
+    keys.length = 0;
+    addDraftPastedText(KEY, "first");
+    addDraftPastedText(KEY, "second");
+    removeDraftPastedText(KEY, loadDraft(KEY).pastedTexts[0]!.id);
+  } finally {
+    stop();
+  }
+  expect(keys).toEqual([KEY, KEY, KEY]);
 });
 
 // A staged attachment is a ~90-character ref, but an image the server refused

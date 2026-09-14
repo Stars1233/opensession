@@ -241,7 +241,8 @@ function writeLocal(
   // the sidebar nothing.
   const attachmentsChanged =
     previous.images.length !== next.images.length ||
-    previous.files.length !== next.files.length;
+    previous.files.length !== next.files.length ||
+    previous.pastedTexts.length !== next.pastedTexts.length;
   if (has) {
     drafts.set(key, next);
     schedulePersist(key);

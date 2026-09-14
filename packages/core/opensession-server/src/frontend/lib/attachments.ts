@@ -23,6 +23,7 @@
 import { MAX_PROMPT_IMAGES } from "@tellahq/opensession-protocol/session";
 import { loadDraft, saveDraft } from "./drafts";
 import { splitAttachments, type FileAttachment } from "./images";
+import { createPastedTextAttachment } from "./pasted-text";
 
 /** Why an image past the per-message cap was left out of the draft. */
 export function imageCapReason(dropped: number): string {
@@ -145,6 +146,28 @@ export function removeDraftImage(key: string, index: number): void {
 export function removeDraftFile(key: string, index: number): void {
   const stored = loadDraft(key);
   saveDraft(key, { files: stored.files.filter((_, i) => i !== index) });
+}
+
+/**
+ * Add a collapsed paste to the key's draft. The list is read from the store
+ * at the moment of the paste, never from a caller's copy: a handler built
+ * during a render holds the list as it was then, and two pastes served by the
+ * same handler would each append to that same stale list, leaving one chip on
+ * screen for two pastes sent.
+ */
+export function addDraftPastedText(key: string, text: string): void {
+  const stored = loadDraft(key);
+  saveDraft(key, {
+    pastedTexts: [...stored.pastedTexts, createPastedTextAttachment(text)],
+  });
+}
+
+/** Drop one of the key's collapsed pastes by id. */
+export function removeDraftPastedText(key: string, id: string): void {
+  const stored = loadDraft(key);
+  saveDraft(key, {
+    pastedTexts: stored.pastedTexts.filter((item) => item.id !== id),
+  });
 }
 
 /**

@@ -29,10 +29,7 @@ import {
 } from "../lib/api";
 import { getCurrentUser } from "./UserPicker";
 import { type FileAttachment } from "../lib/images";
-import {
-  createPastedTextAttachment,
-  type PastedTextAttachment,
-} from "../lib/pasted-text";
+import { type PastedTextAttachment } from "../lib/pasted-text";
 import {
   loadDraft,
   saveDraft,
@@ -42,11 +39,13 @@ import {
   workspaceDraftKey,
 } from "../lib/drafts";
 import {
+  addDraftPastedText,
   attachToDraft,
   dropStagingAttachments,
   isStaging,
   removeDraftFile,
   removeDraftImage,
+  removeDraftPastedText,
   sameFiles,
   sameImages,
 } from "../lib/attachments";
@@ -1489,15 +1488,15 @@ export function NewSession({
                 adoptDraftAttachments();
               },
               addAttachments: (picked) => void addAttachments(picked),
+              // Through the store, like an image or a file: the handler must
+              // not carry its own copy of the list (lib/attachments.ts).
               addPastedText: (text) => {
-                const next = [...pastedTexts, createPastedTextAttachment(text)];
-                setPastedTexts(next);
-                saveDraft(DRAFT_KEY, { pastedTexts: next });
+                addDraftPastedText(DRAFT_KEY, text);
+                adoptDraftAttachments();
               },
               removePastedText: (id) => {
-                const next = pastedTexts.filter((item) => item.id !== id);
-                setPastedTexts(next);
-                saveDraft(DRAFT_KEY, { pastedTexts: next });
+                removeDraftPastedText(DRAFT_KEY, id);
+                adoptDraftAttachments();
               },
               create: handleCreate,
               changeHasText: setHasPromptText,
