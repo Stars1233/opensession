@@ -203,7 +203,7 @@ export function AppSidebar({
             </Tooltip>
           </div>
           {!isPhone && !sidebarCollapsed && (
-            <div className="@container/server-health flex min-w-0 flex-1 items-center">
+            <div className="@container/server-health flex min-w-0 flex-1 items-center justify-center">
               <ServerHealthMonitor />
             </div>
           )}

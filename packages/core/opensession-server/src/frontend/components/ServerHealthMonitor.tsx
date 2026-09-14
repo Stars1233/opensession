@@ -13,6 +13,7 @@ import { Button } from "../ui/button";
 import { cn } from "../ui/cn";
 import { Popover } from "../ui/popover";
 import { IconServer, IconX } from "./icons";
+import { FrontendFpsCounter } from "./FrontendFpsCounter";
 
 function ResourceGraph({
   samples,
@@ -71,16 +72,21 @@ export function ServerHealthMonitor({
         aria-label="Server health"
         render={<Button variant="ghost" size="sm" />}
         className={cn(
-          "shrink-0 gap-3 min-h-10 font-normal [-webkit-app-region:no-drag] [app-region:no-drag]",
+          "shrink-0 gap-2 min-h-10 font-normal [-webkit-app-region:no-drag] [app-region:no-drag]",
           compact
-            ? cn(MOBILE_TOP_BAR_CONTROL, "size-11 p-0")
-            : "px-1 @max-[200px]/server-health:w-10 @max-[200px]/server-health:p-0",
+            ? cn(
+                MOBILE_TOP_BAR_CONTROL,
+                "phone:w-auto phone:gap-1.5 phone:px-2",
+              )
+            : "px-1 @max-[224px]/server-health:p-0",
         )}
       >
         {/* The sidebar slot measures space left after traffic lights and navigation. */}
         <span
           className={
-            compact ? "flex" : "hidden @max-[200px]/server-health:flex"
+            compact
+              ? "flex"
+              : "hidden @min-[80px]/server-health:@max-[224px]/server-health:flex"
           }
         >
           {latest?.cpu != null ? (
@@ -94,10 +100,10 @@ export function ServerHealthMonitor({
           )}
         </span>
         {!compact && (
-          <span className="flex gap-2 @max-[200px]/server-health:hidden">
+          <span className="flex gap-2 @max-[224px]/server-health:hidden">
             {RESOURCE_METRICS.map(({ key, shortLabel }) => (
-              <span key={key} className="flex w-14 flex-col gap-0.5">
-                <span className="flex items-center justify-between text-meta leading-tight">
+              <span key={key} className="flex w-12 flex-col gap-0.5">
+                <span className="flex items-center justify-between gap-1 text-meta leading-tight">
                   <span className="text-faint">{shortLabel}</span>
                   <span className="tabular-nums text-dim">
                     {formatResourcePercent(resourcePercent(latest, key))}
@@ -112,6 +118,7 @@ export function ServerHealthMonitor({
             ))}
           </span>
         )}
+        <FrontendFpsCounter />
       </Popover.Trigger>
       <Popover.Popup
         side="bottom"
