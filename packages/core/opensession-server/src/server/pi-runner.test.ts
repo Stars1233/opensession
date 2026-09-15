@@ -24,6 +24,7 @@ import {
   assertContainedPiPath,
   assistantRenderableBlockCount,
   buildPiThirdPartyProviderPlan,
+  cancelPiRun,
   isPiSessionBusy,
   isPiUsageLimitShape,
   makeGuardedGrepExecute,
@@ -36,7 +37,7 @@ import {
   PI_STEER_TOOL_SKIP,
   piDialOracleAgent,
   piGateReason,
-  piStreamEventBlocksAccountRotation,
+  piStreamEventRequiresAccountContinuation,
   piSteeringBoundaryTools,
   piToolNames,
   resolvePiPresetWiring,
@@ -740,22 +741,26 @@ describe("pi/openai in-band account rotation gate", () => {
     // Pi emits init → usage_snapshot(0) → stopReason:error for a provider
     // usage limit. The terminal is handled after the queue drains, so the
     // snapshot must not masquerade as assistant output and block rotation.
-    expect(piStreamEventBlocksAccountRotation({ type: "init" })).toBe(false);
-    expect(piStreamEventBlocksAccountRotation({ type: "usage_snapshot" })).toBe(
+    expect(piStreamEventRequiresAccountContinuation({ type: "init" })).toBe(
       false,
     );
+    expect(
+      piStreamEventRequiresAccountContinuation({ type: "usage_snapshot" }),
+    ).toBe(false);
 
     // Real output and durable operational notices still make replay unsafe.
-    expect(piStreamEventBlocksAccountRotation({ type: "text_chunk" })).toBe(
+    expect(
+      piStreamEventRequiresAccountContinuation({ type: "text_chunk" }),
+    ).toBe(true);
+    expect(piStreamEventRequiresAccountContinuation({ type: "tool_use" })).toBe(
       true,
     );
-    expect(piStreamEventBlocksAccountRotation({ type: "tool_use" })).toBe(true);
-    expect(piStreamEventBlocksAccountRotation({ type: "tool_result" })).toBe(
-      true,
-    );
-    expect(piStreamEventBlocksAccountRotation({ type: "runner_notice" })).toBe(
-      true,
-    );
+    expect(
+      piStreamEventRequiresAccountContinuation({ type: "tool_result" }),
+    ).toBe(true);
+    expect(
+      piStreamEventRequiresAccountContinuation({ type: "runner_notice" }),
+    ).toBe(true);
   });
 });
 
@@ -1007,159 +1012,252 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     expect(errors[0].usageLimitExhausted).toBe(true);
   });
 
-  test("an in-band zero-usage limit rotates before model fallback", async () => {
-    const servingHomeAccount = (id: string, providerAccountId: string) => {
-      const home = join(dir, `codex-home-${id}`);
-      mkdirSync(home, { recursive: true });
-      const payload = Buffer.from(
-        JSON.stringify({ exp: Math.floor((Date.now() + 60 * 60_000) / 1000) }),
-      ).toString("base64url");
+  test.each([
+    { streamed: false, strict: false, cancel: false, dry: false },
+    { streamed: true, strict: false, cancel: false, dry: false },
+    { streamed: true, strict: true, cancel: false, dry: false },
+    { streamed: true, strict: false, cancel: true, dry: false },
+    { streamed: true, strict: false, cancel: false, dry: true },
+  ])(
+    "in-band account rotation %j",
+    async ({ streamed, strict, cancel, dry }) => {
+      const servingHomeAccount = (id: string, providerAccountId: string) => {
+        const home = join(dir, `codex-home-${id}`);
+        mkdirSync(home, { recursive: true });
+        const payload = Buffer.from(
+          JSON.stringify({
+            exp: Math.floor((Date.now() + 60 * 60_000) / 1000),
+          }),
+        ).toString("base64url");
+        writeFileSync(
+          join(home, "auth.json"),
+          JSON.stringify({
+            tokens: {
+              access_token: `h.${payload}.s`,
+              account_id: providerAccountId,
+            },
+          }),
+        );
+        return {
+          id,
+          name: id,
+          kind: "home",
+          value: home,
+          createdAt: new Date().toISOString(),
+        };
+      };
+
+      const firstAccountId = `live-a-${crypto.randomUUID()}`;
       writeFileSync(
-        join(home, "auth.json"),
+        storePath,
         JSON.stringify({
-          tokens: {
-            access_token: `h.${payload}.s`,
-            account_id: providerAccountId,
-          },
+          accounts: [
+            servingHomeAccount(firstAccountId, "provider-a"),
+            ...(dry
+              ? []
+              : [
+                  {
+                    id: "live-b",
+                    name: "live-b",
+                    kind: "api_key",
+                    value: "sk-provider-b",
+                    createdAt: new Date().toISOString(),
+                  },
+                ]),
+          ],
         }),
       );
-      return {
-        id,
-        name: id,
-        kind: "home",
-        value: home,
-        createdAt: new Date().toISOString(),
-      };
-    };
 
-    writeFileSync(
-      storePath,
-      JSON.stringify({
-        accounts: [
-          servingHomeAccount("live-a", "provider-a"),
-          {
-            id: "live-b",
-            name: "live-b",
-            kind: "api_key",
-            value: "sk-provider-b",
-            createdAt: new Date().toISOString(),
+      const prompts: string[] = [];
+      const managers: Array<{ completedActions: number }> = [];
+      let completedActions = 0;
+      const usedProviderAccounts: string[] = [];
+      const transportSettings: Array<Record<string, unknown>> = [];
+      const fakeSdk = {
+        ModelRuntime: {
+          create: async ({ credentials }: any) => {
+            const auth = await credentials.read("openai-codex");
+            const runtime = {
+              providerAccountId: String(auth?.accountId || ""),
+              getModel: (_provider: string, id: string) => ({ id, name: id }),
+              registerProvider: () => {},
+              setRuntimeApiKey: async (provider: string, key: string) => {
+                if (provider === "openai" && key === "sk-provider-b") {
+                  runtime.providerAccountId = "provider-b";
+                }
+              },
+            };
+            return runtime;
           },
-        ],
-      }),
-    );
-
-    const usedProviderAccounts: string[] = [];
-    const transportSettings: Array<Record<string, unknown>> = [];
-    const fakeSdk = {
-      ModelRuntime: {
-        create: async ({ credentials }: any) => {
-          const auth = await credentials.read("openai-codex");
-          const runtime = {
-            providerAccountId: String(auth?.accountId || ""),
-            getModel: (_provider: string, id: string) => ({ id, name: id }),
-            registerProvider: () => {},
-            setRuntimeApiKey: async (provider: string, key: string) => {
-              if (provider === "openai" && key === "sk-provider-b") {
-                runtime.providerAccountId = "provider-b";
+        },
+        SettingsManager: {
+          inMemory: (settings: Record<string, unknown>) => {
+            transportSettings.push(settings);
+            return {};
+          },
+        },
+        DefaultResourceLoader: class {
+          async reload() {}
+          getSkills() {
+            return { skills: [] };
+          }
+        },
+        SessionManager: {
+          create: () => ({ completedActions: 0 }),
+          open: () => ({ completedActions: 0 }),
+        },
+        createAgentSession: async ({ modelRuntime, sessionManager }: any) => {
+          const providerAccountId = String(modelRuntime.providerAccountId);
+          usedProviderAccounts.push(providerAccountId);
+          managers.push(sessionManager);
+          const limited = providerAccountId === "provider-a";
+          let listener: (event: any) => void = () => {};
+          const session = {
+            sessionId: `fake-${providerAccountId}`,
+            sessionManager,
+            pendingMessageCount: 0,
+            agent: { continue: async () => {} },
+            setSteeringMode: () => {},
+            subscribe: (fn: (event: any) => void) => {
+              listener = fn;
+              return () => {};
+            },
+            prompt: async (prompt: string) => {
+              prompts.push(prompt);
+              if (streamed && prompt.endsWith("\n\nhi")) {
+                completedActions++;
+                sessionManager.completedActions++;
+                listener({
+                  type: "message_end",
+                  message: {
+                    role: "assistant",
+                    stopReason: "toolUse",
+                    content: [{ type: "text", text: "Working on it" }],
+                    usage: {
+                      input: 11,
+                      output: 7,
+                      cacheRead: 3,
+                      cacheWrite: 2,
+                      cost: { total: 0.5 },
+                    },
+                    timestamp: Date.now(),
+                  },
+                });
+                listener({
+                  type: "tool_execution_start",
+                  toolCallId: "completed-action",
+                  toolName: "bash",
+                  args: { command: "do-once" },
+                });
+                listener({
+                  type: "tool_execution_end",
+                  toolCallId: "completed-action",
+                  toolName: "bash",
+                  result: { content: [{ type: "text", text: "done" }] },
+                  isError: false,
+                });
               }
+              listener({
+                type: "message_end",
+                message: {
+                  role: "assistant",
+                  stopReason: limited ? "error" : "stop",
+                  errorMessage: limited
+                    ? "Codex error: The usage limit has been reached"
+                    : undefined,
+                  usage: {
+                    input: limited ? 0 : 1,
+                    output: limited ? 0 : 1,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    cost: { total: 0 },
+                  },
+                  content: limited ? [] : [{ type: "text", text: "ok" }],
+                  timestamp: Date.now(),
+                },
+              });
+              listener({ type: "agent_settled" });
+            },
+            getLastAssistantText: () => (limited ? "" : "ok"),
+            steer: async () => {},
+            abort: async () => {},
+            abortRetry: () => {},
+            dispose: () => {
+              if (cancel && limited) cancelPiRun(sessionKey);
             },
           };
-          return runtime;
+          return { session };
         },
-      },
-      SettingsManager: {
-        inMemory: (settings: Record<string, unknown>) => {
-          transportSettings.push(settings);
-          return {};
-        },
-      },
-      DefaultResourceLoader: class {
-        async reload() {}
-        getSkills() {
-          return { skills: [] };
-        }
-      },
-      SessionManager: {
-        create: () => ({}),
-        open: () => ({}),
-      },
-      createAgentSession: async ({ modelRuntime }: any) => {
-        const providerAccountId = String(modelRuntime.providerAccountId);
-        usedProviderAccounts.push(providerAccountId);
-        const limited = providerAccountId === "provider-a";
-        let listener: (event: any) => void = () => {};
-        const session = {
-          sessionId: `fake-${providerAccountId}`,
-          pendingMessageCount: 0,
-          agent: { continue: async () => {} },
-          setSteeringMode: () => {},
-          subscribe: (fn: (event: any) => void) => {
-            listener = fn;
-            return () => {};
-          },
-          prompt: async () => {
-            listener({
-              type: "message_end",
-              message: {
-                role: "assistant",
-                stopReason: limited ? "error" : "stop",
-                errorMessage: limited
-                  ? "Codex error: The usage limit has been reached"
-                  : undefined,
-                usage: {
-                  input: limited ? 0 : 1,
-                  output: limited ? 0 : 1,
-                  cacheRead: 0,
-                  cacheWrite: 0,
-                  cost: { total: 0 },
-                },
-                content: limited ? [] : [{ type: "text", text: "ok" }],
-                timestamp: Date.now(),
-              },
-            });
-            listener({ type: "agent_settled" });
-          },
-          getLastAssistantText: () => (limited ? "" : "ok"),
-          steer: async () => {},
-          abort: async () => {},
-          abortRetry: () => {},
-          dispose: () => {},
-        };
-        return { session };
-      },
-    };
+      };
 
-    const sdkState = globalThis as any;
-    const previousSdkPromise = sdkState.__piSdkPromise;
-    const sessionKey = `pi-inband-limit-${crypto.randomUUID()}`;
-    sdkState.__piSdkPromise = Promise.resolve(fakeSdk);
-    const warnings = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const events = await collect("pi/openai/gpt-5.6-sol", {
-        accountId: "live-a",
-        sessionId: sessionKey,
-        disableLocalWorkspaceTools: true,
-      });
-      expect(usedProviderAccounts).toEqual(["provider-a", "provider-b"]);
-      // Subscription traffic skips the experimental ChatGPT WebSocket, whose
-      // mid-stream 1006 failures otherwise force a visible whole-step retry.
-      // The API-key rotation still uses Pi's ordinary provider defaults.
-      expect(transportSettings).toEqual([{ transport: "sse" }, {}]);
-      expect(events.filter((event) => event.type === "init")).toHaveLength(2);
-      expect(events.filter((event) => event.type === "error")).toHaveLength(0);
-      expect(events.find((event) => event.type === "done")).toMatchObject({
-        model: "pi/openai/gpt-5.6-sol",
-        result: "ok",
-      });
-    } finally {
-      warnings.mockRestore();
-      sdkState.__piSdkPromise = previousSdkPromise;
-      rmSync(join(PI_STATE_DIR, "sessions", sessionKey), {
-        recursive: true,
-        force: true,
-      });
-    }
-  });
+      const sdkState = globalThis as any;
+      const previousSdkPromise = sdkState.__piSdkPromise;
+      const sessionKey = `pi-inband-limit-${crypto.randomUUID()}`;
+      sdkState.__piSdkPromise = Promise.resolve(fakeSdk);
+      const warnings = spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const events = await collect("pi/openai/gpt-5.6-sol", {
+          accountId: firstAccountId,
+          accountStrict: strict,
+          sessionId: sessionKey,
+          disableLocalWorkspaceTools: true,
+        });
+        if (strict || cancel || dry) {
+          expect(usedProviderAccounts).toEqual(["provider-a"]);
+          expect(events.filter((event) => event.type === "done")).toHaveLength(
+            0,
+          );
+          const errors = events.filter((event) => event.type === "error");
+          expect(errors).toHaveLength(cancel ? 0 : 1);
+          if (!cancel) expect(errors[0].usageLimitExhausted).toBe(true);
+          return;
+        }
+        expect(usedProviderAccounts).toEqual(["provider-a", "provider-b"]);
+        if (streamed) {
+          expect(managers[1]).toBe(managers[0]);
+          expect(managers[1].completedActions).toBe(1);
+          expect(completedActions).toBe(1);
+          expect(prompts).toHaveLength(2);
+          expect(prompts[1]).toContain('source="auto-continue"');
+          expect(prompts[1]).not.toEndWith("\n\nhi");
+          expect(
+            events.filter((event) => event.type === "tool_use"),
+          ).toHaveLength(1);
+          expect(
+            events.filter((event) => event.type === "tool_result"),
+          ).toHaveLength(1);
+          expect(
+            events.find((event) => event.type === "done")?.usage,
+          ).toMatchObject({
+            inputTokens: 12,
+            outputTokens: 8,
+            cacheReadTokens: 3,
+            cacheCreationTokens: 2,
+            costUsd: 0.5,
+          });
+        }
+        // Subscription traffic skips the experimental ChatGPT WebSocket, whose
+        // mid-stream 1006 failures otherwise force a visible whole-step retry.
+        // The API-key rotation still uses Pi's ordinary provider defaults.
+        expect(transportSettings).toEqual([{ transport: "sse" }, {}]);
+        expect(events.filter((event) => event.type === "init")).toHaveLength(2);
+        expect(events.filter((event) => event.type === "error")).toHaveLength(
+          0,
+        );
+        expect(events.find((event) => event.type === "done")).toMatchObject({
+          model: "pi/openai/gpt-5.6-sol",
+          result: "ok",
+        });
+      } finally {
+        warnings.mockRestore();
+        sdkState.__piSdkPromise = previousSdkPromise;
+        rmSync(join(PI_STATE_DIR, "sessions", sessionKey), {
+          recursive: true,
+          force: true,
+        });
+      }
+    },
+  );
 
   test("a strict pin refuses instead of rotating off the pinned account", async () => {
     writeFileSync(

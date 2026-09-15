@@ -1762,12 +1762,14 @@ interface PiAccountWalk {
   /** The first attempt's user-line uuid, reused by every replay so the
    *  transcript row upserts instead of duplicating the person's message. */
   promptEntryId?: string;
+  /** Resume completed messages and tool results instead of replaying the prompt. */
+  continuation?: AgentSession["sessionManager"];
+  cancelled?: boolean;
 }
 
-/** An init can repeat, and a live usage snapshot is replaced by the next
- * attempt. Everything else has user-visible or durable meaning and makes
- * replay unsafe. Exported so the in-band usage-limit regression stays pinned. */
-export function piStreamEventBlocksAccountRotation(
+/** Bookkeeping can repeat, but output or tool activity requires continuing the
+ * native conversation rather than replaying the original prompt. */
+export function piStreamEventRequiresAccountContinuation(
   event: Pick<StreamEvent, "type">,
 ): boolean {
   return event.type !== "init" && event.type !== "usage_snapshot";
@@ -1788,19 +1790,44 @@ export function piStreamEventBlocksAccountRotation(
  * pi/openai picks once at bind time (the seeded credential is built before
  * the SDK is even imported), so there is no per-request catch to rotate from
  * and the loop belongs here. Both sides share one contract: an exclusion set
- * threaded into the picker, rotation only while
- * nothing has streamed, and a strict pin that refuses rather than moving onto
- * an account the person did not choose.
+ * threaded into the picker and a strict pin that refuses rather than moving
+ * onto an account the person did not choose. Once output has streamed, retain
+ * the native session and ask it to continue instead of replaying the prompt.
  */
 export async function* runPi(
   opts: RunAgentOpts,
   model: string,
 ): AsyncGenerator<StreamEvent> {
   const walk: PiAccountWalk = { excluded: new Set(), rotate: false };
+  let priorUsage: TurnUsage | undefined;
   for (;;) {
     walk.rotate = false;
-    yield* runPiAttempt(opts, model, walk);
-    if (!walk.rotate) return;
+    let latestUsage = priorUsage;
+    for await (const event of runPiAttempt(opts, model, walk)) {
+      if (event.usage) {
+        const usage = event.usage;
+        latestUsage = {
+          ...usage,
+          inputTokens: (priorUsage?.inputTokens || 0) + usage.inputTokens,
+          outputTokens: (priorUsage?.outputTokens || 0) + usage.outputTokens,
+          cacheReadTokens:
+            (priorUsage?.cacheReadTokens || 0) + usage.cacheReadTokens,
+          cacheCreationTokens:
+            (priorUsage?.cacheCreationTokens || 0) + usage.cacheCreationTokens,
+          costUsd: (priorUsage?.costUsd || 0) + (usage.costUsd || 0),
+        };
+        yield { ...event, usage: latestUsage };
+      } else if (
+        priorUsage &&
+        (event.type === "error" || event.type === "done")
+      ) {
+        yield { ...event, usage: priorUsage };
+      } else {
+        yield event;
+      }
+    }
+    if (!walk.rotate || walk.cancelled) return;
+    priorUsage = latestUsage;
   }
 }
 
@@ -1991,8 +2018,8 @@ async function* runPiAttempt(
       markCodexExhausted(account.id, parsed.modelID);
     else markXaiExhausted(account.id, parsed.modelID);
   };
-  // Has the reader seen replay-unsafe output yet? A rotation replays the whole
-  // attempt, so it may only run before model text or tool activity has escaped.
+  // Has the reader seen replay-unsafe output yet? After text or tool activity
+  // escapes, rotation must continue the native session, not replay this prompt.
   // `usage_snapshot` does NOT close the walk: Pi emits a zero-token snapshot
   // with an in-band usage-limit terminal, and treating that bookkeeping event
   // as model output strands the rest of the account pool. (The Anthropic side's
@@ -2036,9 +2063,10 @@ async function* runPiAttempt(
 
   /** Take the rotation, or return false and let the caller surface the
    *  failure. Records the burn, audits the switch and closes this attempt's
-   *  audit; runPi replays the attempt on the next account. */
+   *  audit; runPi resumes or replays the attempt on the next account. */
   const takeAccountRotation = (errorText: string): boolean => {
-    if (sawStreamedOutput || !pickedAccount) return false;
+    if (!pickedAccount || (sawStreamedOutput && !session?.sessionManager))
+      return false;
     const next = nextPoolAccount();
     if (!next) return false;
     console.warn(
@@ -2052,10 +2080,17 @@ async function* runPiAttempt(
       account: pickedAccount.masked,
       account_switch_to: next.masked,
     });
+    if (sawStreamedOutput && session)
+      walk.continuation = session.sessionManager;
     walk.excluded.add(pickedAccount.id);
     walk.rotate = true;
     reachedTerminal = true;
-    endTurn({ ok: false, pi_session_id: piSessionId, error: errorText });
+    endTurn({
+      ok: false,
+      pi_session_id: piSessionId,
+      ...usageAuditFields(),
+      error: errorText,
+    });
     return true;
   };
 
@@ -2594,9 +2629,10 @@ async function* runPiAttempt(
     // Cross-engine handoff notes ride the prompt. A detached host also gets a
     // server-read seed snapshot for the resume-miss case because it must never
     // open transcripts.db itself.
-    const resumePath = opts.sessionId
-      ? findPiSessionFile(sessionDir, opts.sessionId)
-      : null;
+    const resumePath =
+      !walk.continuation && opts.sessionId
+        ? findPiSessionFile(sessionDir, opts.sessionId)
+        : null;
     // Resume-miss bridge: pi's SessionManager buffers a session's jsonl until
     // its first ASSISTANT message, so a turn that died before any assistant
     // output (bridge 429 pre-token, instant cancel) journaled a piSessionId
@@ -2604,7 +2640,12 @@ async function* runPiAttempt(
     // a silently-fresh session would drop the model's context while the store
     // still shows the turns. Bridge it from the store ourselves.
     let resumeMissNote: string | null = null;
-    if (opts.sessionId && !resumePath && unifiedSessionId) {
+    if (
+      !walk.continuation &&
+      opts.sessionId &&
+      !resumePath &&
+      unifiedSessionId
+    ) {
       try {
         const tail = (
           transcriptForwarder()
@@ -2629,9 +2670,11 @@ async function* runPiAttempt(
         console.warn("[pi-runner] resume-miss handoff build failed:", e);
       }
     }
-    const sessionManager = resumePath
-      ? sdk.SessionManager.open(resumePath, sessionDir)
-      : sdk.SessionManager.create(cwd, sessionDir);
+    const sessionManager =
+      walk.continuation ??
+      (resumePath
+        ? sdk.SessionManager.open(resumePath, sessionDir)
+        : sdk.SessionManager.create(cwd, sessionDir));
 
     // Preset effort override (workspace preset's pin first, then the built-in
     // preset's) falls back to the session's own effort.
@@ -2677,7 +2720,7 @@ async function* runPiAttempt(
     // tool guidance. Record it once for the collapsed transcript-start audit
     // row. Later turns can change ambient memory, but this row deliberately
     // answers what preceded the session's initial message.
-    if (!opts.sessionId) {
+    if (!opts.sessionId && !walk.continuation) {
       const activeToolNames = new Set(session.getActiveToolNames());
       await logStandingContext({
         sessionId: unifiedSessionId,
@@ -2801,7 +2844,8 @@ async function* runPiAttempt(
     const queue: StreamEvent[] = [];
     let wake: (() => void) | null = null;
     const push = (ev: StreamEvent) => {
-      if (piStreamEventBlocksAccountRotation(ev)) sawStreamedOutput = true;
+      if (piStreamEventRequiresAccountContinuation(ev))
+        sawStreamedOutput = true;
       queue.push(ev);
       const w = wake;
       wake = null;
@@ -2843,7 +2887,12 @@ async function* runPiAttempt(
     const promptForEngine = [
       wrapContext(sessionContext, "session"),
       ...(resumeMissNote ? [wrapContext(resumeMissNote, "handoff")] : []),
-      promptWithSkill,
+      walk.continuation
+        ? wrapContext(
+            "The previous account reached its usage limit. Continue the unfinished task from the existing conversation and completed tool results. Do not restart the task or repeat completed actions. Finish with a reply to the user.",
+            "auto-continue",
+          )
+        : promptWithSkill,
     ].join("\n\n");
     // Injected BELOW runOnModel's choke point, so that call never saw this
     // payload — log it here, exactly as the previous runner runner does for its own
@@ -3115,7 +3164,7 @@ async function* runPiAttempt(
     } else {
       void session
         .prompt(promptForEngine, {
-          images: piImages(opts.images),
+          images: walk.continuation ? undefined : piImages(opts.images),
           expandPromptTemplates: false,
         })
         .then(
@@ -3282,9 +3331,8 @@ async function* runPiAttempt(
     // Rotate rather than end the turn. This is the COMMON half of the walk:
     // a provider usage limit normally arrives as an in-band terminal (pi's
     // own error result), not as a throw, so without this the openai walk
-    // would only ever engage on pre-init failures. takeAccountRotation is a
-    // no-op once anything has streamed, so a limit that lands mid-answer
-    // still surfaces here instead of replaying what the reader already saw.
+    // would only ever engage on pre-init failures. A mid-turn limit retains
+    // the native session so the next account continues completed work.
     if (terminalUsageLimit && takeAccountRotation(String(terminal.content))) {
       return;
     }
@@ -3365,6 +3413,7 @@ async function* runPiAttempt(
         session.dispose();
       } catch {}
     }
+    walk.cancelled ||= abort.signal.aborted;
     for (const key of registeredKeys) {
       if (activeRuns.get(key) === handle) activeRuns.delete(key);
     }
