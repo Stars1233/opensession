@@ -26,6 +26,7 @@ test("composer groups configuration and actions behind a bounded prop API", asyn
     "config",
     "actions",
     "attached",
+    "attachedAction",
     "menuExtra",
     "sendMenu",
   ]);

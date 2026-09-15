@@ -1401,19 +1401,11 @@ export function SessionViewerMainRegion({
                       )}
                     </>
                   )}
-                  attached={
+                  attached={attachedComposer}
+                  attachedAction={
                     nextAction ? (
-                      <>
-                        {attachedComposer}
-                        <NextUnreadButton
-                          key={session.id}
-                          phone={isPhone}
-                          stacked={!!attachedComposer}
-                        />
-                      </>
-                    ) : (
-                      attachedComposer
-                    )
+                      <NextUnreadButton key={session.id} phone={isPhone} />
+                    ) : null
                   }
                   sendMenu={
                     session.source === "opensession"

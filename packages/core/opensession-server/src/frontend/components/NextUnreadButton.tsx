@@ -10,13 +10,7 @@ import { Button } from "../ui/button";
 import { Popover } from "../ui/popover";
 import { IconArrowRight, IconX } from "./icons";
 
-export function NextUnreadButton({
-  phone = false,
-  stacked = false,
-}: {
-  phone?: boolean;
-  stacked?: boolean;
-}) {
+export function NextUnreadButton({ phone = false }: { phone?: boolean }) {
   const { unreadChats, allChatsRead, openNextChat } = useNavigation();
   const keys = useShortcutKeys("workspace-next-unread");
   const [open, setOpen] = useState(false);
@@ -33,11 +27,9 @@ export function NextUnreadButton({
   const chats = availableHeldChats(held, unreadChats);
   const next = chats[0];
   const surface = cn(
-    "relative min-h-10 w-full justify-start gap-2 border-x border-t border-b-0 bg-[color-mix(in_srgb,var(--bg-panel)_80%,var(--composer-surface))] px-3.5 text-left text-label font-medium phone:min-h-11",
+    "relative min-h-[54px] min-w-0 max-w-[min(24rem,85%)] justify-start gap-2 border-x border-t border-b-0 bg-[color-mix(in_srgb,var(--bg-panel)_80%,var(--composer-surface))] px-3.5 pt-2.5 pb-6 text-left text-label font-medium phone:min-h-[58px]",
     composerFlapBorder,
-    stacked
-      ? "rounded-none"
-      : "rounded-b-none rounded-t-[var(--composer-radius)]",
+    "rounded-b-none rounded-t-[var(--composer-radius)]",
   );
 
   useEffect(() => () => clearTimeout(longPress.current), []);

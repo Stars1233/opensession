@@ -147,6 +147,8 @@ interface Props {
   actions: ComposerActions;
   /** Content visually attached to the composer above the draft field. */
   attached?: React.ReactNode;
+  /** A compact tab attached to the top-right edge, above any full-width flaps. */
+  attachedAction?: React.ReactNode;
   /** Extra row for the "+" menu, below the built-in ones. Same shape as
    * `sendMenu`: render a `composerMenuItem` button and call `close()` when it
    * is picked. */
@@ -230,6 +232,7 @@ export function Composer({
   },
   menuExtra,
   attached,
+  attachedAction,
   sendMenu,
 }: Props) {
   const internalRef = useRef<HTMLTextAreaElement>(null);
@@ -489,7 +492,7 @@ export function Composer({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [dictating, setDictating] = useState(false);
   const [dictationClipping, setDictationClipping] = useState(false);
-  const hasAttached = !!attached;
+  const hasAttached = !!attached || !!attachedAction;
   const hasContent =
     !!text.trim() ||
     imgs.length > 0 ||
@@ -1299,6 +1302,9 @@ export function Composer({
     <div className="mx-auto w-full max-w-[calc(var(--session-col)+40px)]">
       {/* Queued/steered messages fold out from behind the composer box —
           a sibling flap tucked under its top edge, not a box-in-box. */}
+      {attachedAction && (
+        <div className="-mb-3.5 flex justify-end px-3">{attachedAction}</div>
+      )}
       {attached}
       <motion.div
         layout
@@ -1331,19 +1337,18 @@ export function Composer({
         // otherwise Motion animates from the stylesheet value on load, a
         // visible radius morph.
         //
-        // With a flap attached the two are ONE control rather than a pill
-        // parked on a panel: the flap keeps the rounded top, this keeps the
-        // rounded bottom, and the seam where they meet squares off.
+        // Full-width flaps share a squared seam with the composer. A compact
+        // action instead tucks behind its rounded top edge with a small inset.
         initial={false}
         animate={{
           borderTopLeftRadius: minimized
             ? 999
-            : hasAttached
+            : attached
               ? 0
               : composerRadius(),
           borderTopRightRadius: minimized
             ? 999
-            : hasAttached
+            : attached
               ? 0
               : composerRadius(),
           borderBottomLeftRadius: minimized ? 999 : composerRadius(),
