@@ -32,6 +32,9 @@ writeFileSync(
 process.env.OPENSESSION_STATE_DIR = scratch;
 process.env.OPENSESSION_CONFIG = configPath;
 
+const { SessionListStore } = await import("./session-list-sqlite");
+const { __setSessionListStoreForTest } = await import("./session-list-store");
+const { invalidateSessionsCache } = await import("./session-cache");
 const { SessionKernelStore, __setSessionKernelStoreForTest } =
   await import("./session-kernel");
 const { __resetWorkspaceProjectionForTest, createWorkspace, getWorkspace } =
@@ -41,16 +44,28 @@ const { resolvePrWorkspace, workspaceBacksOpenPr } =
 
 // Workspaces live in the kernel catalog: a fresh in-memory store per test.
 let store: InstanceType<typeof SessionKernelStore>;
+let index: InstanceType<typeof SessionListStore>;
+let previousIndex: InstanceType<typeof SessionListStore> | undefined;
 let previousStore: InstanceType<typeof SessionKernelStore> | undefined;
 beforeEach(() => {
   process.env.OPENSESSION_STATE_DIR = scratch;
   process.env.OPENSESSION_CONFIG = configPath;
   store = new SessionKernelStore(":memory:");
   previousStore = __setSessionKernelStoreForTest(store);
+  // Workspace resolution reads the session list to adopt matching siblings.
+  // These fixtures have none; use a complete, isolated projection, not a scan
+  // of the operator's legacy session directories.
+  index = new SessionListStore(":memory:");
+  index.replaceAll([]);
+  previousIndex = __setSessionListStoreForTest(index);
+  invalidateSessionsCache();
   __resetWorkspaceProjectionForTest();
 });
 
 afterEach(() => {
+  __setSessionListStoreForTest(previousIndex);
+  index.close();
+  invalidateSessionsCache();
   __setSessionKernelStoreForTest(previousStore);
   store.close();
   __resetWorkspaceProjectionForTest();

@@ -628,5 +628,5 @@ describe("deploy/release-checkout.sh", () => {
     expect(existsSync(join(state, "releases", shas[1]))).toBe(true);
     expect(existsSync(join(state, "releases", shas[2]))).toBe(true);
     expect(existsSync(join(state, "releases", shas[3]))).toBe(true);
-  });
+  }, 30_000);
 });

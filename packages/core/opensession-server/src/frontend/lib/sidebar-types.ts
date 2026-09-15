@@ -1,4 +1,5 @@
 import React from "react";
+import type { UnreadChat } from "./unread-chats";
 import type { UnifiedSession, Workspace } from "./types";
 
 export type OpenNextSidebarItem = () => boolean;
@@ -67,8 +68,8 @@ export interface Props {
   archivedActive: boolean;
   /** True while the catch-up deck is open — highlights its entry. */
   catchUpActive: boolean;
-  /** Report whether Next can open attention work or another rendered chat. */
-  onNextChatAvailableChange?: (available: boolean) => void;
+  /** Report unread destinations, including collapsed groups and sibling tabs. */
+  onUnreadChatsChange?: (chats: UnreadChat[]) => void;
   /**
    * Archive a session. `openNext` opens the rendered sidebar item after it, or
    * the previous item when it is last. It returns false when no item remains.

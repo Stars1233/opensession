@@ -123,9 +123,8 @@ export function buildAppCommandActions({
             ? [
                 {
                   id: "next-unread-workspace",
-                  label: "Next chat",
-                  description:
-                    "Open the next chat, prioritizing work that needs attention",
+                  label: "Next unread",
+                  description: "Open the next unread session",
                   category: "Navigate" as const,
                   keywords: ["next", "unread", "ready", "attention"],
                   shortcut:

@@ -19,10 +19,7 @@ import { sessionHasWorkspace } from "../lib/session-workspace";
 import { absoluteLink, copyToClipboard, sessionPath } from "../lib/share-link";
 import { matchesShortcut } from "../lib/shortcuts";
 import { isClaimed, ownedBy } from "../lib/sidebar-lanes";
-import {
-  nextRenderedSidebarChat,
-  nextUnreadRenderedWorkspaceItem,
-} from "../lib/sidebar-next";
+import { unreadChatsInOrder } from "../lib/unread-chats";
 import { previewSidebarSelection } from "../lib/sidebar-selection";
 import type { SwipeAction, SwipeState } from "../lib/sidebar-swipe";
 import {
@@ -131,7 +128,7 @@ interface WorkspaceControllerActions {
   onArchiveWorkspace: Props["onArchiveWorkspace"];
   onArchive: Props["onArchive"];
   onSetStatus: Props["onSetStatus"];
-  onNextChatAvailableChange: Props["onNextChatAvailableChange"];
+  onUnreadChatsChange: Props["onUnreadChatsChange"];
   onToast: Props["onToast"];
   confirm: ReturnType<typeof useConfirm>[0];
 }
@@ -199,7 +196,7 @@ export function useSidebarWorkspaceController({
     onArchiveWorkspace,
     onArchive,
     onSetStatus,
-    onNextChatAvailableChange,
+    onUnreadChatsChange,
     onToast,
     confirm,
   },
@@ -319,26 +316,18 @@ export function useSidebarWorkspaceController({
     archiveSelected: archiveOpenSessionWithNext,
   }));
 
-  const reportedNextChatAvailable = useRef<boolean | null>(null);
+  const reportedUnreadChats = useRef<string | null>(null);
   useLayoutEffect(() => {
-    const sidebar = sidebarScrollRef.current?.querySelector(
-      "[data-sidebar-list]",
+    const chats = unreadChatsInOrder(
+      wsRowOrder,
+      selectedId,
+      reads,
+      activeSnoozeKeys,
     );
-    const workspaceItems = Array.from(
-      sidebar?.querySelectorAll<HTMLButtonElement>("button[data-ws-row]") ?? [],
-    );
-    const renderedItems = Array.from(
-      sidebar?.querySelectorAll<HTMLButtonElement>(
-        "button[data-sidebar-row]",
-      ) ?? [],
-    );
-    const available = !!(
-      nextUnreadRenderedWorkspaceItem(workspaceItems) ??
-      nextRenderedSidebarChat(renderedItems)
-    );
-    if (reportedNextChatAvailable.current === available) return;
-    reportedNextChatAvailable.current = available;
-    onNextChatAvailableChange?.(available);
+    const signature = JSON.stringify(chats);
+    if (reportedUnreadChats.current === signature) return;
+    reportedUnreadChats.current = signature;
+    onUnreadChatsChange?.(chats);
   });
 
   // Advertised keycaps, read through the registry so a rebind in Settings

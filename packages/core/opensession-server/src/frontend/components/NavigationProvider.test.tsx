@@ -13,6 +13,8 @@ const providerSource = await Bun.file(
 
 function navigationFixture(openPrs: () => void): NavigationActions {
   return {
+    unreadChats: [],
+    allChatsRead: false,
     goBack() {},
     openNextChat() {},
     openPrs,

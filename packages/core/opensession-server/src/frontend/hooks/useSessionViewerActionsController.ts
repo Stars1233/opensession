@@ -9,6 +9,7 @@ import { fetchGitStatus } from "../lib/api";
 import { blockingOverlayOpen } from "../lib/blocking-overlay";
 import { PHONE_QUERY } from "../lib/breakpoints";
 import { matchesShortcut } from "../lib/shortcuts";
+import { editableOwnsCaretChord } from "../lib/sidebar-swipe";
 
 interface ShippedShareIdentity {
   sessionId: string;
@@ -211,6 +212,7 @@ export function useSessionArchiveShortcut({
           : null;
       if (editable && !editable.classList.contains("composer-textarea")) return;
       if (matchesShortcut(event, "workspace-next-unread") && openNextChat) {
+        if (event.isComposing || editableOwnsCaretChord(event.target)) return;
         event.preventDefault();
         openNextChat();
         return;

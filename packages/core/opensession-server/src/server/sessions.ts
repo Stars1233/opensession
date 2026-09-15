@@ -164,9 +164,8 @@ export function readEngineTranscript(
   return parseTranscript(path);
 }
 
-/** readEngineTranscript with the file parse yielding to the event loop —
- *  identical output. The pi SQLite read stays sync (bounded pages),
- *  and so does the pi store read (same bounded store pages). */
+/** Read legacy files or the owned store asynchronously. Store-backed reads
+ * must resolve the owning session through the canonical access boundary. */
 export async function readEngineTranscriptAsync(
   worktreeDir: string,
   engineSessionId: string,
@@ -220,59 +219,46 @@ export async function readEngineHandoffTranscriptAsync(
  *     osSessionId);
  *  2. the persisted engine→unified map (sessionForEngineId — recorded before the
  *     runner ever yields init, and never cleared on run end);
- *  3. the session scan — every engine slot, including a claude-slot match for
+ *  3. a memory-cache hint — every engine slot, including a claude-slot match for
  *     slack/linear files whose pi id predates the pi slot there (equality on
  *     the uuid can only mean this engine session; ses_/claude ids of other
  *     sessions never collide with one of these uuids).
  */
-function engineStoreOwner(engineSessionId: string): UnifiedSession | undefined {
+async function engineStoreOwner(
+  engineSessionId: string,
+): Promise<UnifiedSession | undefined> {
   if (!engineSessionId) return undefined;
-  try {
-    // Call-time require, not a static import: session-cache imports this
-    // module (getAllSessions), so the static edge must stay one-directional.
-    // By the time a transcript is read the cache module is long-loaded —
-    // this is a module-cache hit (the importLegacyIntoStore pattern in
-    // pi-transcript.ts).
-    const cacheMod =
-      require("./session-cache") as typeof import("./session-cache");
-    const sessions = cacheMod.getCachedSessions();
-    const byUnifiedId = (unifiedId: string | undefined) =>
-      unifiedId
-        ? sessions.find(
-            (s) => s.id === unifiedId || s.aliasIds?.includes(unifiedId),
-          )
-        : undefined;
-    const journaled = activeRunRecords().find(
-      (r) => r.claudeSessionId === engineSessionId && r.osSessionId,
+  // The journal/map name a known session even when the list cache is cold or
+  // invalidated. Resolve it asynchronously at the canonical access boundary;
+  // the cache is only a hint for legacy sessions without a recorded mapping.
+  const cache = await import("./session-cache");
+  const journaled = activeRunRecords().find(
+    (record) =>
+      record.claudeSessionId === engineSessionId && record.osSessionId,
+  );
+  const id = journaled?.osSessionId ?? sessionForEngineId(engineSessionId);
+  if (id) return cache.findSessionAsync(id);
+  const hint = cache
+    .peekCachedSessions()
+    .find(
+      (session) =>
+        session.piSessionId === engineSessionId ||
+        session.codexThreadId === engineSessionId ||
+        session.claudeSessionId === engineSessionId,
     );
-    return (
-      byUnifiedId(journaled?.osSessionId) ??
-      byUnifiedId(sessionForEngineId(engineSessionId)) ??
-      sessions.find(
-        (s) =>
-          s.piSessionId === engineSessionId ||
-          s.codexThreadId === engineSessionId ||
-          s.claudeSessionId === engineSessionId,
-      )
-    );
-  } catch (e) {
-    console.warn(
-      `[sessions] engine store owner resolution failed for ${engineSessionId}:`,
-      e instanceof Error ? e.message : e,
-    );
-    return undefined;
-  }
+  return hint ? cache.findSessionAsync(hint.id) : undefined;
 }
 
 function engineStoreTranscript(engineSessionId: string): TranscriptEntry[] {
-  const owner = engineStoreOwner(engineSessionId);
-  return owner ? mergedSessionTranscript(owner) : [];
+  throw new Error(
+    "Synchronous engine-store reads cannot authorize session scope; use readEngineTranscriptAsync",
+  );
 }
 
 async function engineStoreTranscriptAsync(
   engineSessionId: string,
 ): Promise<TranscriptEntry[]> {
-  const owner = engineStoreOwner(engineSessionId);
+  const owner = await engineStoreOwner(engineSessionId);
   return owner ? mergedSessionTranscriptAsync(owner) : [];
 }
 
@@ -282,7 +268,7 @@ async function engineStoreTranscriptAsync(
 async function engineStoreHandoffTranscriptAsync(
   engineSessionId: string,
 ): Promise<TranscriptEntry[]> {
-  const owner = engineStoreOwner(engineSessionId);
+  const owner = await engineStoreOwner(engineSessionId);
   if (!owner || owner.id.startsWith("plain-")) return [];
   try {
     return (await transcript.readHandoffTail(owner.id)).entries;

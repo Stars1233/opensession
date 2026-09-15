@@ -88,7 +88,6 @@ export function useSessionWorkspaceToolsController({
   });
   const archiveShortcutLabel = useShortcutLabel("session-archive");
   const copyTranscriptLabel = useShortcutLabel("session-copy-transcript");
-  const nextChatKeys = useShortcutKeys("workspace-next-unread");
   const newSiblingKeys = useShortcutKeys("session-new-sibling");
   const transcriptDownKeys = useShortcutKeys("transcript-down");
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -153,7 +152,6 @@ export function useSessionWorkspaceToolsController({
     shortcuts: {
       archiveShortcutLabel,
       copyTranscriptLabel,
-      nextChatKeys,
       newSiblingKeys,
       transcriptDownKeys,
       composerRef,

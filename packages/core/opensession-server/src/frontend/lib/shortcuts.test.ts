@@ -125,7 +125,7 @@ describe("shortcut registry", () => {
     expect(mod.shortcutBindings("composer-dictate")).toEqual(["mod+d"]);
     expect(mod.shortcutBindings("ask-focus")).toEqual(["mod+i"]);
     expect(mod.shortcutBindings("workspace-next-unread")).toEqual([
-      "alt+shift+arrowdown",
+      "mod+arrowright",
     ]);
     expect(mod.shortcutBindings("session-archive")).toEqual([
       "mod+e",

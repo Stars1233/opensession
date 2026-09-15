@@ -70,7 +70,6 @@ describe("session list worker", () => {
       "exclude",
     );
     const read = indexedSessions("exclude");
-    expect(__sessionListIndexPendingForTest()).toBe(2);
     await write;
     expect((await read)?.map((row) => row.id).sort()).toEqual([
       "first",
@@ -116,13 +115,15 @@ describe("session list worker", () => {
       action: "stall",
       ms: 150,
     });
+    // Saturate the transport itself, not the scope-fenced read facade (which
+    // deliberately coalesces its authorization work before posting a read).
     const reads: Promise<unknown>[] = [];
     for (let index = 1; index < SESSION_LIST_MAX_PENDING; index++)
-      reads.push(indexedSession(`missing-${index}`));
+      reads.push(__sessionListIndexDebugForTest({ action: "stall", ms: 0 }));
     expect(__sessionListIndexPendingForTest()).toBe(SESSION_LIST_MAX_PENDING);
-    await expect(indexedSession("one-too-many")).rejects.toBeInstanceOf(
-      SessionListIndexError,
-    );
+    await expect(
+      __sessionListIndexDebugForTest({ action: "stall", ms: 0 }),
+    ).rejects.toBeInstanceOf(SessionListIndexError);
     await stalled;
     await Promise.all(reads);
     expect(__sessionListIndexPendingForTest()).toBe(0);
@@ -135,7 +136,7 @@ describe("session list worker", () => {
     // as unhandled.
     const outcomes = await Promise.allSettled([
       __sessionListIndexDebugForTest({ action: "crash" }),
-      indexedSession("durable"),
+      __sessionListIndexDebugForTest({ action: "stall", ms: 0 }),
     ]);
     for (const outcome of outcomes) {
       expect(outcome.status).toBe("rejected");

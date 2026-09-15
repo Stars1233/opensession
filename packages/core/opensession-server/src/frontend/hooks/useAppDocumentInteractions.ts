@@ -11,6 +11,7 @@ import type { useSidebarFilter } from "../lib/sidebar-filter";
 import { personFilterFor, setFilter } from "../lib/sidebar-filter";
 import { getTabColors, onTabColorsChanged } from "../lib/tab-colors";
 import type { UnifiedSession } from "../lib/types";
+import type { UnreadChat } from "../lib/unread-chats";
 import type { useAppRoute } from "./useAppRoute";
 import { useBackSwipe } from "./useBackSwipe";
 import { useInputAlerts } from "./useInputAlerts";
@@ -104,8 +105,18 @@ export function useAppDocumentInteractions({
   const mobileDetail = route.view !== "prs" && !(isPhone && settingsActive);
 
   const sidebarRef = useRef<SidebarHandle>(null);
-  const nextChatRef = useRef<() => void>(() => {});
-  const [nextChatAvailable, setNextChatAvailable] = useState(false);
+  const [unreadChats, setUnreadChats] = useState<UnreadChat[]>([]);
+  const nextChatAvailable = unreadChats.length > 0;
+  const hadUnreadChats = useRef(false);
+  const [allChatsRead, setAllChatsRead] = useState(false);
+  useEffect(() => {
+    const justFinished = hadUnreadChats.current && !nextChatAvailable;
+    hadUnreadChats.current = nextChatAvailable;
+    setAllChatsRead(justFinished);
+    if (!justFinished) return;
+    const timer = setTimeout(() => setAllChatsRead(false), 1600);
+    return () => clearTimeout(timer);
+  }, [nextChatAvailable]);
   // Set below, once the review-focus callback it needs exists.
   const openPrRef = useRef<(repo: string, number: number) => void>(() => {});
 
@@ -262,9 +273,10 @@ export function useAppDocumentInteractions({
     borrowedSidebar,
     mobileDetail,
     sidebarRef,
-    nextChatRef,
+    unreadChats,
+    allChatsRead,
     nextChatAvailable,
-    setNextChatAvailable,
+    setUnreadChats,
     openPrRef,
   };
 }

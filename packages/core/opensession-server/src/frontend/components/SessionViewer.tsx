@@ -828,7 +828,7 @@ export function SessionViewer({
   const { diffState } = workspaceTools.workspace;
   const { archiveShortcutLabel, copyTranscriptLabel } =
     workspaceTools.shortcuts;
-  const { nextChatKeys, newSiblingKeys } = workspaceTools.shortcuts;
+  const { newSiblingKeys } = workspaceTools.shortcuts;
   const { transcriptDownKeys, composerRef } = workspaceTools.shortcuts;
   const stableComposerRef = useRef(composerRef);
   // ⌃⇧↑/⌃⇧↓ page the transcript up/down — keyboard scrolling that works while
@@ -1403,23 +1403,25 @@ export function SessionViewer({
     !ask &&
     !forkFrom &&
     replySuggestions.length > 0;
-  /* Desktop shows reading controls between quick replies and Next. Phone keeps
-	   its existing standalone reading control and centered session toolbar. */
-  const nextAction = showNextChatButton && !!openNextChat;
+  /* Unread navigation attaches to the composer. Only floating reading and
+     reply controls need additional clearance over the transcript. */
+  const nextAction =
+    showNextChatButton &&
+    focused &&
+    (!!openNextChat || navigation.allChatsRead);
   const scrollAction = showScrollToBottom && entries.length > 0;
-  const actionBand = quickReplies || nextAction || scrollAction || isPhone;
+  const actionBand = quickReplies || scrollAction || isPhone;
   const actionClearance = !actionBand
     ? undefined
-    : nextAction || isPhone
+    : isPhone
       ? isPhone && quickReplies
         ? ACTION_WITH_REPLIES_CLEARANCE
         : ACTION_CLEARANCE
       : scrollAction
         ? SCROLL_ACTION_CLEARANCE
         : SUGGESTIONS_CLEARANCE;
-  // This class changes the scroller's bottom padding. Session metadata can make
-  // Next appear after a cached transcript has already settled; re-pin before
-  // that larger scroll height paints, but never move a reader in history.
+  // Floating controls change the scroller's bottom padding. Re-pin before the
+  // larger scroll height paints, but never move a reader in history.
   useLayoutEffect(() => {
     if (readFollowingLive(followingLive)) scrollToLatest("auto");
   }, [actionClearance, followingLive, scrollToLatest]);
@@ -1774,13 +1776,10 @@ export function SessionViewer({
             replySuggestions,
             pickReplySuggestion,
             transcriptDownKeys,
-            nextChatKeys,
-            openNextChat,
             archiving,
             handleArchive,
             setMobileActionMenuEl,
             openNewWorkspace,
-            showNextChatButton,
           }}
           composer={{
             state: {

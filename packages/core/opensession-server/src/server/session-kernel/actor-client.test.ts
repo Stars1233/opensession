@@ -335,7 +335,10 @@ describe("actor-owned session metadata", () => {
     await put(host, sessionId, 1, null);
     await host.decideCoreAsync({ op: "tombstone", sessionId });
     expect(await host.decideMetadataAsync({ op: "get", sessionId })).toBeNull();
-    expect(await rejection(put(host, sessionId, 2, 1))).toMatch(/deleted/);
+    // A tombstone must not reveal existence through an access-gated write.
+    expect(await rejection(put(host, sessionId, 2, 1))).toMatch(
+      /deleted|not found/i,
+    );
     const page = await host.decideMetadataAsync({
       op: "catalog_page",
       afterSessionId: "",

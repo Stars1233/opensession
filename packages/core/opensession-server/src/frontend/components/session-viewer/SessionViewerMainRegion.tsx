@@ -36,6 +36,7 @@ import {
   WorkspaceWaiting,
 } from "./busy-indicators";
 import { Button } from "../../ui/button";
+import { NextUnreadButton } from "../NextUnreadButton";
 import { TranscriptView } from "../session/TranscriptView";
 import { SessionSafetyNotice } from "../SessionSafetyNotice";
 import { AskCard } from "../AskCard";
@@ -83,7 +84,6 @@ import {
   VIEWER_REVIEW_MAIN,
   VIEWER_SUGGESTIONS,
   VIEWER_SUGGESTIONS_ROW,
-  VIEWER_SUGGESTIONS_ROW_INLINE,
   VIEWER_SUMMARY_STEP,
 } from "../../lib/session-viewer-classes";
 import type { UnifiedSession, SessionNote } from "../../lib/types";
@@ -295,13 +295,10 @@ interface ActionBandRegion {
   replySuggestions: ReplySuggestion[];
   pickReplySuggestion: (text: string) => void;
   transcriptDownKeys: string[] | null;
-  nextChatKeys: string[] | null;
-  openNextChat?: () => void;
   archiving: boolean;
   handleArchive: () => void | Promise<void>;
   setMobileActionMenuEl: (node: HTMLDivElement | null) => void;
   openNewWorkspace?: () => void;
-  showNextChatButton: boolean | undefined;
 }
 
 interface ComposerState {
@@ -563,13 +560,10 @@ export function SessionViewerMainRegion({
     replySuggestions,
     pickReplySuggestion,
     transcriptDownKeys,
-    nextChatKeys,
-    openNextChat,
     archiving,
     handleArchive,
     setMobileActionMenuEl,
     openNewWorkspace,
-    showNextChatButton,
   } = actionBand;
   const {
     forkFrom,
@@ -1168,9 +1162,8 @@ export function SessionViewerMainRegion({
                     </button>
                   </div>
                 )}
-                {/* Session actions float above the composer. Desktop pairs quick
-								    replies with Next. Phone centers the visible actions, with quick
-								    replies on their own row when present. */}
+                {/* Reading and reply actions float above the composer. The
+                    unread destination belongs to the attached composer flaps. */}
                 {hasActionBand && (
                   <div className={VIEWER_SUGGESTIONS}>
                     <div
@@ -1182,9 +1175,7 @@ export function SessionViewerMainRegion({
                       {quickReplies && (
                         <ReplySuggestions
                           className={cn(
-                            nextAction && !isPhone
-                              ? VIEWER_SUGGESTIONS_ROW_INLINE
-                              : VIEWER_SUGGESTIONS_ROW,
+                            VIEWER_SUGGESTIONS_ROW,
                             "desktop:col-start-1 desktop:row-start-1 desktop:w-full",
                             isPhone && "w-full flex-none self-stretch",
                           )}
@@ -1213,26 +1204,6 @@ export function SessionViewerMainRegion({
                                 aria-hidden
                               />
                             </button>
-                          </Tooltip>
-                        </div>
-                      )}
-                      {nextAction && !isPhone && (
-                        <div className="pointer-events-auto col-start-3 row-start-1 shrink-0 justify-self-end">
-                          <Tooltip
-                            label="Next chat"
-                            shortcut={nextChatKeys ?? undefined}
-                          >
-                            <Button
-                              size="lg"
-                              className="min-h-10 shrink-0 border-divider hover:border-line"
-                              trailing={
-                                <IconChevronRight size={18} aria-hidden />
-                              }
-                              aria-label="Next chat"
-                              onClick={openNextChat}
-                            >
-                              Next
-                            </Button>
                           </Tooltip>
                         </div>
                       )}
@@ -1271,17 +1242,6 @@ export function SessionViewerMainRegion({
                             disabled={!openNewWorkspace}
                             onClick={openNewWorkspace}
                           />
-                          {showNextChatButton && (
-                            <Button
-                              variant="ghost"
-                              size="lg"
-                              className="size-11 min-h-11 rounded-control [corner-shape:squircle]"
-                              icon={<IconArrowRight size={22} aria-hidden />}
-                              aria-label="Next chat"
-                              disabled={!openNextChat}
-                              onClick={openNextChat}
-                            />
-                          )}
                         </div>
                       )}
                     </div>
@@ -1441,7 +1401,20 @@ export function SessionViewerMainRegion({
                       )}
                     </>
                   )}
-                  attached={attachedComposer}
+                  attached={
+                    nextAction ? (
+                      <>
+                        {attachedComposer}
+                        <NextUnreadButton
+                          key={session.id}
+                          phone={isPhone}
+                          stacked={!!attachedComposer}
+                        />
+                      </>
+                    ) : (
+                      attachedComposer
+                    )
+                  }
                   sendMenu={
                     session.source === "opensession"
                       ? ({ text, disabled, onScheduled }) => (

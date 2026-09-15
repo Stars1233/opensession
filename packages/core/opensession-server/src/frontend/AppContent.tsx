@@ -121,10 +121,6 @@ import { NO_REPO } from "./lib/session-repo";
 import type { NewTabMorphOrigin } from "./lib/session-tabs-types";
 import { SIDEBAR_CHROME_BTN } from "./lib/sidebar-classes";
 import { useSidebarFilter } from "./lib/sidebar-filter";
-import {
-  nextRenderedSidebarChat,
-  nextUnreadRenderedWorkspaceItem,
-} from "./lib/sidebar-next";
 import { ASK_BAND } from "./lib/sidebar-workspaces";
 import { saveTabSplit } from "./lib/split-tabs";
 import { getTabColors } from "./lib/tab-colors";
@@ -388,9 +384,10 @@ export function AppContent({
     borrowedSidebar,
     mobileDetail,
     sidebarRef,
-    nextChatRef,
+    unreadChats,
+    allChatsRead,
     nextChatAvailable,
-    setNextChatAvailable,
+    setUnreadChats,
     openPrRef,
   } = documentInteractions;
 
@@ -958,26 +955,12 @@ export function AppContent({
   // hair lighter than a filled triangle / globe at the same nominal size).
   const panelIcon = <IconSidebarLeft size={24} />;
   const sidebarToggleKeys = useShortcutKeys("sidebar-toggle");
-  // Rendered rows are the navigation order. Filters, grouping and collapsed
-  // sections all change that order, so backing session arrays cannot answer
-  // which chat is actually next on screen. Ready unread work stays the priority;
-  // when none exists, continue from the selected chat instead.
-  const openNextChat = () => {
-    const sidebar = document.querySelector("[data-sidebar-list]");
-    const workspaceItems = Array.from(
-      sidebar?.querySelectorAll<HTMLButtonElement>("button[data-ws-row]") ?? [],
-    );
-    const renderedItems = Array.from(
-      sidebar?.querySelectorAll<HTMLButtonElement>(
-        "button[data-sidebar-row]",
-      ) ?? [],
-    );
-    const next =
-      nextUnreadRenderedWorkspaceItem(workspaceItems) ??
-      nextRenderedSidebarChat(renderedItems);
-    if (!next) return;
-    next.scrollIntoView({ block: "nearest" });
-    next.click();
+  // The same destination list drives the button, popover and shortcut.
+  const openNextChat = (requestedId?: string) => {
+    const id = requestedId ?? unreadChats[0]?.id;
+    if (!id || !unreadChats.some((chat) => chat.id === id)) return;
+    setActiveViewTab(null);
+    navigate({ view: "session", id });
   };
   const currentTheme = effectiveTheme();
   const commandActions = buildAppCommandActions({
@@ -1099,9 +1082,6 @@ export function AppContent({
     if (route.view !== "prs") navigate({ view: "prs" });
     setDraftFocusSeq((seq) => seq + 1);
   };
-  useLayoutEffect(() => {
-    nextChatRef.current = openNextChat;
-  });
   const renderSessionPane = (
     viewerSession: UnifiedSession,
     socket: ReturnType<typeof useWebSocket>,
@@ -1197,6 +1177,8 @@ export function AppContent({
   );
 
   const navigationActions = {
+    unreadChats,
+    allChatsRead,
     goBack,
     openNextChat,
     openPrs: () => navigate({ view: "prs" }),
@@ -1383,7 +1365,7 @@ export function AppContent({
                   interactions={{
                     isPhone,
                     sidebarRef,
-                    setNextChatAvailable,
+                    setUnreadChats,
                   }}
                   navigation={{
                     taskCount: appViewState.taskCount,

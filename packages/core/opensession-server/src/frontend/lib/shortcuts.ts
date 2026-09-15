@@ -142,10 +142,10 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
   },
   {
     id: "workspace-next-unread",
-    title: "Next chat",
-    description: "Open the next chat, prioritizing work that needs attention",
+    title: "Next unread",
+    description: "Open the next unread session",
     group: "Navigation",
-    defaults: ["alt+shift+arrowdown"],
+    defaults: ["mod+arrowright"],
   },
   // The tab strip's horizontal answer to the sidebar's ⌘↑/⌘↓. ⌘⌥ arrows are
   // the neighbouring family (⌘⌥↑/↓ already step the reasoning effort), which

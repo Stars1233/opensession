@@ -54,7 +54,7 @@ interface AppSidebarProps {
   };
   interactions: Pick<
     ReturnType<typeof useAppDocumentInteractions>,
-    "isPhone" | "sidebarRef" | "setNextChatAvailable"
+    "isPhone" | "sidebarRef" | "setUnreadChats"
   >;
   navigation: {
     taskCount: ReturnType<typeof useAppViewState>["taskCount"];
@@ -111,7 +111,7 @@ export function AppSidebar({
     startSidebarResize,
     headerActionsEl,
   },
-  interactions: { isPhone, sidebarRef, setNextChatAvailable },
+  interactions: { isPhone, sidebarRef, setUnreadChats },
   navigation: {
     taskCount,
     commandMenuRef,
@@ -255,7 +255,7 @@ export function AppSidebar({
           // the session's top bar.
           headerActionsEl={mobileDetail ? null : headerActionsEl}
           catchUpActive={route.view === "catchup"}
-          onNextChatAvailableChange={setNextChatAvailable}
+          onUnreadChatsChange={setUnreadChats}
           archivedActive={route.view === "archived"}
           onArchive={archiveSessionFromSidebar}
           onArchiveWorkspace={archiveWorkspaceFromSidebar}

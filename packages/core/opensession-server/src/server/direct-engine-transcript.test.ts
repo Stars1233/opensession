@@ -79,15 +79,22 @@ describe("readEngineTranscript for direct-SDK engine sessions", () => {
     }
   });
 
-  test("no file on disk delegates to the store instead of failing", async () => {
+  test("synchronous store fallback fails closed instead of using an unverified cache", () => {
+    for (const provider of ["claude", "codex", "pi"] as const) {
+      expect(() =>
+        readEngineTranscript(scratch, crypto.randomUUID(), provider),
+      ).toThrow("readEngineTranscriptAsync");
+    }
+  });
+
+  test("no file on disk delegates asynchronously to the store", async () => {
     // Nothing wrote these ids anywhere, so the store answers empty too — the
     // point is that the read resolves through the store path rather than
     // throwing or parsing a path that does not exist.
     const engineId = crypto.randomUUID();
-    expect(readEngineTranscript(scratch, engineId, "claude")).toEqual([]);
     expect(
       await readEngineTranscriptAsync(scratch, engineId, "claude"),
     ).toEqual([]);
-    expect(readEngineTranscript(scratch, "", "codex")).toEqual([]);
+    expect(await readEngineTranscriptAsync(scratch, "", "codex")).toEqual([]);
   });
 });

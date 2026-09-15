@@ -81,6 +81,8 @@ function Popup({
   ring = "default",
   anchor,
   initialFocus = false,
+  finalFocus,
+  "aria-label": ariaLabel,
   children,
 }: {
   className?: string;
@@ -129,6 +131,8 @@ function Popup({
    * focus out of the page on hover would be hostile. Pass `true` for a
    * click-opened popup that holds controls, so the keyboard reaches them. */
   initialFocus?: React.ComponentProps<typeof BasePopover.Popup>["initialFocus"];
+  finalFocus?: React.ComponentProps<typeof BasePopover.Popup>["finalFocus"];
+  "aria-label"?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -151,6 +155,8 @@ function Popup({
       >
         <BasePopover.Popup
           initialFocus={initialFocus}
+          finalFocus={finalFocus}
+          aria-label={ariaLabel}
           className={cn(
             // The ring override rides on the popup so the arrow, which
             // continues that hairline, inherits the same value.

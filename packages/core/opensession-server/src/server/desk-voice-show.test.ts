@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   SHOW_IN_APP_TOOL,
   resolveShowTarget,
@@ -10,7 +10,7 @@ import type { Workspace } from "./workspaces";
 import { DeskVoiceNavigation } from "./desk-voice-navigation";
 import { buildVoiceSessionConfig } from "./desk-voice";
 
-type Summary = ReturnType<SessionControl["listSessions"]>[number];
+type Summary = Awaited<ReturnType<SessionControl["listSessions"]>>[number];
 
 function summary(
   id: string,
@@ -269,8 +269,16 @@ describe("show_in_app authorization and delivery", () => {
   test("returns success only after the owning browser acknowledges", async () => {
     registerStubControl();
     const nav = new DeskVoiceNavigation("signed-in-login");
+    const ready = Promise.withResolvers<void>();
+    const show = nav.show.bind(nav);
+    const navigation = spyOn(nav, "show").mockImplementation((target) => {
+      const result = show(target);
+      ready.resolve();
+      return result;
+    });
     const pending = showInApp(nav, { session: "lint", tab: "review" });
-    await Promise.resolve();
+    await ready.promise;
+    navigation.mockRestore();
     const polled = nav.handle("signed-in-login", {
       action: "poll",
       connectionId: "call",
