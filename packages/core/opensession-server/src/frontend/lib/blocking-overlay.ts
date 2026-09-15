@@ -32,6 +32,8 @@ export const BLOCKING_OVERLAY_SELECTOR =
  * True when a blocking overlay is open, so a window-level shortcut should
  * decline the keystroke.
  */
-export function blockingOverlayOpen(root: ParentNode = document): boolean {
+export function blockingOverlayOpen(
+  root: { querySelector(selectors: string): object | null } = document,
+): boolean {
   return !!root.querySelector(BLOCKING_OVERLAY_SELECTOR);
 }

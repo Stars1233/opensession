@@ -126,6 +126,8 @@ import {
   useSessionViewStateController,
 } from "../hooks/useSessionViewStateController";
 import { useSessionWorkspaceToolsController } from "../hooks/useSessionWorkspaceToolsController";
+import { useRefocusComposerOnWindowFocus } from "../hooks/useRefocusComposerOnWindowFocus";
+import { os1Shell } from "../lib/os1-shell";
 import { useSessionChromeController } from "../hooks/useSessionChromeController";
 import {
   sessionConversationAvailability,
@@ -1331,6 +1333,13 @@ export function SessionViewer({
     if (autoFocusComposer && !isPhone)
       stableComposerRef.current.current?.focus();
   }, [autoFocusComposer, isPhone]);
+  // Coming back to the desktop app lands you typing again. Only the focused
+  // pane of a split takes the caret, and only while its conversation is the
+  // thing on screen rather than a review, terminal, or portal tab.
+  useRefocusComposerOnWindowFocus(
+    focused && !isPhone && !sessionHidden && !!os1Shell()?.desktop,
+    composerRef,
+  );
   useEffect(() => {
     if (!composerPrefillExternal) return;
     stableComposerPrefillRef.current.current(composerPrefillExternal);
