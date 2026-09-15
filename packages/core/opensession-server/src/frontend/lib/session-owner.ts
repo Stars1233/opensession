@@ -19,9 +19,24 @@ import {
   AGENT_PERSON_KEY,
   AUTOMATION_MACHINE_IDENTITY,
 } from "./automation-audience";
+import { useDebugValue } from "react";
 import { AGENT_NAME } from "./brand";
 import type { Person } from "./people";
 import type { UnifiedSession } from "./types";
+
+/**
+ * `canonicalNames` with an identity that follows the roster. The map feeds
+ * derivations across the whole Sidebar render; as a plain call its result
+ * counts as mutable to the React Compiler and everything downstream loses
+ * memoization, so the hook boundary is what keeps it stable. `useDebugValue`
+ * labels it in DevTools and is what makes the compiler memoize the hook: it
+ * only compiles a `use*` function whose body calls a React hook itself.
+ */
+export function useCanonicalNames(roster: Person[]): Map<string, string> {
+  const names = canonicalNames(roster);
+  useDebugValue(names.size, (size) => `${size} names`);
+  return names;
+}
 
 /** Lowercased first name, full name and GitHub login → the roster's display name. */
 export function canonicalNames(roster: Person[]): Map<string, string> {

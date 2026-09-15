@@ -1,5 +1,10 @@
 import { DEFAULT_REPO_ID } from "./brand";
-import { sessionCarriesPr } from "./session-prs";
+import {
+  prBranchKey,
+  prLookupKeys,
+  prNumberKey,
+  sessionCarriesPr,
+} from "./session-prs";
 import type { UnifiedSession, Workspace } from "./types";
 
 type PrIdentity = { repo: string; number?: number; branch?: string };
@@ -9,12 +14,18 @@ export function workspaceCarriesPr(
   workspace: Workspace,
   pr: PrIdentity,
 ): boolean {
+  const carried = workspaceCarriedPrKeys(workspace);
+  return prLookupKeys(pr).some((key) => carried.includes(key));
+}
+
+/** The `prLookupKeys` a workspace record answers to; see `workspaceCarriesPr`. */
+export function workspaceCarriedPrKeys(workspace: Workspace): string[] {
   const repo = workspace.repo || DEFAULT_REPO_ID;
-  if (repo !== pr.repo) return false;
-  return (
-    (pr.number !== undefined && workspace.prNumber === pr.number) ||
-    (!!pr.branch && workspace.branch === pr.branch)
-  );
+  const keys: string[] = [];
+  if (workspace.prNumber != null)
+    keys.push(prNumberKey(repo, workspace.prNumber));
+  if (workspace.branch) keys.push(prBranchKey(repo, workspace.branch));
+  return keys;
 }
 
 /**

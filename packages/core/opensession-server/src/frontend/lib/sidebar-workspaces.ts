@@ -1,4 +1,9 @@
-import { prLinksMatch, sessionPrRefs } from "./session-prs";
+import {
+  canonicalPrUrl,
+  prBranchKey,
+  prNumberKey,
+  sessionPrRefs,
+} from "./session-prs";
 import type { SessionPrRef, UnifiedSession, Workspace } from "./types";
 
 export function isScratchWorkspace(
@@ -161,31 +166,53 @@ function subagentIsInline(
   return true;
 }
 
-function prRefsMatch(left: SessionPrRef, right: SessionPrRef): boolean {
-  if (left.url && right.url && prLinksMatch(left.url, right.url)) return true;
+/**
+ * A root session's PRs, indexed by the three ways a child's PR can match one
+ * of them: same repo and number, same repo and branch, or the same link. A
+ * root is compared against every child it has, so build this once per root
+ * rather than re-deriving and re-parsing its PR list for each pair.
+ */
+interface RootPrIndex {
+  numbers: Set<string>;
+  branches: Set<string>;
+  links: Set<string>;
+}
+
+function indexRootPrs(root: UnifiedSession): RootPrIndex {
+  const index: RootPrIndex = {
+    numbers: new Set(),
+    branches: new Set(),
+    links: new Set(),
+  };
+  for (const ref of sessionPrRefs(root)) {
+    if (ref.number !== undefined)
+      index.numbers.add(prNumberKey(ref.repo, ref.number));
+    if (ref.branch) index.branches.add(prBranchKey(ref.repo, ref.branch));
+    const link = canonicalPrUrl(ref.url);
+    if (link !== undefined) index.links.add(link);
+  }
+  return index;
+}
+
+function rootIndexHasPr(index: RootPrIndex, ref: SessionPrRef): boolean {
   if (
-    left.number !== undefined &&
-    right.number !== undefined &&
-    left.repo === right.repo &&
-    left.number === right.number
+    ref.number !== undefined &&
+    index.numbers.has(prNumberKey(ref.repo, ref.number))
   )
     return true;
-  return (
-    !!left.branch &&
-    !!right.branch &&
-    left.repo === right.repo &&
-    left.branch === right.branch
-  );
+  if (ref.branch && index.branches.has(prBranchKey(ref.repo, ref.branch)))
+    return true;
+  const link = canonicalPrUrl(ref.url);
+  return link !== undefined && index.links.has(link);
 }
 
 function subagentSharesRootPr(
   session: UnifiedSession,
-  root: UnifiedSession,
+  rootPrs: RootPrIndex,
 ): boolean {
   const own = sessionPrRefs(session);
   if (own.length === 0) return false;
-  const rootPrs = sessionPrRefs(root);
-  return own.every((pr) => rootPrs.some((rootPr) => prRefsMatch(pr, rootPr)));
+  return own.every((pr) => rootIndexHasPr(rootPrs, pr));
 }
 
 export function sessionHasOpenPr(session: UnifiedSession): boolean {
@@ -244,6 +271,15 @@ export function subagentsByWorkspace(
   for (const session of sessions) byId.set(session.id, session);
 
   const groups = new Map<string, WorkspaceSubagent[]>();
+  const rootPrsById = new Map<string, RootPrIndex>();
+  const rootPrs = (root: UnifiedSession): RootPrIndex => {
+    let index = rootPrsById.get(root.id);
+    if (!index) {
+      index = indexRootPrs(root);
+      rootPrsById.set(root.id, index);
+    }
+    return index;
+  };
   for (const session of byId.values()) {
     if (!session.parentSessionId || session.archived) continue;
 
@@ -274,7 +310,7 @@ export function subagentsByWorkspace(
       session,
       depth,
       inline: subagentIsInline(session, directParent, root),
-      sharesRootPr: subagentSharesRootPr(session, root),
+      sharesRootPr: subagentSharesRootPr(session, rootPrs(root)),
     });
     groups.set(root.workspaceId, items);
   }

@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { UnifiedSession } from "./types";
 import {
   collapsePrLinkSessions,
+  prBranchKey,
   prLinksMatch,
+  prLookupKeys,
+  prNumberKey,
+  sessionCarriedPrKeys,
   sessionCarriesPr,
   sessionHasConnectedPr,
   sessionHasPr,
@@ -515,5 +519,90 @@ describe("siblingTabPrRefs", () => {
 
   test("a tab without a PR opens without one", () => {
     expect(siblingTabPrRefs(session({}))).toEqual([]);
+  });
+});
+
+describe("PR link canonical forms", () => {
+  test("a plain GitHub pull link matches its tab, query, hash and slash variants", () => {
+    const base = "https://github.com/tellahq/tella-fusion/pull/5513";
+    for (const variant of [
+      "https://github.com/TellaHQ/Tella-Fusion/pull/5513",
+      `${base}/`,
+      `${base}/files`,
+      `${base}?tab=checks`,
+      `${base}#discussion_r1`,
+      `  ${base}  `,
+    ]) {
+      expect(prLinksMatch(variant, base)).toBe(true);
+    }
+  });
+
+  test("a different number, repo or host is a different link", () => {
+    const base = "https://github.com/tellahq/tella-fusion/pull/5513";
+    expect(
+      prLinksMatch("https://github.com/tellahq/tella-fusion/pull/5514", base),
+    ).toBe(false);
+    expect(
+      prLinksMatch("https://github.com/tellahq/opensession/pull/5513", base),
+    ).toBe(false);
+    expect(
+      prLinksMatch("https://gitlab.com/tellahq/tella-fusion/pull/5513", base),
+    ).toBe(false);
+    expect(
+      prLinksMatch("https://github.com/tellahq/tella-fusion/pull/55130", base),
+    ).toBe(false);
+  });
+
+  test("non-GitHub links still compare without query, hash or trailing slash", () => {
+    expect(
+      prLinksMatch(
+        "https://gitlab.example.com/group/repo/-/merge_requests/7/?x=1#note",
+        "https://gitlab.example.com/group/repo/-/merge_requests/7",
+      ),
+    ).toBe(true);
+    expect(prLinksMatch("not a url", "not a url")).toBe(false);
+  });
+});
+
+describe("carried PR keys", () => {
+  test("answer exactly like sessionCarriesPr for every ref kind", () => {
+    const value = session({
+      repo: "gitops",
+      branch: "grid-pool",
+      prNumber: 955,
+      prs: [
+        {
+          repo: "gitops",
+          branch: "node-taints",
+          source: "discovered",
+          number: 961,
+        },
+      ],
+      linkedPrs: [{ repo: "tella-fusion", branch: "webapp", number: 5528 }],
+      attachedRepos: [
+        { repo: "shared-infra", branch: "iops", dir: "/tmp/iops" },
+      ],
+    });
+    const carried = new Set(sessionCarriedPrKeys(value));
+    for (const pr of [
+      { repo: "gitops", number: 955 },
+      { repo: "gitops", branch: "grid-pool" },
+      { repo: "gitops", number: 961 },
+      { repo: "tella-fusion", number: 5528 },
+      { repo: "shared-infra", branch: "iops" },
+      { repo: "gitops" },
+      { repo: "gitops", number: 12 },
+      { repo: "tella-fusion", number: 955 },
+      { repo: "shared-infra", number: 1 },
+    ]) {
+      expect(prLookupKeys(pr).some((key) => carried.has(key))).toBe(
+        sessionCarriesPr(value, pr),
+      );
+    }
+  });
+
+  test("keys separate repo from branch and number", () => {
+    expect(prBranchKey("gitops", "955")).not.toBe(prNumberKey("gitops", 955));
+    expect(prBranchKey("a", "b")).not.toBe(prBranchKey("a\0b", ""));
   });
 });

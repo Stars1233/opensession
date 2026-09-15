@@ -75,41 +75,97 @@ export function sessionPrRefs(session: UnifiedSession): ProjectedSessionPr[] {
   return foundPrimary ? projected : [legacy, ...projected];
 }
 
+// Both canonical forms are pure functions of the input string, and `new URL`
+// is the expensive part: the sidebar compares every child session's PRs
+// against its root's on each model rebuild, which at a few thousand sessions
+// meant tens of thousands of URL parses per render. Remember each string's
+// answer instead. Two generations keep memory bounded without the cliff of a
+// full reset: once the young map fills it becomes the old one, and a hit in
+// the old map is promoted, so links still in use never age out.
+const PR_LINK_CACHE_GENERATION = 8192;
+
+// Entries are boxed so an answer of `undefined` is distinguishable from a miss.
+class PrLinkCache<T> {
+  private young = new Map<string, { value: T }>();
+  private old = new Map<string, { value: T }>();
+
+  get(value: string, compute: (value: string) => T): T {
+    const fresh = this.young.get(value);
+    if (fresh) return fresh.value;
+    const entry = this.old.get(value) ?? { value: compute(value) };
+    if (this.young.size >= PR_LINK_CACHE_GENERATION) {
+      this.old = this.young;
+      this.young = new Map();
+    }
+    this.young.set(value, entry);
+    return entry.value;
+  }
+}
+
+// The everyday GitHub pull link needs no URL parser: for a value this plain
+// `new URL` would report the same host and an identical, already-normal
+// pathname. Anything else (userinfo, ports, encoded segments, other hosts)
+// takes the full parse below.
+const PLAIN_GITHUB_PULL =
+  /^\s*https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)\/?(?:[?#]\S*)?\s*$/;
+
+const githubPrIdentityCache = new PrLinkCache<
+  { repo: string; number: number } | undefined
+>();
+
 function githubPrIdentity(
   value: string | undefined,
 ): { repo: string; number: number } | undefined {
   if (!value) return undefined;
-  try {
-    const url = new URL(value.trim());
-    if (url.hostname.toLowerCase() !== "github.com") return undefined;
-    const match = url.pathname.match(
-      /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/i,
-    );
-    if (!match?.[2] || !match[3]) return undefined;
-    return { repo: match[2].toLowerCase(), number: Number(match[3]) };
-  } catch {
-    return undefined;
-  }
+  return githubPrIdentityCache.get(value, (link) => {
+    const plain = PLAIN_GITHUB_PULL.exec(link);
+    if (plain)
+      return { repo: plain[2].toLowerCase(), number: Number(plain[3]) };
+    try {
+      const url = new URL(link.trim());
+      if (url.hostname.toLowerCase() !== "github.com") return undefined;
+      const match = url.pathname.match(
+        /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/i,
+      );
+      if (!match?.[2] || !match[3]) return undefined;
+      return { repo: match[2].toLowerCase(), number: Number(match[3]) };
+    } catch {
+      return undefined;
+    }
+  });
 }
 
-function canonicalPrUrl(value: string | undefined): string | undefined {
+const canonicalPrUrlCache = new PrLinkCache<string | undefined>();
+
+/**
+ * The comparable form of a PR link: GitHub pull URLs collapse to their
+ * lowercase owner/repo/number, anything else drops its query, hash and
+ * trailing slash. Undefined when the value is not a URL.
+ */
+export function canonicalPrUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  try {
-    const url = new URL(value.trim());
-    const github =
-      url.hostname.toLowerCase() === "github.com"
-        ? url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/i)
-        : null;
-    if (github) {
-      return `https://github.com/${github[1]?.toLowerCase()}/${github[2]?.toLowerCase()}/pull/${github[3]}`;
+  return canonicalPrUrlCache.get(value, (link) => {
+    const plain = PLAIN_GITHUB_PULL.exec(link);
+    if (plain) {
+      return `https://github.com/${plain[1].toLowerCase()}/${plain[2].toLowerCase()}/pull/${plain[3]}`;
     }
-    url.hash = "";
-    url.search = "";
-    url.pathname = url.pathname.replace(/\/+$/, "");
-    return url.toString().toLowerCase();
-  } catch {
-    return undefined;
-  }
+    try {
+      const url = new URL(link.trim());
+      const github =
+        url.hostname.toLowerCase() === "github.com"
+          ? url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/i)
+          : null;
+      if (github) {
+        return `https://github.com/${github[1]?.toLowerCase()}/${github[2]?.toLowerCase()}/pull/${github[3]}`;
+      }
+      url.hash = "";
+      url.search = "";
+      url.pathname = url.pathname.replace(/\/+$/, "");
+      return url.toString().toLowerCase();
+    } catch {
+      return undefined;
+    }
+  });
 }
 
 /** Match pasted PR links even when GitHub adds a tab, query, or trailing slash. */
@@ -235,26 +291,53 @@ export function sessionCarriesPr(
   session: UnifiedSession,
   pr: { repo: string; branch?: string; number?: number },
 ): boolean {
-  const same = (ref: {
+  const carried = sessionCarriedPrKeys(session);
+  return prLookupKeys(pr).some((key) => carried.includes(key));
+}
+
+/** A PR is carried when a ref shares its repo and branch, or repo and number. */
+export function prBranchKey(repo: string | undefined, branch: string): string {
+  return `${repo}\0branch\0${branch}`;
+}
+
+export function prNumberKey(repo: string | undefined, number: number): string {
+  return `${repo}\0number\0${number}`;
+}
+
+/** The keys a PR answers to; a branch-less, number-less PR answers to none. */
+export function prLookupKeys(pr: {
+  repo: string;
+  branch?: string;
+  number?: number;
+}): string[] {
+  const keys: string[] = [];
+  if (pr.branch) keys.push(prBranchKey(pr.repo, pr.branch));
+  if (pr.number !== undefined) keys.push(prNumberKey(pr.repo, pr.number));
+  return keys;
+}
+
+/**
+ * Every key under which `sessionCarriesPr` answers true for this session:
+ * its own branch, projected PRs, linked PRs and attached branches. Callers
+ * that test many PRs against many sessions index these once instead of
+ * re-walking each session per PR.
+ */
+export function sessionCarriedPrKeys(session: UnifiedSession): string[] {
+  const keys: string[] = [];
+  const add = (ref: {
     repo?: string;
     branch?: string | null;
-    number?: number;
-  }) =>
-    ref.repo === pr.repo &&
-    ((!!pr.branch && ref.branch === pr.branch) ||
-      (pr.number !== undefined && ref.number === pr.number));
-  return (
-    same({
-      repo: session.repo,
-      branch: session.branch,
-      number: session.prNumber,
-    }) ||
-    sessionPrRefs(session).some(same) ||
-    (session.linkedPrs || []).some(same) ||
-    (session.attachedRepos || []).some((r) =>
-      same({ repo: r.repo, branch: r.branch }),
-    )
-  );
+    number?: number | null;
+  }) => {
+    if (ref.branch) keys.push(prBranchKey(ref.repo, ref.branch));
+    if (ref.number != null) keys.push(prNumberKey(ref.repo, ref.number));
+  };
+  add({ repo: session.repo, branch: session.branch, number: session.prNumber });
+  for (const ref of sessionPrRefs(session)) add(ref);
+  for (const ref of session.linkedPrs || []) add(ref);
+  for (const attached of session.attachedRepos || [])
+    add({ repo: attached.repo, branch: attached.branch });
+  return keys;
 }
 
 /**

@@ -24,7 +24,7 @@ import { getRecents, onRecentsChanged } from "../lib/recents";
 import { setRepoOrder } from "../lib/repo-order";
 import type { ReviewQueueItem } from "../lib/review-queue";
 import { personKey } from "../lib/review-queue";
-import { canonicalNames } from "../lib/session-owner";
+import { useCanonicalNames } from "../lib/session-owner";
 import {
   SIDEBAR_DENSITY_VARS,
   SIDEBAR_GROUP,
@@ -74,7 +74,7 @@ import {
   useSidebarFilter,
 } from "../lib/sidebar-filter";
 import { sortInboxByCreation } from "../lib/sidebar-inbox";
-import { deriveSidebarInventory } from "../lib/sidebar-inventory";
+import { useSidebarInventory } from "../lib/sidebar-inventory";
 import { isClaimed } from "../lib/sidebar-lanes";
 import { nextRenderedSidebarItem } from "../lib/sidebar-next";
 import { rowsAtPlacement } from "../lib/sidebar-placement";
@@ -452,7 +452,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
   }, [savedRepoOrder, completeRepoOrder]);
 
   const roster = usePeople();
-  const canonical = canonicalNames(roster);
+  const canonical = useCanonicalNames(roster);
   const people = sidebarPeople(sessions, canonical, openPrs ?? []);
 
   // A borrowed sidebar: someone else's lanes, everyone's, or the unassigned
@@ -476,7 +476,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     sorted,
     subagentsByWorkspaceId,
     workspaceSubagentIds,
-  } = deriveSidebarInventory({
+  } = useSidebarInventory({
     sessions,
     workspaces,
     openPrs: openPrs ?? [],

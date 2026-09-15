@@ -22,8 +22,8 @@ import {
   rowWasAutoCreated,
 } from "./sidebar-placement";
 import { SNOOZE_SOMEDAY } from "./snoozes";
-import { sessionCarriesPr } from "./session-prs";
-import { workspaceCarriesPr } from "./pr-workspace";
+import { prLookupKeys, sessionCarriedPrKeys } from "./session-prs";
+import { workspaceCarriedPrKeys } from "./pr-workspace";
 import type { Group, WsRow } from "./sidebar-types";
 import type {
   FeedItem,
@@ -367,17 +367,20 @@ export function deriveSidebarPrRows({
     currentUser,
     githubLogin,
   );
+  // Index what the rows carry once; testing every PR against every row's
+  // sessions in turn is a per-render cost that grows with both lists.
+  const carriedByRows = new Set<string>();
+  for (const row of workspaceRows) {
+    if (row.workspace)
+      for (const key of workspaceCarriedPrKeys(row.workspace))
+        carriedByRows.add(key);
+    for (const session of row.sessions)
+      for (const key of sessionCarriedPrKeys(session)) carriedByRows.add(key);
+  }
   const workspaceCoveredPrUrls = new Set<string>();
   for (const item of reviewQueueItems) {
-    if (
-      workspaceRows.some(
-        (row) =>
-          (!!row.workspace && workspaceCarriesPr(row.workspace, item.pr)) ||
-          row.sessions.some((session) => sessionCarriesPr(session, item.pr)),
-      )
-    ) {
+    if (prLookupKeys(item.pr).some((key) => carriedByRows.has(key)))
       workspaceCoveredPrUrls.add(item.pr.url);
-    }
   }
 
   if (!workspaceDataReady || filter.prs === "none") {

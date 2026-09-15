@@ -1,3 +1,4 @@
+import { useDebugValue } from "react";
 import type { OpenPr } from "./api";
 import { useAutomationOverview } from "./automation-overview";
 import { mentionFor } from "./mentions";
@@ -32,6 +33,25 @@ interface SidebarInventoryOptions {
   currentUser: string;
   peopleActivityNow: number;
   automationOverview: ReturnType<typeof useAutomationOverview>;
+}
+
+/**
+ * `deriveSidebarInventory` for a component render.
+ *
+ * The Sidebar hands its result to plain helpers between hook calls, which the
+ * React Compiler must treat as possible mutation, so at the call site the
+ * derivation could not be memoized and rebuilt on every render. Behind a hook
+ * boundary the result is frozen and the compiler keys it on the options, so
+ * a hover or menu state change no longer rebuilds the whole sidebar model.
+ *
+ * `useDebugValue` labels the hook in DevTools; it is also what makes the
+ * compiler treat this function as a hook, since it only memoizes a `use*`
+ * function whose body calls a React hook itself.
+ */
+export function useSidebarInventory(options: SidebarInventoryOptions) {
+  const inventory = deriveSidebarInventory(options);
+  useDebugValue(inventory.allWsRows.length, (rows) => `${rows} rows`);
+  return inventory;
 }
 
 export function deriveSidebarInventory({
