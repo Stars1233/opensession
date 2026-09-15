@@ -151,6 +151,13 @@
           // to scroll it back. Measure the result and hand the height back when
           // that happens: a letterboxed strip is better than a cut-off composer.
           var standaloneFillTaken = true;
+          var standaloneVerifyTimer;
+          var standaloneSettleTimers = [];
+          var cancelStandaloneTimers = function () {
+            clearTimeout(standaloneVerifyTimer);
+            standaloneSettleTimers.forEach(clearTimeout);
+            standaloneSettleTimers = [];
+          };
           var setRootHeight = function (value) {
             document.documentElement.style.height = value;
             if (document.body) document.body.style.height = value;
@@ -163,23 +170,39 @@
           var verifyStandaloneScreen = function (height) {
             // An open keyboard shrinks the window on purpose, so it can neither
             // confirm nor disprove the correction.
-            if (!standaloneFillTaken || keyboardOpen()) return;
+            if (document.hidden || !standaloneFillTaken || keyboardOpen())
+              return;
             if (window.innerHeight >= height - 1) return;
             standaloneFillTaken = false;
             setRootHeight("");
           };
           var fillStandaloneScreen = function () {
             var height = window.screen.height;
-            if (!height || !standaloneFillTaken || keyboardOpen()) return;
+            if (
+              document.hidden ||
+              !height ||
+              !standaloneFillTaken ||
+              keyboardOpen()
+            )
+              return;
             setRootHeight(height + "px");
-            setTimeout(function () {
+            clearTimeout(standaloneVerifyTimer);
+            standaloneVerifyTimer = setTimeout(function () {
               verifyStandaloneScreen(height);
             }, 300);
           };
           var resyncStandaloneScreen = function () {
+            cancelStandaloneTimers();
+            if (document.hidden) return;
+            // A short reading only rejects this attempt, not the lifetime of
+            // the PWA. Resume and keyboard dismissal can repair WebKit's window
+            // without a reload. Retry through their animation, then keep the
+            // same visible-height safeguard if the window really stays short.
+            standaloneFillTaken = true;
             fillStandaloneScreen();
-            requestAnimationFrame(fillStandaloneScreen);
-            setTimeout(fillStandaloneScreen, 250);
+            standaloneSettleTimers = [250, 500].map(function (delay) {
+              return setTimeout(fillStandaloneScreen, delay);
+            });
           };
           fillStandaloneScreen();
           document.addEventListener("DOMContentLoaded", fillStandaloneScreen, {
@@ -187,6 +210,12 @@
           });
           window.addEventListener("resize", fillStandaloneScreen);
           window.addEventListener("orientationchange", resyncStandaloneScreen);
+          window.addEventListener("pageshow", resyncStandaloneScreen);
+          window.addEventListener("pagehide", cancelStandaloneTimers);
+          document.addEventListener("visibilitychange", resyncStandaloneScreen);
+          // focusout precedes the app removing kb-open. The delayed attempts
+          // wait for that class and the keyboard animation to settle.
+          document.addEventListener("focusout", resyncStandaloneScreen);
         }
 
         // The Electron shell owns a hidden native titlebar even when Chromium
