@@ -577,10 +577,12 @@ export const TRANSCRIPT_PILL_TOP =
  * the composer's top edge on desktop and wedged between the phone action bar
  * and the input; this offset clears both and rides the band's own clearance,
  * so quick replies or the phone toolbar lift it out of the way with them.
+ * 8px up puts the ring mid-way through that resting space rather than
+ * touching whatever sits below it.
  */
 export const TRANSCRIPT_SYNC_SPOT =
   "pointer-events-none absolute left-1/2 z-[5] flex " +
-  "bottom-[calc(var(--session-under,0px)+var(--suggestions-under,0px)+4px)] " +
+  "bottom-[calc(var(--session-under,0px)+var(--suggestions-under,0px)+8px)] " +
   PILL_CENTRED;
 
 /* ── Session info page (phone) ──────────────────────────────────────────────

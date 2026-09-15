@@ -33,7 +33,7 @@ describe("TranscriptSyncing", () => {
     expect(html).toContain("pointer-events-none absolute left-1/2");
     // Clear of the composer's overlap and any action band, not the bare edge.
     expect(html).toContain(
-      "bottom-[calc(var(--session-under,0px)+var(--suggestions-under,0px)+4px)]",
+      "bottom-[calc(var(--session-under,0px)+var(--suggestions-under,0px)+8px)]",
     );
     expect(html).toContain("animate-spin");
     expect(html).toContain("Checking for new messages");
