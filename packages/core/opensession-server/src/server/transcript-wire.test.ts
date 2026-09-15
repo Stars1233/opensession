@@ -46,20 +46,46 @@ describe("v2 transcript wire previews", () => {
 
   test("loads intermediate assistant notes separately from visible answers", () => {
     const prompt = entry("u", "user", "prompt");
-    const note = entry("n", "assistant", "n".repeat(3_000));
+    const note = entry("n", "assistant", "n".repeat(8_000));
     const call = entry("t", "tool_use", "Using Read", { toolUseId: "call" });
     const result = entry("r", "tool_result", "result", { toolUseId: "call" });
-    const answer = entry("a", "assistant", "a".repeat(3_000));
+    const answer = entry("a", "assistant", "a".repeat(8_000));
 
     const clamped = clampV2InitEntries([prompt, note, call, result, answer]);
 
     expect(clamped[1]).toMatchObject({
       contentClamped: true,
-      contentLength: 3_000,
+      contentLength: 8_000,
     });
     expect(clamped[1].content).toHaveLength(INIT_COLLAPSED_MESSAGE_CLAMP_BYTES);
     expect(clamped[4]).toBe(answer);
-    expect(clamped[4].content).toHaveLength(3_000);
+    expect(clamped[4].content).toHaveLength(8_000);
+  });
+
+  test("sends short and near-limit intermediate notes whole", () => {
+    const prompt = entry("u", "user", "prompt");
+    const short = entry("s", "assistant", "s".repeat(303));
+    const nearLimit = entry(
+      "n",
+      "assistant",
+      "n".repeat(INIT_COLLAPSED_MESSAGE_CLAMP_BYTES + 500),
+    );
+    const call = entry("t", "tool_use", "Using Read", { toolUseId: "call" });
+    const result = entry("r", "tool_result", "result", { toolUseId: "call" });
+    const answer = entry("a", "assistant", "done");
+
+    const clamped = clampV2InitEntries([
+      prompt,
+      short,
+      nearLimit,
+      call,
+      result,
+      answer,
+    ]);
+
+    expect(clamped[1]).toBe(short);
+    expect(clamped[2]).toBe(nearLimit);
+    expect(clamped[2].contentClamped).toBeUndefined();
   });
 
   test("does not send message text the UI would hide behind its expander", () => {

@@ -120,8 +120,9 @@ by Open Session:
   notes collapse into the work fold and do not add visible conversation rows.
   Extension stops at 1,400 rows or an estimated 850,000 uncompressed wire
   bytes. Ordinary opening content is clamped to the 24,000 characters the web
-  client can render eagerly; folded tool results and intermediate assistant
-  notes get 256-character previews. Parser-only request ids, raw notice kinds,
+  client can render eagerly; folded tool results get 256-character previews
+  and intermediate assistant notes 4,000-character previews, with notes that
+  are less than 20% over sent whole. Parser-only request ids, raw notice kinds,
   and context provenance are removed after classification. Large transcript
   frames use WebSocket per-message deflate when the client negotiates it, with
   a shared server compressor to bound memory.

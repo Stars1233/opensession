@@ -9,9 +9,14 @@ export const INIT_MESSAGE_CLAMP_BYTES = MESSAGE_PREVIEW_CHARS;
 /** Tool results open folded and hydrate from the full-entry endpoint when a
  * reader expands them. The opening frame only needs a compact preview. */
 export const INIT_TOOL_RESULT_CLAMP_BYTES = 256;
-/** Intermediate assistant notes live inside a closed work turn. Their full
- * text loads through the existing entry endpoint only when requested. */
-export const INIT_COLLAPSED_MESSAGE_CLAMP_BYTES = 256;
+/** Intermediate assistant notes live inside a closed work turn. Most are a
+ * paragraph or two of narration, so 4,000 characters ships nearly all of them
+ * whole; anything longer loads through the entry endpoint when requested. */
+export const INIT_COLLAPSED_MESSAGE_CLAMP_BYTES = 4_000;
+/** Skip the clamp when it would hide less than 20% of a folded note, the
+ * same rule MESSAGE_COLLAPSE_CHARS applies to visible messages. */
+export const INIT_COLLAPSED_MESSAGE_COLLAPSE_BYTES =
+  INIT_COLLAPSED_MESSAGE_CLAMP_BYTES / 0.8;
 
 /**
  * Clamp an opening snapshot or history page without changing live appends.
@@ -58,10 +63,27 @@ export function v2SnapshotEntryWeight(
 
 function initClampBytes(entry: SeqEntry, foldedAssistant: boolean): number {
   if (entry.type === "tool_result") return INIT_TOOL_RESULT_CLAMP_BYTES;
-  if (foldedAssistant) return INIT_COLLAPSED_MESSAGE_CLAMP_BYTES;
-  return entry.content.length < MESSAGE_COLLAPSE_CHARS
-    ? MESSAGE_COLLAPSE_CHARS
-    : INIT_MESSAGE_CLAMP_BYTES;
+  if (foldedAssistant)
+    return nearLimitClamp(
+      entry,
+      INIT_COLLAPSED_MESSAGE_CLAMP_BYTES,
+      INIT_COLLAPSED_MESSAGE_COLLAPSE_BYTES,
+    );
+  return nearLimitClamp(
+    entry,
+    INIT_MESSAGE_CLAMP_BYTES,
+    MESSAGE_COLLAPSE_CHARS,
+  );
+}
+
+/** Content just past the preview goes through whole rather than losing a
+ * short tail behind an expander. */
+function nearLimitClamp(
+  entry: SeqEntry,
+  preview: number,
+  collapseAt: number,
+): number {
+  return entry.content.length < collapseAt ? collapseAt : preview;
 }
 
 /** Assistant notes hidden by TranscriptBlocks' default work fold. */
