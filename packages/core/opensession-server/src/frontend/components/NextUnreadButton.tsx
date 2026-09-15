@@ -241,7 +241,7 @@ export function NextUnreadButton({ phone = false }: { phone?: boolean }) {
             buttons[target]?.focus();
           }}
         >
-          {chats.map((chat, index) => (
+          {chats.map((chat) => (
             <Button
               key={chat.id}
               data-unread-destination
@@ -261,13 +261,6 @@ export function NextUnreadButton({ phone = false }: { phone?: boolean }) {
                   </span>
                 )}
               </span>
-              {index === 0 && (
-                <IconArrowRight
-                  size={16}
-                  className="shrink-0 text-faint"
-                  aria-hidden
-                />
-              )}
             </Button>
           ))}
         </div>
