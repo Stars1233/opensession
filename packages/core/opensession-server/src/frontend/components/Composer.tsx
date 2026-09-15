@@ -1305,7 +1305,9 @@ export function Composer({
       {attachedAction && (
         <div className="-mb-3.5 flex justify-end px-3">{attachedAction}</div>
       )}
-      {attached}
+      {/* Keep the compact action outside the full-width stack so the first
+          flap retains its top corners, even when the action is present. */}
+      {attached && <div className="flex flex-col">{attached}</div>}
       <motion.div
         layout
         // `layout` here is for ONE move: the phone pill morphing to and from the
