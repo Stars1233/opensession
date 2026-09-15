@@ -418,6 +418,15 @@ the file, and falls back to the file only for a session the catalog has not
 seen. Agents run inside the gateway and read the derived file directly; none
 of them may write it (the `spawn_task` depth stamp commits through
 `updateSessionFile`), and the ownership test scans `src/agents` for writers.
+
+Automatic fallback retries observe committed metadata, falling back to an async
+legacy-file read only when no actor document exists. Their conditional write
+still checks both the selected model and the displaced-selection marker.
+External `publishSessionChange` calls read the canonical export and agent sources
+asynchronously under that row's mutation lock, then await indexing before
+publishing. They retain file-based observation for writers outside the facade;
+read or index failures are caught without announcing a stale or removed row.
+
 The gateway exports the committed document with asynchronous atomic file I/O and
 builds its list row directly from that same document, preserving alias overlays
 without reading the export back. Slack and Linear rows combine their

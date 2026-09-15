@@ -4,7 +4,6 @@
  * in opensession.ts now calls invalidateSessionsCache().
  */
 
-import { existsSync, readFileSync } from "fs";
 import { readFile } from "fs/promises";
 import { OPENSESSION_SESSIONS_DIR } from "./paths";
 import {
@@ -16,10 +15,8 @@ import {
   nativeSessionDetailFromData,
   nativeSessionListRowFromData,
   nativeSessionRow,
-  readAgentSessionListRow,
   readAgentSessionListRowAsync,
   readNativeSession,
-  readNativeSessionListRow,
   readSlackSession,
   type SessionArchiveSlice,
 } from "./sessions";
@@ -140,23 +137,25 @@ export function invalidateSessionsCache(): void {
  * stale and publish the row. Nothing tells every client to refetch.
  */
 export function publishSessionChange(sessionId: string): Promise<void> {
-  const indexed = targetedSessionListRow(sessionId);
-  let written: Promise<void> = Promise.resolve();
-  if (indexed) {
-    enrichSessionRuntime([indexed]);
-    // Posted before the row publish below, so the coalesced flush reads the
-    // row this write produced: the index answers requests in order. Callers
-    // that need the row durable in the index await the returned promise.
-    written = upsertIndexedSession(indexed).catch((error) => {
-      console.warn(
-        `[session-cache] index write failed for ${sessionId}:`,
-        error instanceof Error ? error.message : error,
-      );
-    });
-  }
-  markSessionListStale();
-  publishSessionRow(indexed?.id ?? sessionId);
-  return written;
+  const identity = knownSessionIdentity(sessionId);
+  // Reading the file now yields. Share the canonical row's projection lock
+  // with metadata writes so a delayed read cannot overwrite a newer commit.
+  return withSessionMutationLock(identity.id, async () => {
+    const indexed = await targetedSessionListRow(identity);
+    if (indexed) {
+      enrichSessionRuntime([indexed]);
+      await upsertIndexedSession(indexed);
+    }
+    markSessionListStale();
+    publishSessionRow(indexed?.id ?? sessionId);
+  }).catch((error) => {
+    // Most callers intentionally fire and forget. Do not publish a stale or
+    // removed row when the read/index failed; a later refresh can retry it.
+    console.warn(
+      `[session-cache] row refresh failed for ${sessionId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  });
 }
 
 /**
@@ -174,12 +173,15 @@ export function publishSessionChange(sessionId: string): Promise<void> {
  * was missing from the sidebar and from the worktree reaper's session
  * snapshot, which reaped its fresh checkout as done work (2026-09-10).
  */
-function targetedSessionListRow(sessionId: string): UnifiedSession | undefined {
-  const { id, aliasIds } = knownSessionIdentity(sessionId);
-  return (
-    readNativeSessionListRow(id, aliasIds) ??
-    readAgentSessionListRow(id, aliasIds)
-  );
+async function targetedSessionListRow(
+  identity: SessionIdentity,
+): Promise<UnifiedSession | undefined> {
+  const { id } = identity;
+  if (!isNativeSessionId(id) && !isAgentSessionId(id)) return undefined;
+  // External publishers still observe the file, including legacy writes
+  // outside the metadata facade, rather than replacing it with a catalog read.
+  const doc = await readSessionFileAsync(`${SESSIONS_DIR}/${id}.json`);
+  return committedSessionListRow(id, doc, identity);
 }
 
 /** The row a session id resolves to: the canonical id the last list assembly
@@ -917,7 +919,7 @@ async function currentSessionDocument(
  */
 async function committedSessionListRow(
   sessionId: string,
-  doc: NativeSessionFile,
+  doc: NativeSessionFile | undefined,
   { id, aliasIds }: SessionIdentity,
 ): Promise<UnifiedSession | undefined> {
   const native = isNativeSessionId(id);
@@ -1246,18 +1248,20 @@ export interface AutoFallbackRetry {
 export async function retryAutoFallbackModel(
   sessionId: string,
 ): Promise<AutoFallbackRetry | undefined> {
-  const path = `${SESSIONS_DIR}/${sessionId}.json`;
-  let observed: NativeSessionFile;
+  if (!isNativeSessionId(sessionId) && !isAgentSessionId(sessionId))
+    return undefined;
+  let observed: NativeSessionFile | undefined;
   try {
-    if (!existsSync(path)) return undefined;
-    observed = JSON.parse(readFileSync(path, "utf-8"));
+    observed = await currentSessionDocument(sessionId);
   } catch {
     return undefined;
   }
-  if (observed.autoFallbackModel === undefined) return undefined;
+  if (observed?.autoFallbackModel === undefined) return undefined;
 
   let retry: AutoFallbackRetry | undefined;
   await updateSessionFile(sessionId, (data) => {
+    // A CAS conflict re-runs this mutator. Report only the attempt that commits.
+    retry = undefined;
     if (
       data.model !== observed.model ||
       data.autoFallbackModel !== observed.autoFallbackModel

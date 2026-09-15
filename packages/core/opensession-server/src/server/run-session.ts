@@ -1128,7 +1128,7 @@ export async function recordRecoveredRunEvent(
         shouldPersistModelSwitch(event) &&
         syncAgentSessionEngine(session, { model: event.toModel })
       ) {
-        publishSessionChange(session.id);
+        await publishSessionChange(session.id);
       }
     } else if (
       (event.type === "init" || event.type === "done") &&
@@ -1144,7 +1144,7 @@ export async function recordRecoveredRunEvent(
             : { engineSessionId: event.sessionId },
         )
       )
-        publishSessionChange(session.id);
+        await publishSessionChange(session.id);
       if (session.worktreeDir)
         attachSessionWatchersToEngineTranscript(
           osSessionId,
@@ -1254,7 +1254,7 @@ export async function recordRecoveredRunEvent(
           ],
         });
         linkThreadInIndex(osSessionId, post.channel, post.threadTs);
-        publishSessionChange(osSessionId);
+        await publishSessionChange(osSessionId);
       }
     }
     if (event.type === "done" || event.type === "error")
@@ -1304,7 +1304,7 @@ export async function recordRecoveredRunEvent(
         engineSessionId,
       );
     }
-    publishSessionChange(osSessionId);
+    await publishSessionChange(osSessionId);
   }
 
   if (event.type === "done" || event.type === "error") {
@@ -3350,7 +3350,7 @@ async function runSessionPromptInner(
                   }
                 : {}),
             });
-            publishSessionChange(session.id); // new watchers must see the new transcriptPath
+            await publishSessionChange(session.id); // new watchers must see the new transcriptPath
           } else if (
             // Slack/linear-source sessions need the same persistence, into
             // the owning agent's store — otherwise a fallback/rotation-minted
@@ -3367,7 +3367,7 @@ async function runSessionPromptInner(
                 : { engineSessionId: finalSessionId },
             )
           ) {
-            publishSessionChange(session.id);
+            await publishSessionChange(session.id);
           }
           attachSessionWatchersToEngineTranscript(
             sessionId,
@@ -3431,7 +3431,7 @@ async function runSessionPromptInner(
           // Keep the slack/linear store's model in step so the next turn
           // (from the loop or the UI) resumes on the fallback, not the
           // exhausted model. The new engine id follows via the init event.
-          publishSessionChange(session.id);
+          await publishSessionChange(session.id);
         }
         if (persistSwitch)
           broadcastToSession(sessionId, {
@@ -3553,7 +3553,7 @@ async function runSessionPromptInner(
             } catch {}
           }
         }
-        publishSessionChange(sessionId);
+        await publishSessionChange(sessionId);
         break;
       case "error":
         // "Session is busy" = we lost the start race to a concurrent run (the

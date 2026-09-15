@@ -71,8 +71,8 @@ async function resolvePlainTriageSession(
     const timer = setTimeout(() => resolve(null), 120_000);
     void runAutomation(
       automation,
-      (id) => {
-        publishSessionChange(id);
+      async (id) => {
+        await publishSessionChange(id);
         clearTimeout(timer);
         resolve(id);
       },

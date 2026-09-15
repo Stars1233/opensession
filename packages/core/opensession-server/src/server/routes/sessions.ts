@@ -1797,7 +1797,7 @@ export async function handleSessionsRoutes(
     // unarchive, also clear the file flag so the session returns to "My
     // sessions".
     if (!archived) clearSessionFileArchive(sessionId);
-    publishSessionChange(sessionId);
+    await publishSessionChange(sessionId);
     if (archived) {
       // setArchived drops the plain id pin; also drop legacy alias-id pins,
       // and the workspace pin once its last live session is archived (else the
@@ -1824,7 +1824,7 @@ export async function handleSessionsRoutes(
     await executeSessionProjection(sessionId, "title_override", () =>
       setTitleOverride(sessionId, title || null),
     );
-    publishSessionChange(sessionId);
+    await publishSessionChange(sessionId);
     return Response.json({ ok: true });
   }
 
@@ -1842,7 +1842,7 @@ export async function handleSessionsRoutes(
     await executeSessionProjection(sessionId, "status_override", () =>
       setStatusOverride(sessionId, status),
     );
-    publishSessionChange(sessionId);
+    await publishSessionChange(sessionId);
     return Response.json({ ok: true });
   }
 
@@ -1885,7 +1885,7 @@ export async function handleSessionsRoutes(
           : null,
         reviewAliases,
       );
-      publishSessionChange(session.id);
+      await publishSessionChange(session.id);
       // Buzz whoever asked for the review that it landed (not on self-review).
       if (
         body.accept &&
@@ -2006,7 +2006,7 @@ export async function handleSessionsRoutes(
     // that did reach GitHub still leaves the reviewers on screen.
     if (!reviewer && mirroredToGithub && target)
       markCachedPrReviewRequestsCleared(target.ghRepo, target.branch);
-    publishSessionChange(session.id);
+    await publishSessionChange(session.id);
     if (reviewer) {
       // Only suppress the watcher's own push when the request really landed on
       // GitHub; marking a skipped mirror would swallow a later genuine one.
@@ -2101,7 +2101,8 @@ export async function handleSessionsRoutes(
         );
       }
       await purgeTranscriptRows(session.id);
-      publishSessionChange(session.id);
+      // Deletion already owns this session lock. Publish after it releases.
+      void publishSessionChange(session.id);
       // Tear down the session's sandbox (container + engine-state volumes,
       // and in volume-workspace mode the workspace volume itself; that data
       // loss is the mode's documented contract). Best-effort and detached:

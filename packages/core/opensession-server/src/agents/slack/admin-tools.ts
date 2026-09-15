@@ -456,7 +456,7 @@ export function createAdminMcpServer(ctx: AdminToolContext) {
         async (args: { sessionId: string }) => {
           const res = await retriggerAutomationSession(args.sessionId);
           if (!res.ok) return text(`Couldn't retrigger: ${res.reason}`);
-          publishSessionChange(args.sessionId);
+          await publishSessionChange(args.sessionId);
           return text(
             `Retriggered *${res.name}* from \`${args.sessionId}\` — running now.`,
           );

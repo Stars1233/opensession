@@ -263,7 +263,7 @@ function mergeFileRefs(
 // fresh checkout hourly as "tip in origin/main" (2026-09-10).
 async function saveAndPublishSession(session: SlackSession): Promise<void> {
   await saveSession(session);
-  void publishSessionChange(
+  await publishSessionChange(
     `slack-${getSessionKey(session.channel, session.threadTs)}`,
   );
 }

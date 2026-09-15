@@ -427,7 +427,7 @@ export async function handlePrRoutes(
         number: body.number,
         branch: body.branch,
       });
-      publishSessionChange(sessionId); // session.prs / linkedPrs changed
+      await publishSessionChange(sessionId); // session.prs / linkedPrs changed
       return Response.json({ ok: true, ...result });
     } catch (e: any) {
       return Response.json({ error: e.message || String(e) }, { status: 400 });
@@ -452,7 +452,7 @@ export async function handlePrRoutes(
     try {
       const { unlinkPr } = await import("../session-repos");
       const all = unlinkPr(sessionId, body.repo, body.branch);
-      publishSessionChange(sessionId);
+      await publishSessionChange(sessionId);
       return Response.json({ ok: true, all });
     } catch (e: any) {
       return Response.json({ error: e.message || String(e) }, { status: 400 });
@@ -1141,7 +1141,7 @@ export async function handlePrRoutes(
         });
         stopped = true;
       }
-      publishSessionChange(bksId);
+      await publishSessionChange(bksId);
       return Response.json({ ok: true, cancelled: requested || stopped });
     }
 

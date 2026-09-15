@@ -196,7 +196,7 @@ export async function handleSystemRoutes(
       if (changed) {
         deadLettersCaches.clear();
         if (validQuarantine) {
-          publishSessionChange(body.sessionId as string);
+          await publishSessionChange(body.sessionId as string);
           broadcastToSession(body.sessionId as string, {
             type: "session_status",
             sessionId: body.sessionId,

@@ -141,7 +141,7 @@ export async function handleAutomationsRoutes(
     const result = await retriggerAutomationSession(body.sessionId);
     if (!result.ok)
       return Response.json({ error: result.reason }, { status: 400 });
-    publishSessionChange(body.sessionId);
+    await publishSessionChange(body.sessionId);
     return Response.json(result);
   }
 

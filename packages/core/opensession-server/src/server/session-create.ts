@@ -1420,7 +1420,7 @@ export async function openCreatedSession(
     )
     .then(async (t) => {
       if (!t) return;
-      publishSessionChange(bksId);
+      await publishSessionChange(bksId);
       if (!wsToName) return;
       const cur = await getWorkspace(wsToName.id);
       if (cur && cur.name === wsToName.name)
@@ -1693,7 +1693,7 @@ export async function openCreatedSession(
             lifecycle: "awake",
           },
         });
-        publishSessionChange(bksId);
+        await publishSessionChange(bksId);
         const stored = await findSessionAsync(bksId);
         // The session-list projection may still hold the pre-Runner create row
         // for this same command turn. Launch from the just-committed immutable
