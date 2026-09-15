@@ -145,6 +145,7 @@ function TranscriptMotionPlayer({
   const [eventIndex, setEventIndex] = useState(0);
   const [liveTurnStore] = useState(() => new LiveTurnStore());
   const busyRef = useRef(state.busy);
+  const controlRef = useRef<TranscriptMotionControl | null>(null);
   const [busySince] = useState(() => Date.now());
   const settleTimer = useRef<number | undefined>(undefined);
   const {
@@ -183,7 +184,7 @@ function TranscriptMotionPlayer({
 
   useEffect(() => {
     const control: TranscriptMotionControl = {
-      paused: false,
+      paused: controlRef.current?.paused ?? false,
       followLatest: () => scrollToLatest("auto"),
       step: manual
         ? () => {
@@ -214,6 +215,7 @@ function TranscriptMotionPlayer({
           }
         : undefined,
     };
+    controlRef.current = control;
     window.__transcriptMotionControl = control;
     return () => {
       if (window.__transcriptMotionControl === control)

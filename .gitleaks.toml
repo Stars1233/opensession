@@ -7,6 +7,18 @@ useDefault = true
 description = "Intentional secret-shaped inputs verify that memory extraction drops credentials"
 paths = ['''^test/memory-bench/secrets-exclusion\.json$''']
 
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Synthetic Slack session identifier in the empty-timestamp export regression test"
+condition = "AND"
+paths = [
+  '''(^|/)packages/core/opensession-server/src/server/session-cache-metadata-export\.test\.ts$''',
+]
+regexTarget = "secret"
+regexes = ['''^C0EMPTY\-1789056158\.000010$''']
+
 [[allowlists]]
 description = "Known public identifiers and synthetic test values misclassified as generic API keys"
 regexTarget = "secret"

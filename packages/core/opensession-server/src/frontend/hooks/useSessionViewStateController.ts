@@ -55,6 +55,7 @@ import type { useSessionSocket } from "./useSessionSocket";
 import type { LiveTurnStore } from "../lib/live-turn-store";
 import type { TranscriptViewStore } from "../lib/transcript-view-store";
 import type { SessionPrRef } from "../lib/types";
+import type { PortalTarget } from "../lib/portals";
 import type { SessionViewerProps } from "../lib/session-viewer-bindings";
 
 type WorkspaceSummaryStyle = CSSProperties & {
@@ -305,6 +306,7 @@ export function useSessionViewStateController({
   const [panelTerminalMounted, setPanelTerminalMounted] = useState(
     () => activePanelOpen && sidePanel.page === "terminal",
   );
+  const [pinnedPortal, setPinnedPortal] = useState<PortalTarget | null>(null);
   const assets = useSessionAssets(session.id, addHandler);
   const assetPaths = useMemo(
     () => assets.files.map((file) => file.path),
@@ -439,6 +441,9 @@ export function useSessionViewStateController({
       setPanelPage,
       panelTerminalMounted,
       setPanelTerminalMounted,
+      pinnedPortal:
+        pinnedPortal?.sessionId === session.id ? pinnedPortal : null,
+      setPinnedPortal,
     },
     assets: {
       assetFiles: assets.files,

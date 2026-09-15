@@ -234,6 +234,7 @@ describe("host Portal lifecycle cleanup", () => {
       name: "wakeable",
       defaultPath: "/kept?mode=preview",
       readyTimeoutMs: 15_000,
+      shutdownGraceMs: 30_000,
       command:
         "bun -e 'Bun.serve({port:Number(process.env.PORT),fetch(){return new Response(\"awake\")}})'",
     });
@@ -267,6 +268,7 @@ describe("host Portal lifecycle cleanup", () => {
       expect(first.pid).not.toBe(started.pid);
       expect(first.defaultPath).toBe("/kept?mode=preview");
       expect(first.readyTimeoutMs).toBe(15_000);
+      expect(first.shutdownGraceMs).toBe(30_000);
       expect(await (await fetch(`http://127.0.0.1:${port}`)).text()).toBe(
         "awake",
       );
@@ -382,6 +384,7 @@ describe("host Portal lifecycle cleanup", () => {
       worktreeDir: worktree,
       name: "web",
       port,
+      shutdownGraceMs: 30_000,
       command:
         "bun -e 'Bun.serve({port:Number(process.env.PORT),fetch(){return new Response(\"web\")}})'",
     });
@@ -403,9 +406,11 @@ describe("host Portal lifecycle cleanup", () => {
     await expect(sweep).rejects.toThrow("Portal changed");
     expect(replacement.state).toBe("awake");
     expect(replacement.pid).not.toBe(first.pid);
+    expect(replacement.shutdownGraceMs).toBe(30_000);
     expect((await listPortalServices(worktree))[0]).toMatchObject({
       state: "awake",
       pid: replacement.pid,
+      shutdownGraceMs: 30_000,
     });
     await stopPortalService({
       sessionId: "owner",

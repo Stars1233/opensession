@@ -358,8 +358,15 @@ try {
 
       // Partial-prefix growth and two keyed prepends while following.
       await probe.phase("following");
+      // Keyboard probes pause the automatic timeline while geometry settles.
+      // A transcript render must not replace that pause with a fresh control.
+      await evaluate<void>(`window.__transcriptMotionControl.paused = true`);
       for (let index = 0; index < 3; index++) {
         current = await step();
+        assert(
+          await evaluate<boolean>(`window.__transcriptMotionControl.paused`),
+          "fixture pause reset by a transcript render",
+        );
         assert(
           current.clientHeight === fixedViewportHeight,
           `viewport height changed during prepend: ${fixedViewportHeight} -> ${current.clientHeight}`,
@@ -369,6 +376,7 @@ try {
           `following ended ${current.bottomGap}px from the end`,
         );
       }
+      await evaluate<void>(`window.__transcriptMotionControl.paused = false`);
       const followingSteps = current.event;
       const following = await probe.take();
       const followingGlides = findRowGeometryTransitions(following);
