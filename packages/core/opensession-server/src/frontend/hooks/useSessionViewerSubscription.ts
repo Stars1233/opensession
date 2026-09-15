@@ -73,6 +73,8 @@ interface SubscriptionTranscript {
   viewStore: TranscriptViewStore;
   setEntries: SetEntries;
   setLoading: Setter<boolean>;
+  /** Held entries are on screen while the watch handshake catches them up. */
+  setSyncing: Setter<boolean>;
   setHistoryTruncated: Setter<boolean>;
   liveTurnStore: LiveTurnStore;
 }
@@ -152,6 +154,7 @@ export function useSessionViewerSubscription({
     viewStore: transcriptViewStore,
     setEntries,
     setLoading,
+    setSyncing,
     setHistoryTruncated,
     liveTurnStore,
   },
@@ -228,6 +231,12 @@ export function useSessionViewerSubscription({
         : ready && cursor?.sessionId === session.id
           ? { sinceOffset: cursor.offset, sinceRev: cursor.rev }
           : {};
+    // The held entries may be behind the server. A resume answers with the
+    // gap as transcript_append, or with nothing at all when there is no gap,
+    // so the flag clears on the first frame that follows the watch instead:
+    // the tail or gap itself, then the index and the queue snapshot, which
+    // the server sends in that order after every watch resolves.
+    if (ready && transcriptViewStore.getSnapshot().length > 0) setSyncing(true);
     const unsubscribe = addHandler((msg) => {
       // Session-scoped messages carry the session id — drop anything meant
       // for a different session. Without this, a socket race (or a lingering
@@ -260,6 +269,7 @@ export function useSessionViewerSubscription({
           // Weave persisted model switches into the conversation as dividers.
           const merged = withModelSwitches(msg.entries, session.modelHistory);
           transcriptReadySessionRef.current = session.id;
+          setSyncing(false);
           // Mode detection (transcript v2): an init carrying seq fields
           // switches this session into seq mode; one without switches it
           // back to legacy (e.g. the flag was turned off — the resume
@@ -328,6 +338,7 @@ export function useSessionViewerSubscription({
           break;
         }
         case "transcript_index": {
+          setSyncing(false);
           replaceIndex(msg, messagesRef.current, followingLive.current);
           setHistoryTruncated(false);
           backgroundHistoryRef.current = false;
@@ -414,6 +425,7 @@ export function useSessionViewerSubscription({
           break;
         }
         case "transcript_append": {
+          setSyncing(false);
           const seqState = transcriptSeqRef.current;
           const inSeqMode = seqState?.sessionId === session.id;
           if (inSeqMode) {
@@ -467,6 +479,7 @@ export function useSessionViewerSubscription({
             setTypingUsers(otherTypingUsers(msg.users, getCurrentUser()));
           break;
         case "queue_update":
+          setSyncing(false);
           if (msg.sessionId === session.id) {
             // Don't let a broadcast rewrite the list mid-drag (see
             // draggingQueueRef) — the drop will send our order and the

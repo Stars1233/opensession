@@ -76,6 +76,25 @@ test("SessionViewer delegates its session subscription once", async () => {
   expect(viewer).not.toContain('case "transcript_init"');
   expect(viewer).not.toContain('type: "watch"');
   expect(subscription).toContain('case "transcript_init"');
+});
+
+test("the subscription clears the catch-up spinner on every frame that ends a watch", async () => {
+  const subscription = await source("../hooks/useSessionViewerSubscription.ts");
+  // A resume with no gap answers with nothing transcript-shaped at all, so
+  // the flag must also fall on the content-free frames the server sends after
+  // every watch resolves. Dropping any of these leaves the ring spinning on a
+  // thread that is already current.
+  for (const frame of [
+    "transcript_init",
+    "transcript_append",
+    "transcript_index",
+    "queue_update",
+  ]) {
+    const at = subscription.indexOf(`case "${frame}"`);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const body = subscription.slice(at, at + 400);
+    expect(body).toContain("setSyncing(false)");
+  }
   expect(subscription).toContain('case "transcript_append"');
   const register = subscription.indexOf("const unsubscribe = addHandler(");
   const watch = subscription.indexOf('type: "watch"');

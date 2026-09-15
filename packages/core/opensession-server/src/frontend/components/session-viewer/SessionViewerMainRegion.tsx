@@ -32,6 +32,7 @@ import {
   WorkspaceSetup,
   ConversationLoading,
   BusyInline,
+  TranscriptSyncing,
   WorkspaceWaiting,
 } from "./busy-indicators";
 import { Button } from "../../ui/button";
@@ -220,6 +221,8 @@ interface TranscriptContent {
   atTop: boolean;
   /** Older rows are on the wire: a legacy page walk or indexed ranges. */
   loadingHistory: boolean;
+  /** Cached entries are on screen while the watch handshake catches them up. */
+  syncing: boolean;
 }
 
 interface TranscriptActions {
@@ -502,6 +505,7 @@ export function SessionViewerMainRegion({
     historyTruncated,
     atTop,
     loadingHistory,
+    syncing,
   } = transcript.content;
   const {
     openAssetFromTranscript,
@@ -1097,6 +1101,12 @@ export function SessionViewerMainRegion({
                   </button>
                 </div>
               )}
+
+            <AnimatePresence initial={false}>
+              {syncing && !loading && !settingUpWorkspace && (
+                <TranscriptSyncing key="transcript-syncing" />
+              )}
+            </AnimatePresence>
 
             {scrollAction && isPhone && (
               /* Phone keeps this above its stacked action rows. Desktop

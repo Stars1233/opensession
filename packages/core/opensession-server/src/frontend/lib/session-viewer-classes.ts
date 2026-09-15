@@ -565,6 +565,24 @@ export const TRANSCRIPT_PILL_TOP =
   `pointer-events-none absolute top-3 left-1/2 z-[5] ${PILL_CENTRED} ` +
   "phone:top-[calc(var(--pane-header-h)+var(--strip-clearance,0px)+8px)]";
 
+/**
+ * Where the catch-up spinner floats while held entries wait for the watch
+ * handshake. A sibling of the scroll area like the top pill, so it never
+ * moves a row; 12px of ring and nothing else, centred on the reading column.
+ *
+ * It sits in the 16px of clear resting space the scroller keeps above
+ * everything that overlaps its bottom edge (VIEWER_MESSAGES): the composer's
+ * overlap (`--session-under`) plus whatever action band is up
+ * (`--suggestions-under`). Measured at `bottom-2` instead, the ring landed on
+ * the composer's top edge on desktop and wedged between the phone action bar
+ * and the input; this offset clears both and rides the band's own clearance,
+ * so quick replies or the phone toolbar lift it out of the way with them.
+ */
+export const TRANSCRIPT_SYNC_SPOT =
+  "pointer-events-none absolute left-1/2 z-[5] flex " +
+  "bottom-[calc(var(--session-under,0px)+var(--suggestions-under,0px)+4px)] " +
+  PILL_CENTRED;
+
 /* ── Session info page (phone) ──────────────────────────────────────────────
  *
  * Tapping the top-bar title opens this as a deeper page, WhatsApp-style: a

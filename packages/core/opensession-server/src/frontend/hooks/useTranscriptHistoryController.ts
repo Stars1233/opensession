@@ -471,8 +471,16 @@ export function useTranscriptHistoryController({
   // the list row carries the answer where it no longer carries the ids.
   const [loading, setLoading] = useState(!cachedTranscript && !!ran);
   // Cached transcripts stay visible while the watch handshake catches them up.
-  // That background sync is intentionally silent: it does not block reading or
-  // sending, and a loader at the live edge looks like part of the conversation.
+  // That background sync never blocks reading or sending, and it is not a
+  // transcript row: a loader at the live edge looks like part of the
+  // conversation. It is a small spinner floated over the bottom edge instead,
+  // because a thread that has moved on since it was cached can otherwise sit
+  // for seconds on an older tail with nothing saying newer messages are on
+  // the way. The subscription clears it on the first frame the server sends
+  // after the watch resolves, and re-arms it on every resume re-watch.
+  const [syncing, setSyncing] = useState(
+    !!ran && (cachedTranscript?.entries.length ?? 0) > 0,
+  );
   // The initial transcript is the tail only when the file is large; these drive
   // the "load earlier history" affordance at the top of the conversation.
   const [historyTruncated, setHistoryTruncated] = useState(
@@ -526,6 +534,8 @@ export function useTranscriptHistoryController({
     state: {
       loading,
       setLoading,
+      syncing,
+      setSyncing,
       historyTruncated,
       setHistoryTruncated,
       loadingHistory,

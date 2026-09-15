@@ -614,6 +614,8 @@ export function SessionViewer({
   const {
     loading,
     setLoading,
+    syncing: transcriptSyncing,
+    setSyncing: setTranscriptSyncing,
     historyTruncated,
     setHistoryTruncated,
     loadingHistory,
@@ -903,6 +905,7 @@ export function SessionViewer({
       viewStore: transcriptViewStore,
       setEntries,
       setLoading,
+      setSyncing: setTranscriptSyncing,
       setHistoryTruncated,
       liveTurnStore,
     },
@@ -1698,6 +1701,7 @@ export function SessionViewer({
               safety,
             },
             content: {
+              syncing: transcriptSyncing,
               assetPaths,
               toolPathRoots,
               liveSubagents,

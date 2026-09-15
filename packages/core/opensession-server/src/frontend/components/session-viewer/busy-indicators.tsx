@@ -13,6 +13,7 @@ import {
   msgRow,
   msgSystemRow,
 } from "../../lib/msg-classes";
+import { TRANSCRIPT_SYNC_SPOT } from "../../lib/session-viewer-classes";
 import type { LiveTurnStore } from "../../lib/live-turn-store";
 import { TranscriptLoadingStatus } from "../TranscriptLoadingStatus";
 
@@ -81,6 +82,42 @@ export function ConversationLoading() {
         <TranscriptLoadingStatus />
       </div>
       <TranscriptSkeleton aria-hidden="true" />
+    </motion.div>
+  );
+}
+
+// How long the cached tail may sit on screen before the catch-up spinner
+// appears. Most watch handshakes answer well inside this, and a ring that
+// flashes and goes on every thread open is worse than none.
+const SYNC_SPINNER_DELAY_S = 0.25;
+
+/**
+ * A thread opened from its cached entries while the server is still answering
+ * the resume watch. The entries are real and readable, just possibly behind;
+ * this is the one hint that newer messages may be on the way. It floats over
+ * the scroller's bottom padding rather than joining the transcript, so it
+ * never reads as a row of the conversation and never moves one.
+ */
+export function TranscriptSyncing() {
+  const reducedMotion = useReducedMotion();
+  return (
+    <motion.div
+      role="status"
+      aria-live="polite"
+      data-transcript-syncing
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: { duration: 0 } }}
+      transition={{
+        type: "tween",
+        duration: reducedMotion ? 0 : duration.micro,
+        delay: reducedMotion ? 0 : SYNC_SPINNER_DELAY_S,
+        ease,
+      }}
+      className={TRANSCRIPT_SYNC_SPOT}
+    >
+      <Spinner className="text-faint" />
+      <span className="sr-only">Checking for new messages</span>
     </motion.div>
   );
 }
