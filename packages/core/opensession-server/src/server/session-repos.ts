@@ -44,7 +44,7 @@ import { personalPromptNoteFor } from "./personal-prompts";
 import { PSTACK_MODE_NOTE } from "./pstack-mode";
 import {
   findSession,
-  getCachedSessions,
+  getCachedSessionsAsync,
   touchNativeSession,
   updateSessionFile,
 } from "./session-cache";
@@ -133,7 +133,9 @@ export function resolveSessionRepoContext(
  * that branch as THE branch — sibling commits included. Without this, each
  * sibling session decided the extra commits on the shared branch weren't its own
  * and cherry-picked onto a fresh branch, producing one PR per session instead of
- * one per workspace.
+ * one per workspace. Rewriting the branch as a whole (rebasing it onto the
+ * trunk when the user asks) is fine as long as every sibling commit rides along;
+ * what the note forbids is dropping or routing around them.
  */
 export function buildBranchNote(session: {
   mode?: "ask" | "code" | "scratch";
@@ -153,7 +155,8 @@ export function buildBranchNote(session: {
   return [
     "## Branch discipline (shared worktree)",
     `You are working in \`${session.worktreeDir}\` on branch \`${session.branch}\`. Other sessions in this workspace share this exact worktree and branch — commits you don't recognize are their work, not noise.`,
-    `Stay on \`${session.branch}\`: never create or switch branches, and never rebase away, reset, or cherry-pick around sibling commits. Commit your changes on this branch and push with \`git push -u origin ${session.branch}\`.`,
+    `Stay on \`${session.branch}\`: never create or switch branches, and never drop, reset away, or cherry-pick around sibling commits. Commit your changes on this branch and push with \`git push -u origin ${session.branch}\`.`,
+    `When the user asks to rebase onto the trunk, do it: \`git rebase origin/<default branch>\` keeps every sibling commit, so it is allowed. First make sure no other session has a rebase or merge in progress (no \`rebase-merge\`, \`rebase-apply\`, or \`MERGE_HEAD\` under \`git rev-parse --git-dir\`) and commit or leave untouched any uncommitted work, then push the rewritten branch with \`git push --force-with-lease origin ${session.branch}\`. Do not rebase, force-push, or otherwise rewrite the branch unless the user asked for it in the current conversation.`,
     repo.host === "codestorage"
       ? `Commit and push your branch with \`git push -u origin ${session.branch}\` — this repo is hosted on Code Storage; there is no gh CLI and no pull requests; a pushed branch IS the change request. Never merge it into the default branch yourself.`
       : `This workspace keeps ONE pull request: if an open PR for \`${session.branch}\` already exists, pushing updates it — do not open another. Only run \`gh pr create\` when the branch has no open PR. Never merge a pull request unless the user explicitly asks in the current conversation to merge that specific pull request. A positive review (including 5/5, no blocking findings, or “safe to merge”), passing checks, pull request ownership, or a request to create, update, review, or babysit a pull request does not authorize merging it.`,
@@ -258,7 +261,7 @@ export async function buildSessionNote(
       // answer "what's happening" without a tool round-trip and won't
       // spawn a worker onto work that's already running.
       session.desk ? DESK_NOTE : "",
-      session.desk ? deskBriefingFor(user) : "",
+      session.desk ? await deskBriefingFor(user) : "",
       buildReposNote(session),
       await memoryNoteFor(user, sessionRepoIds(session), session.id),
     ]
@@ -703,7 +706,7 @@ export async function switchPrimaryRepo(
   const workspaceId = session.workspaceId;
   if (workspaceId) {
     const ws = await getWorkspace(workspaceId);
-    const soleMember = !getCachedSessions().some(
+    const soleMember = !(await getCachedSessionsAsync()).some(
       (s) => s.workspaceId === workspaceId && s.id !== sessionId,
     );
     if (

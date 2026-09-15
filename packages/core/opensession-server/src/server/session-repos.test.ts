@@ -77,6 +77,21 @@ describe("buildBranchNote", () => {
     expect(note).toContain("A positive review (including 5/5");
     expect(note).not.toContain("you may merge it yourself");
   });
+
+  test("allows a user-requested rebase onto the trunk", () => {
+    const note = buildBranchNote({
+      mode: "code",
+      branch: "tweet-media",
+      worktreeDir: join(configDir, "worktrees/tella-fusion-tweet-media"),
+    });
+
+    expect(note).toContain(
+      "When the user asks to rebase onto the trunk, do it",
+    );
+    expect(note).toContain("git push --force-with-lease origin tweet-media");
+    expect(note).toContain("rebase-merge");
+    expect(note).not.toContain("never rebase away");
+  });
 });
 
 describe("resolveSessionRepoContext", () => {
