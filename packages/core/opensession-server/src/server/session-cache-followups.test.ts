@@ -267,6 +267,109 @@ test("retry observes committed metadata rather than a stale export, without sync
   expect(await cache.retryAutoFallbackModel(id)).toBeUndefined();
 });
 
+test.each(["original", null])(
+  "fallback %s stays selected until one hour, then retries only once",
+  async (original) => {
+    const id = `retry-cooldown-${original}`;
+    const switchedAt = Date.now();
+    await cache.updateSessionFile(id, () =>
+      doc(id, { model: original ?? undefined }),
+    );
+    const entry = {
+      model: "fallback",
+      from: original ?? undefined,
+      at: new Date(switchedAt).toISOString(),
+      by: "auto-switch — out of credits",
+    };
+    expect(
+      await cache.persistAutoModelSwitch({
+        sessionId: id,
+        expectedModel: original ?? undefined,
+        model: "fallback",
+        entry,
+      }),
+    ).toBe(true);
+    const before = await kernel.sessionMetadata({ op: "get", sessionId: id });
+    const now = spyOn(Date, "now").mockReturnValue(
+      switchedAt + 60 * 60 * 1000 - 1,
+    );
+    try {
+      expect(await cache.retryAutoFallbackModel(id)).toBeUndefined();
+      expect(await cache.retryAutoFallbackModel(id)).toBeUndefined();
+      // Skipped retries do not write metadata, clear the marker, or add notices.
+      expect(
+        await kernel.sessionMetadata({ op: "get", sessionId: id }),
+      ).toEqual(before);
+      now.mockReturnValue(switchedAt + 60 * 60 * 1000);
+      expect(await cache.retryAutoFallbackModel(id)).toMatchObject({
+        fromModel: "fallback",
+        model: original ?? (await import("./models")).getDefaultModel(),
+      });
+      expect(await cache.retryAutoFallbackModel(id)).toBeUndefined();
+      const stored = JSON.parse(
+        (await kernel.sessionMetadata({ op: "get", sessionId: id }))!.doc,
+      );
+      expect(stored.modelHistory).toHaveLength(2);
+      expect(stored.autoFallbackModel).toBeUndefined();
+
+      // If the probe fails again, it starts a fresh cooldown.
+      expect(
+        await cache.persistAutoModelSwitch({
+          sessionId: id,
+          expectedModel: original ?? undefined,
+          model: "fallback",
+          entry: { ...entry, at: new Date(Date.now()).toISOString() },
+        }),
+      ).toBe(true);
+      expect(await cache.retryAutoFallbackModel(id)).toBeUndefined();
+      now.mockReturnValue(switchedAt + 2 * 60 * 60 * 1000);
+      expect(await cache.retryAutoFallbackModel(id)).toBeDefined();
+    } finally {
+      now.mockRestore();
+    }
+  },
+);
+
+test("a newer fallback with unchanged models restarts the cooldown during retry", async () => {
+  const id = "retry-cooldown-race";
+  const entry = {
+    model: "fallback",
+    from: "original",
+    at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    by: "auto-switch — out of credits",
+  };
+  await cache.updateSessionFile(id, () =>
+    doc(id, {
+      autoFallbackModel: "original",
+      modelHistory: [entry],
+    }),
+  );
+  const { withSessionMutationLock } = await import("./session-mutation-lock");
+  const gate = Promise.withResolvers<void>();
+  const holder = withSessionMutationLock(id, () => gate.promise);
+  const newerFallback = cache.updateSessionFile(id, (data) => ({
+    ...data,
+    modelHistory: [
+      ...(data.modelHistory ?? []),
+      { ...entry, at: new Date().toISOString() },
+    ],
+  }));
+  const retry = cache.retryAutoFallbackModel(id);
+  try {
+    await Bun.sleep(0);
+  } finally {
+    gate.resolve();
+  }
+  await Promise.all([holder, newerFallback]);
+  expect(await retry).toBeUndefined();
+  const stored = JSON.parse(
+    (await kernel.sessionMetadata({ op: "get", sessionId: id }))!.doc,
+  );
+  expect(stored.model).toBe("fallback");
+  expect(stored.autoFallbackModel).toBe("original");
+  expect(stored.modelHistory).toHaveLength(2);
+});
+
 test("retry seeds legacy metadata asynchronously and preserves an inherited default", async () => {
   const id = "retry-legacy";
   writeDoc(id, doc(id, { autoFallbackModel: null }));

@@ -621,7 +621,8 @@ export interface NativeSessionFile {
   externalRefs?: ExternalRef[]; // generic feed-item linkage (the feeds design)
   model?: string; // model id for this session's runs; unset = default
   /** Original selection displaced by an automatic usage fallback. `null` means
-   *  the session inherited the instance default; retried on the next prompt. */
+   *  the session inherited the instance default; retried on the first prompt
+   *  at least one hour after the latest modelHistory switch. */
   autoFallbackModel?: string | null;
   /** Workspace model-preset instructions captured when this session was created. */
   presetNote?: string;

@@ -1240,10 +1240,21 @@ export interface AutoFallbackRetry {
   by: string;
 }
 
+const AUTO_FALLBACK_RETRY_COOLDOWN_MS = 60 * 60 * 1000;
+
+function autoFallbackCoolingDown(data: NativeSessionFile): boolean {
+  // The fallback marker and history entry are persisted together. Reuse the
+  // latest switch time so cooldowns survive restarts and cover existing sessions.
+  // Legacy markers without a valid timestamp remain eligible for one retry.
+  const switchedAt = Date.parse(data.modelHistory?.at(-1)?.at ?? "");
+  return Date.now() < switchedAt + AUTO_FALLBACK_RETRY_COOLDOWN_MS;
+}
+
 /**
- * Retry the selection displaced by the previous turn's automatic usage
- * fallback. The compare-and-swap includes both fields observed before the
- * serialized write, so a concurrent explicit /model always wins.
+ * Retry the displaced selection on the first prompt after a one-hour cooldown.
+ * No timer starts a run by itself. A failed retry persists another fallback,
+ * restarting the cooldown. The compare-and-swap preserves explicit /model
+ * choices, and rechecking the cooldown protects a newer fallback write.
  */
 export async function retryAutoFallbackModel(
   sessionId: string,
@@ -1256,7 +1267,11 @@ export async function retryAutoFallbackModel(
   } catch {
     return undefined;
   }
-  if (observed?.autoFallbackModel === undefined) return undefined;
+  if (
+    observed?.autoFallbackModel === undefined ||
+    autoFallbackCoolingDown(observed)
+  )
+    return undefined;
 
   let retry: AutoFallbackRetry | undefined;
   await updateSessionFile(sessionId, (data) => {
@@ -1264,7 +1279,8 @@ export async function retryAutoFallbackModel(
     retry = undefined;
     if (
       data.model !== observed.model ||
-      data.autoFallbackModel !== observed.autoFallbackModel
+      data.autoFallbackModel !== observed.autoFallbackModel ||
+      autoFallbackCoolingDown(data)
     )
       return data;
 

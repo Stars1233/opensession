@@ -26,7 +26,8 @@ const {
   hasUsableSessionShot,
   socialSessionIdFromPath,
 } = await import("./session-social-card");
-const { invalidateSessionsCache } = await import("./session-cache");
+const { invalidateSessionsCache, updateSessionFile } =
+  await import("./session-cache");
 const { transcriptStore } = await import("./transcript-store");
 
 const signedRouteSessionId = "slack-C123-1719860000.000000";
@@ -51,18 +52,18 @@ function testImage(name: string): string {
 function mediaRef(path: string): string {
   return `/media?path=${encodeURIComponent(path)}`;
 }
-writeFileSync(
-  join(sessionsDir, `${signedRouteSessionId}.json`),
-  JSON.stringify({
-    id: signedRouteSessionId,
-    claudeSessionId: null,
-    title: "Signed Slack social card",
-    createdBy: "Test Person",
-    createdAt: "2026-08-18T12:00:00Z",
-    lastActivity: "2026-08-18T12:00:00Z",
-    mode: "ask",
-  }),
-);
+// A signed URL still resolves through the authoritative metadata catalog.
+// Seed it through the normal writer rather than relying on a legacy file scan.
+await updateSessionFile(signedRouteSessionId, (data) => ({
+  ...data,
+  id: signedRouteSessionId,
+  claudeSessionId: "",
+  title: "Signed Slack social card",
+  createdBy: "Test Person",
+  createdAt: "2026-08-18T12:00:00Z",
+  lastActivity: "2026-08-18T12:00:00Z",
+  mode: "ask",
+}));
 invalidateSessionsCache();
 
 afterAll(() => {

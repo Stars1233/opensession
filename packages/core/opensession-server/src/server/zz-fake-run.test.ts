@@ -76,6 +76,9 @@ beforeAll(async () => {
     sessionListStoreMod.__setSessionListStoreForTest(testSessionListStore);
   restoreSessionListStore = () =>
     sessionListStoreMod.__setSessionListStoreForTest(previousSessionListStore);
+  // Queue drains read the catalog for running children. Start with complete
+  // empty coverage; subsequent session writes publish their individual rows.
+  await sessionListStoreMod.upsertIndexedSessions([], "include");
   const runJournal = await import("./run-journal");
   const prevJournal = runJournal.__setActiveRunsPathForTest(
     `${tmp}/active-runs.json`,
@@ -407,7 +410,7 @@ describe("fake-engine session runs (consumer loop end-to-end)", () => {
     expect(data.modelHistory[0].by).toContain("out of credits");
   });
 
-  test("the next prompt retries the model selected before a usage fallback", async () => {
+  test("prompts keep the fallback until the original selection's cooldown expires", async () => {
     if (!redirected) return;
     const sid = "bks-zz-retry-selected-model";
     writeSessionFile(sid, { model: "dial/medium" });
@@ -419,6 +422,11 @@ describe("fake-engine session runs (consumer loop end-to-end)", () => {
         kind: "clean",
         engineSessionId: "ses_zz_fallback",
         text: ["recovered"],
+      },
+      {
+        kind: "clean",
+        engineSessionId: "ses_zz_fallback",
+        text: ["still on fallback"],
       },
       {
         kind: "clean",
@@ -436,7 +444,20 @@ describe("fake-engine session runs (consumer loop end-to-end)", () => {
 
     await runSession.runSessionPromptAndDrain(sid, "second turn", "Test");
 
-    expect(fake.calls[3].model).toBe(fake.calls[0].model);
+    expect(fake.calls[3].model).toBe(fake.calls[2].model);
+    expect(sessionJson(sid).modelHistory).toEqual(fallback.modelHistory);
+    expect(sessionJson(sid).autoFallbackModel).toBe("dial/medium");
+
+    await sessionCache.updateSessionFile(sid, (data) => ({
+      ...data,
+      modelHistory: data.modelHistory?.map((entry) => ({
+        ...entry,
+        at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      })),
+    }));
+    await runSession.runSessionPromptAndDrain(sid, "after cooldown", "Test");
+
+    expect(fake.calls[4].model).toBe(fake.calls[0].model);
     const retried = sessionJson(sid);
     expect(retried.model).toBe("dial/medium");
     expect(retried.autoFallbackModel).toBeUndefined();
@@ -465,6 +486,13 @@ describe("fake-engine session runs (consumer loop end-to-end)", () => {
     await runSession.runSessionPromptAndDrain(sid, "first turn", "Test");
 
     expect(sessionJson(sid).autoFallbackModel).toBeNull();
+    await sessionCache.updateSessionFile(sid, (data) => ({
+      ...data,
+      modelHistory: data.modelHistory?.map((entry) => ({
+        ...entry,
+        at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      })),
+    }));
 
     await runSession.runSessionPromptAndDrain(sid, "second turn", "Test");
 
