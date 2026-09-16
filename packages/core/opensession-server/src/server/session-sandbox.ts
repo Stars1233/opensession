@@ -128,6 +128,22 @@ export async function activeSandboxFor(
 }
 
 /**
+ * Whether the session's Portals belong to a workspace Sandbox: one it runs
+ * in, or one it is moving into. A move records the provider with
+ * `preparing` before it has a machine, and from that write on nothing else
+ * may own the session's Portals: a Portal Sandbox that finished coming up
+ * meanwhile is unowned, and the move's own machine runs them.
+ */
+export function workspaceSandboxClaimed(
+  session: Pick<UnifiedSession, "sandbox">,
+): boolean {
+  return (
+    Boolean(session.sandbox?.sandboxId) ||
+    isRemoteSandboxProvider(session.sandbox?.provider)
+  );
+}
+
+/**
  * The same for a host session's Portal Sandbox (portal-sandbox.ts): the
  * machine that runs its dev server. Its lifecycle is recorded on
  * `portalSandbox`, never on `sandbox`, which stays the session's own.
@@ -143,7 +159,8 @@ export async function activePortalSandboxFor(
     disowned: "the session no longer runs its Portals on this machine",
     persist: (patch) =>
       persistIfStillRecorded(session.id, (data) =>
-        data.portalSandbox?.sandboxId === sandboxId && !data.sandbox?.sandboxId
+        data.portalSandbox?.sandboxId === sandboxId &&
+        !workspaceSandboxClaimed(data)
           ? { ...data, portalSandbox: { ...data.portalSandbox, ...patch } }
           : null,
       ),

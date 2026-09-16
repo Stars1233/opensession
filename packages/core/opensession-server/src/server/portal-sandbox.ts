@@ -39,6 +39,7 @@ import {
   activeSandboxFor,
   recordedSandboxGone,
   teardownSandbox,
+  workspaceSandboxClaimed,
 } from "./session-sandbox";
 import type { UnifiedSession } from "./types";
 
@@ -74,11 +75,7 @@ type PortalSession = Pick<
 export function portalSandboxProvider(session: PortalSession): string | null {
   if (session.source !== "opensession") return null;
   if (session.runner) return null;
-  if (
-    session.sandbox?.sandboxId ||
-    isRemoteSandboxProvider(session.sandbox?.provider)
-  )
-    return null;
+  if (workspaceSandboxClaimed(session)) return null;
   if (session.automationId || session.automation) return null;
   if (session.mode !== "code" || !session.repo || !session.branch) return null;
   if (!session.worktreeDir) return null;
@@ -124,6 +121,15 @@ export async function sandboxForPortals(
 ): Promise<Sandbox | null> {
   if (session.sandbox?.sandboxId)
     return activeSandboxFor(session, { wake: options.wake });
+  if (workspaceSandboxClaimed(session)) {
+    // Moving into a workspace Sandbox that has no machine yet: the Portals
+    // will run there. Nothing to wake or provision on this side.
+    if (options.wake || options.provision)
+      throw new Error(
+        "This session is moving into a Sandbox; start the Portal there once it is ready.",
+      );
+    return null;
+  }
   const record = session.portalSandbox;
   if (record?.sandboxId) {
     let synced = false;
@@ -251,7 +257,7 @@ async function provisionPortalSandbox(
         const owner = await findSessionAsync(session.id);
         if (
           !owner ||
-          owner.sandbox?.sandboxId ||
+          workspaceSandboxClaimed(owner) ||
           owner.portalSandbox?.provider !== provider
         )
           throw new Error(
@@ -331,7 +337,11 @@ export function syncPortalSandbox(
   return withSessionLifecycleLane(session.id, async () => {
     const current = await findSessionAsync(session.id);
     const record = current?.portalSandbox;
-    if (!current?.worktreeDir || record?.sandboxId !== sandbox.id)
+    if (
+      !current?.worktreeDir ||
+      record?.sandboxId !== sandbox.id ||
+      workspaceSandboxClaimed(current)
+    )
       return "skipped";
     if (!options.ownTurn) refuseWhileTurnRuns(current.id);
     try {
