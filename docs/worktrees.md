@@ -25,6 +25,26 @@ worktrees live. `OPENSESSION_WORKTREES_DIR` overrides it; the normal default is
 worktree root inside that state namespace unless either setting overrides it.
 Directory names use the repository's configured `wtPrefix` and branch.
 
+A repository started from Open Session itself (Settings → Repositories → New,
+or "New repository" in the New session palette's Project picker) is laid out
+as a checkout with a bare origin beside it:
+
+```
+~/checkouts/myapp                                 the checkout sessions branch from
+~/checkouts/myapp.git                             its origin, a bare repository
+```
+
+The server makes the first commit (a README on `main`) and pushes it, so the
+registry sees the same shape as a clone and the first code session gets a
+normal worktree, diff and review unit. Nothing is published: the GitHub App
+deliberately holds no `administration` permission (see
+[github-authority.md](github-authority.md)), so publishing is an explicit act
+from a session, `git remote set-url origin …` and a push with that session's
+credential. Until then the repository has no `ghRepo` and no pull-request
+flow. This is what to pick for a project that does not exist anywhere yet; a
+scratch session (Code with no repo) is only a working directory and never
+becomes one.
+
 Fresh worktree setup is best-effort. Open Session first tries to seed a ready
 warm template, then runs `.agents/setup` or the configured `worktreeSetup`
 fallback. It next runs the configured `depsInstall`, or `bun install` when the

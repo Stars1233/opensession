@@ -27,7 +27,8 @@ import {
   type ModelOption,
   type SandboxStatusInfo,
 } from "../lib/api";
-import { getCurrentUser } from "./UserPicker";
+import { getCurrentUser, useAuthStatus } from "./UserPicker";
+import { NewRepoDialog } from "./NewRepoDialog";
 import { type FileAttachment } from "../lib/images";
 import { type PastedTextAttachment } from "../lib/pasted-text";
 import {
@@ -81,6 +82,7 @@ import {
   IconBox,
   IconMessage,
   IconNewBranch,
+  IconPlus,
   IconX,
 } from "./icons";
 import type { WSClientMessage, WSServerMessage } from "../lib/types";
@@ -401,6 +403,33 @@ export function NewSession({
   );
   const [status, setStatus] = useState<CreateStatus>({ kind: "idle" });
   const busy = status.kind === "creating" || status.kind === "reconnecting";
+  // "New repository" at the foot of the Project picker: a project that exists
+  // nowhere yet starts here rather than in a scratch dir. It is a setup call,
+  // so it follows the same admin rule Settings uses to show that page.
+  const [newRepoOpen, setNewRepoOpen] = useState(false);
+  const canCreateRepo = useAuthStatus()?.admin !== false;
+  function adoptCreatedRepo(created: { id: string; label?: string }) {
+    setRepos((current) =>
+      current.some((option) => option.id === created.id)
+        ? current
+        : [
+            ...current,
+            {
+              id: created.id,
+              label: created.label || created.id,
+              sharedCheckout: false,
+            },
+          ],
+    );
+    setRepo(created.id);
+    setStartPoint(defaultStartPoint());
+    setExtraRepos([]);
+    // The row above is a stand-in until /repos answers with the real entry
+    // (tile colour, checkout mode); the create already invalidated the cache.
+    fetchRepos()
+      .then((items) => setRepos(repoOptions(items)))
+      .catch(() => {});
+  }
   // Which edges of the prompt have content beyond them, and so earn a hairline.
   const [edges, setEdges] = useState({ top: false, bottom: false });
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -1359,6 +1388,15 @@ export function NewSession({
               repoOptionLabel,
               MULTI_MODIFIER,
             )}
+            action={
+              canCreateRepo
+                ? {
+                    label: "New repository…",
+                    icon: <IconPlus size={20} />,
+                    onSelect: () => setNewRepoOpen(true),
+                  }
+                : undefined
+            }
             // A feed workspace is repo-less by construction (its subject is a
             // a feed item, not a checkout), so its create doesn't offer one.
             disabled={busy || forceMode === "scratch"}
@@ -1389,6 +1427,11 @@ export function NewSession({
               <IconChevronDown className={CHEVRON} size={22} />
             )}
           </PaletteSelect>
+          <NewRepoDialog
+            open={newRepoOpen}
+            onOpenChange={setNewRepoOpen}
+            onCreated={adoptCreatedRepo}
+          />
         </div>
         {phoneBar && (
           <button

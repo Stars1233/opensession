@@ -217,6 +217,32 @@ export async function registerRepoApi(input: {
   return repo;
 }
 
+/** What `POST /api/setup/repos` answers for a repository this server just
+ *  started: enough for a picker to select it before `/repos` reloads. */
+export interface CreatedRepo {
+  id: string;
+  label?: string;
+  defaultBranch?: string;
+}
+
+/**
+ * Start an empty repository on this server and register it (Settings →
+ * Repositories → New, and the Project picker's "New repository"). Admin-only,
+ * like every setup route. The server makes the first commit, so the answer
+ * is a repo a code session can branch from immediately.
+ */
+export async function createRepoApi(input: {
+  name: string;
+}): Promise<CreatedRepo> {
+  const repo = await request<CreatedRepo>("/setup/repos", {
+    method: "POST",
+    body: { source: "new", name: input.name },
+    label: "Failed to create the repository",
+  });
+  notifyReposChanged();
+  return repo;
+}
+
 export interface AttachedRepo {
   repo: string;
   branch: string;

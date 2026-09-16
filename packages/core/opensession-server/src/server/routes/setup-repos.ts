@@ -4,7 +4,8 @@
  *
  *   GET  /api/setup/github/repos: repos the instance's GitHub credential can
  *                                  see, for the registration picker.
- *   POST /api/setup/repos: clone a remote or register an existing local checkout.
+ *   POST /api/setup/repos: clone a remote, register an existing local checkout,
+ *                          or start a new repository on this server.
  *   PATCH /api/setup/repos/:id: change its default branch or worktree policy.
  */
 
@@ -54,6 +55,7 @@ import {
 import { githubCredentialHelperCommand } from "../github-git-credential";
 import { homeDir } from "../paths";
 import { fetchWithTimeout } from "../shared/fetch-with-timeout";
+import { validNewRepoName } from "../../shared/repo-name";
 import { shellSafeDefaultBranch } from "../repo-branch";
 import type { RouteContext } from "./context";
 import {
@@ -580,6 +582,8 @@ function persistRepoRegistration(input: {
   registered: Record<string, Repo>;
   auditRepo: string;
   adopted?: boolean;
+  /** The checkout and its origin were made by this call, not found. */
+  created?: boolean;
 }): RepoSection & { id: string } {
   const config = rawConfig();
   const repos = repoSectionsForMutation(config, input.registered);
@@ -600,8 +604,97 @@ function persistRepoRegistration(input: {
     id: input.id,
     path: entry.repo,
     ...(input.adopted ? { adopted: true } : {}),
+    ...(input.created ? { created: true } : {}),
   });
   return { id: input.id, ...entry };
+}
+
+/** Where a repository started here keeps its origin: a bare sibling of the
+ *  checkout, so the pair reads as one project in `ls ~/checkouts`. */
+function localOriginPath(id: string): string {
+  return `${checkoutsRoot()}/${id}.git`;
+}
+
+/**
+ * Start a repository that exists nowhere yet: a bare origin beside a checkout
+ * of it under ~/checkouts, with one root commit (a README) on `main`, pushed
+ * and set as origin's HEAD so `inspectRepo` and worktree creation see exactly
+ * what a clone would. The registry requires an origin with a commit on the
+ * default branch, and every session flow (branches, diffs, review units)
+ * keys off that, which is why a scratch dir is not a project.
+ *
+ * Nothing is published. Creating a GitHub repository needs the App to hold
+ * `administration: write`, a permission docs/github-authority.md keeps away
+ * from every automated identity, so publishing stays an explicit act from a
+ * session (`git remote set-url origin …` and a push) with the credential
+ * that session holds. The registry entry carries no `ghRepo` until then.
+ */
+async function createLocalRepo(input: {
+  name: string;
+}): Promise<RepoSection & { id: string }> {
+  const id = repoIdFromName(input.name);
+  const registered = configuredRepos();
+  assertRepoSlotAvailable(id, registered);
+  const root = checkoutsRoot();
+  const dest = `${root}/${id}`;
+  const origin = localOriginPath(id);
+  assertRepoPathAvailable(dest, registered);
+  if (existsSync(dest) || existsSync(origin)) {
+    throw setupRepoError(
+      `A checkout already exists at ${dest}. Register it as a local folder instead.`,
+      409,
+    );
+  }
+  mkdirSync(root, { recursive: true });
+  const git = async (argv: string[]) => {
+    const result = await runCommand(["git", ...argv], 60_000);
+    if (result.exitCode !== 0)
+      throw new Error(result.stderr || `git ${argv[0]} failed`);
+  };
+  try {
+    await git(["init", "--quiet", "--bare", "-b", "main", origin]);
+    await git(["init", "--quiet", "-b", "main", dest]);
+    writeFileSync(join(dest, "README.md"), `# ${input.name}\n`);
+    await git(["-C", dest, "add", "README.md"]);
+    // The same identity the worktree layer signs an empty remote's root
+    // commit with (worktree.ts): the commit is the server's, not a person's.
+    await git([
+      "-C",
+      dest,
+      "-c",
+      "user.name=Open Session",
+      "-c",
+      "user.email=assistant@opensession.dev",
+      "commit",
+      "--quiet",
+      "-m",
+      "Initial commit",
+    ]);
+    await git(["-C", dest, "remote", "add", "origin", origin]);
+    await git(["-C", dest, "push", "--quiet", "-u", "origin", "main"]);
+    await git(["-C", dest, "remote", "set-head", "origin", "main"]);
+    const inspected = await inspectRepo(dest);
+    return persistRepoRegistration({
+      id,
+      registered,
+      auditRepo: inspected.path,
+      created: true,
+      entry: {
+        label: input.name,
+        repo: inspected.path,
+        wtPrefix: id,
+        defaultBranch: await normalizeInspectedDefaultBranch(
+          inspected.defaultBranch,
+        ),
+      },
+    });
+  } catch (error) {
+    // Both halves are this call's own; a failure leaves nothing behind that a
+    // retry would then refuse as "already exists".
+    rmSync(dest, { recursive: true, force: true });
+    rmSync(origin, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function configureGithubCredentialHelper(
@@ -1088,7 +1181,21 @@ export async function handleSetupRepoRoutes(
       repoId?: unknown;
       path?: unknown;
       id?: unknown;
+      name?: unknown;
     } | null;
+    if (body?.source === "new") {
+      if (!validNewRepoName(body.name)) {
+        return Response.json(
+          {
+            error:
+              "name must use letters, digits, dots, dashes and underscores, starting with a letter or digit",
+          },
+          { status: 400 },
+        );
+      }
+      const name = body.name;
+      return registrationResponse(() => createLocalRepo({ name }));
+    }
     if (body?.source === "local") {
       if (typeof body.path !== "string" || !isAbsolute(body.path.trim())) {
         return Response.json(
