@@ -803,6 +803,8 @@ function slackSessionRowFromData(
     id,
     claudeSessionId: data.claudeSessionId || null,
     source: "slack",
+    // Match the Slack loop for legacy files; never override an explicit ask.
+    mode: data.mode ?? "code",
     branch,
     worktreeDir: data.worktreeDir || null,
     createdBy: startedBy,

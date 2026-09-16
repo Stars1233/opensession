@@ -125,10 +125,9 @@ export async function dispatchSlackSessionMessage(
       user: slackIdToFirstName(message.userId) || message.userName,
       createdByLogin: githubLoginForTrustedSlackId(message.userId) || undefined,
       repo: repo.id,
-      // Questions get the same capabilities as an ordinary code session;
-      // their prompt still says not to edit code. A runtime check needs a
-      // session-owned workspace, not the shared repository checkout.
-      mode: "code",
+      // New Slack questions follow native code-session policy. Migrating a
+      // legacy session must retain an explicitly read-only ask policy.
+      mode: source?.mode ?? legacy?.mode ?? "code",
       branch: owned ? legacy?.branch || message.branch : undefined,
       ...(owned ? { sandbox: "local" as const } : {}),
       model: legacy?.model,

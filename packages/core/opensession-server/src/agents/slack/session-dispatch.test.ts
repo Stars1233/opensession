@@ -144,6 +144,29 @@ test("legacy owned worktrees and history survive without a remote clone losing e
   expect(created[0]?.prompt).toContain("Preserved legacy conversation");
 });
 
+test("explicit legacy ask policy survives native migration and admission retry", async () => {
+  legacy = { mode: "ask", worktreeDir: "/shared", repoId: "other" };
+  source = { id: "slack-C1-123.1", mode: "ask" };
+  const msg = message();
+  failCreate = true;
+  await expect(dispatchSlackSessionMessage("C1-123.1", msg)).rejects.toThrow(
+    "retry admission",
+  );
+  expect(created[0]?.mode).toBe("ask");
+  legacy = { mode: "code" };
+  failCreate = false;
+  await dispatchSlackSessionMessage("C1-123.1", msg);
+  expect(created[1]?.mode).toBe("ask");
+  expect(saved).toBe(1);
+});
+
+test("native migration honors the canonical session's read-only mode overlay", async () => {
+  legacy = { mode: "code", worktreeDir: "/owned", branch: "task" };
+  source = { id: "slack-C1-123.1", mode: "ask" };
+  await dispatchSlackSessionMessage("C1-123.1", message());
+  expect(created[0]?.mode).toBe("ask");
+});
+
 test("legacy shared-checkout questions receive their own native workspace", async () => {
   legacy = { worktreeDir: "/shared", branch: "main" };
   source = { id: "slack-C1-123.1" };
@@ -181,6 +204,24 @@ test("follow-ups including images go to native delivery, not a second runner", a
       images: [{ mediaType: "image/png", data: "aW1hZ2U=" }],
     }),
   ]);
+});
+
+test("code task, question, then edit continue the same native session", async () => {
+  await dispatchSlackSessionMessage(
+    "C1-123.1",
+    message({ prompt: "Fix the editor" }),
+  );
+  await dispatchSlackSessionMessage(
+    "C1-123.1",
+    message({ messageTs: "124.1", prompt: "Why did you change that?" }),
+  );
+  await dispatchSlackSessionMessage(
+    "C1-123.1",
+    message({ messageTs: "125.1", prompt: "Make another edit" }),
+  );
+  expect(created).toHaveLength(1);
+  expect(created[0]?.mode).toBe("code");
+  expect(delivered.map(([id]) => id)).toEqual(["os-native", "os-native"]);
 });
 
 test("linked automations stay on their existing permission-scoped session", async () => {
