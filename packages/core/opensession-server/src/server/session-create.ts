@@ -19,6 +19,11 @@
  * session-control-wiring.ts.
  */
 
+import {
+  mirrorSlackSessionReply,
+  SLACK_SESSION_NOTE,
+} from "../agents/slack/session-reply";
+
 import type { ServerWebSocket } from "bun";
 import { randomUUIDv7 } from "bun";
 import { existsSync } from "node:fs";
@@ -346,6 +351,7 @@ export function resolvePinnedAccountId(
  * between those paths lives in how they fill this in.
  */
 export interface ResolvedCreate {
+  slackOrigin?: import("./types").SlackSessionOrigin;
   id: string;
   /** Raw first-line title persisted immediately (replaced by the generated summary). */
   title: string;
@@ -718,6 +724,17 @@ function createdSessionFileDefaults(spec: ResolvedCreate): NativeSessionFile {
     ...(specPstackMode(spec) ? { pstackMode: true } : {}),
     ...(spec.fastMode ? { fastMode: true } : {}),
     ...(spec.accountId ? { accountId: spec.accountId } : {}),
+    ...(spec.slackOrigin
+      ? {
+          slackOrigin: spec.slackOrigin,
+          slackThreads: [
+            {
+              channel: spec.slackOrigin.channel,
+              threadTs: spec.slackOrigin.threadTs,
+            },
+          ],
+        }
+      : {}),
     ...(spec.plainThreadId ? { plainThreadId: spec.plainThreadId } : {}),
     ...(spec.plainDiscussionId
       ? { plainDiscussionId: spec.plainDiscussionId }
@@ -1559,6 +1576,14 @@ export async function openCreatedSession(
           {
             content: spec.openingPrompt,
             user: spec.user,
+            ...(spec.slackOrigin
+              ? {
+                  slackReplyTo: {
+                    channel: spec.slackOrigin.channel,
+                    threadTs: spec.slackOrigin.threadTs,
+                  },
+                }
+              : {}),
             ...(spec.images?.length
               ? {
                   images: spec.images.map(
@@ -1642,6 +1667,7 @@ export async function openCreatedSession(
         }
       }
 
+      if (spec.slackOrigin) spec.openingPrompt += "\n\n" + SLACK_SESSION_NOTE;
       const retrievedMemory = await retrievedMemoryNoteFor(
         spec.openingPrompt,
         spec.user,
@@ -2080,6 +2106,15 @@ export async function openCreatedSession(
 
     io.emit({ type: "stream_done" });
     io.emit({ type: "session_status", isRunning: false });
+    await mirrorSlackSessionReply(spec.slackOrigin, {
+      sessionId: bksId,
+      localMedia:
+        !spec.remoteSandbox &&
+        !spec.runnerTarget &&
+        !spec.automationDescendantPolicy,
+      assistantText,
+      error: runFailure,
+    });
     mirrorTurnToPlainDiscussion(spec.plainDiscussionId, {
       assistantText,
       endedWithError: !!runFailure,
@@ -2135,6 +2170,11 @@ export async function openCreatedSession(
       }
       return;
     }
+    await mirrorSlackSessionReply(spec.slackOrigin, {
+      sessionId: bksId,
+      assistantText: "",
+      error: e instanceof Error ? e.message : String(e),
+    });
     // Failure after the early announce: the client is already in the
     // session — close out the stream and surface the failure there
     // instead of leaving the viewer spinning. Before the announce there's

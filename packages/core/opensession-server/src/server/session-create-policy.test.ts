@@ -230,3 +230,29 @@ describe("automation descendant opening policy", () => {
     expect(restored.automationDescendantPolicy).toEqual(descendant);
   });
 });
+
+test("Slack opening transport survives native create recovery without changing trust", () => {
+  const slackOrigin = {
+    sessionKey: "C1-123.1",
+    channel: "C1",
+    threadTs: "123.1",
+    messageTs: "123.1",
+  };
+  const recovered = restoreResolvedCreate<{ slackOrigin: typeof slackOrigin }>(
+    snapshotOpeningCreate({ slackOrigin }),
+  );
+  expect(recovered.slackOrigin).toEqual(slackOrigin);
+  expect(
+    openingCreateTrustPolicy({
+      branch: "slack-question",
+      user: "Michiel",
+      createdByLogin: "verified",
+    }),
+  ).toMatchObject({
+    automation: false,
+    user: "Michiel",
+    mcpGrantUser: "verified",
+    aws: true,
+    trustProfile: "interactive",
+  });
+});
