@@ -23,7 +23,7 @@
  * there the transcript is NOT host-visible, so a flaky link would otherwise
  * lose mid-run events for good.
  */
-import type { StreamEvent, ImageInput } from "./events";
+import type { StreamEvent, ImageInput, PromptFile } from "./events";
 import type { GitIdentity } from "./identity";
 import type { TranscriptEntry } from "./session";
 
@@ -74,6 +74,10 @@ export interface RunHostSpec {
   selectedModel?: string;
   transientFallback?: boolean;
   images?: ImageInput[];
+  /** Non-image attachments for this turn, bytes inline. Only set when the
+   *  host runs on another machine: the in-host runner stages them into the
+   *  session scratch dir and tells the model where (prompt-attachments.ts). */
+  files?: PromptFile[];
   forkSession?: boolean;
   resumeSessionAt?: string;
   /** MCP scope for the run: an allowlist, [] for none, or "all". Optional

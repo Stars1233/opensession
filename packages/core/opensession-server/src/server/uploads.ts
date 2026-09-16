@@ -20,8 +20,17 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
+import { readFile } from "fs/promises";
 import { MAX_PROMPT_IMAGES } from "@tellahq/opensession-protocol/session";
-import type { ImageInput } from "./run-events";
+import {
+  INLINE_IMAGE_EXTENSIONS,
+  MAX_SHIPPED_ATTACHMENT_BYTES,
+  MAX_UPLOAD_BYTES,
+  sanitizeAttachmentName as sanitizeFilename,
+  type StagedAttachment,
+} from "./prompt-attachments";
+export { MAX_UPLOAD_BYTES };
+import type { ImageInput, PromptFile } from "./run-events";
 import { SESSIONS_DIR } from "./session-cache";
 
 /** The sender's attachment list cannot be staged as sent. Carries the HTTP
@@ -132,16 +141,7 @@ export const UPLOADS_DIR = `${SESSIONS_DIR}/uploads`;
 // The HTTP endpoint stages here — a brand-new session has no session id yet, so the
 // reference is resolved back (and validated) at send time.
 const STAGED_UPLOADS_DIR = `${UPLOADS_DIR}/staged`;
-// Cap so a single upload can't OOM the process. The HTTP path streams, but the
-// inline base64/WS path buffers, so keep it modest.
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_CREATION_ATTACHMENTS = 32;
-const INLINE_IMAGE_EXTENSIONS: Record<string, string> = {
-  "image/png": ".png",
-  "image/jpeg": ".jpg",
-  "image/gif": ".gif",
-  "image/webp": ".webp",
-};
 // The reverse of INLINE_IMAGE_EXTENSIONS, for reading a staged image back off
 // disk. Deliberately the same four types: a staged ref carries no media type of
 // its own, so only extensions we can name a type for are stageable at all.
@@ -191,16 +191,6 @@ export function parseFileUploads(raw?: unknown): ParsedUpload[] | undefined {
     out.push({ kind: "inline", name, data: m[1] });
   }
   return out.length ? out : undefined;
-}
-
-/** Keep a user-supplied filename to a safe basename (no traversal, no exotic chars). */
-function sanitizeFilename(name: string): string {
-  const base = (name.split(/[\\/]/).pop() || "file").replace(/^\.+/, "");
-  const cleaned = base
-    .replace(/[^A-Za-z0-9._ -]/g, "_")
-    .trim()
-    .slice(0, 120);
-  return cleaned || "file";
 }
 
 /** Persist inline composer images for a non-agent surface such as team notes.
@@ -539,6 +529,45 @@ export function withUploadsNote(
   if (!staged.length) return prompt;
   const lines = staged.map((s) => `- ${s.name}: ${s.path}`).join("\n");
   return `${prompt}\n\n[The user attached ${staged.length} file(s), saved to disk — read them with your file tools if relevant:\n${lines}\n]`;
+}
+
+/**
+ * Read staged attachments back for a host on another machine (a Runner, a
+ * remote Sandbox), which cannot open the uploads dir the note names. Bounded
+ * as one payload: the spec is a single JSON document on the wire. Every
+ * attachment gets an entry; one past the cap (or unreadable) ships without
+ * bytes so the in-host note can still tell the model its host path is out
+ * of reach, instead of leaving the plain note's path as the only word.
+ */
+export async function readPromptFiles(
+  staged?: StagedAttachment[],
+): Promise<PromptFile[] | undefined> {
+  if (!staged?.length) return undefined;
+  const files: PromptFile[] = [];
+  let total = 0;
+  for (const { name, path } of staged) {
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(path);
+    } catch (error) {
+      console.warn(
+        `[uploads] Could not read ${name} for a remote host:`,
+        error,
+      );
+      files.push({ name });
+      continue;
+    }
+    if (total + bytes.length > MAX_SHIPPED_ATTACHMENT_BYTES) {
+      console.warn(
+        `[uploads] ${name} (${bytes.length} bytes) stays host-only: remote payload cap reached`,
+      );
+      files.push({ name });
+      continue;
+    }
+    total += bytes.length;
+    files.push({ name, data: bytes.toString("base64") });
+  }
+  return files;
 }
 
 /** Parse + stage composer file attachments in one step; returns the prompt note-augmenter. */

@@ -76,6 +76,7 @@ import {
   promptDispatches,
   promptQueues,
 } from "./queue-state";
+import type { StagedAttachment } from "./prompt-attachments";
 import { type ImageInput, shouldPersistModelSwitch } from "./run-events";
 import {
   attachSessionWatchersToEngineTranscript,
@@ -401,6 +402,9 @@ export interface ResolvedCreate {
   pstackMode?: boolean;
   accountId?: string;
   images?: ImageInput[];
+  /** Server-staged file attachments named in the opening prompt's uploads
+   *  note; a remote opening run gets their bytes in its spec. */
+  attachments?: StagedAttachment[];
   externalRefs?: NativeSessionFile["externalRefs"];
   plainThreadId?: string;
   /** MCP allowlist persisted on the session file. Empty means no MCP servers. */
@@ -1655,6 +1659,7 @@ export async function openCreatedSession(
               cwd: spec.wtPath,
               user: spec.user,
               images: spec.images,
+              attachments: spec.attachments,
               mcpServers: spec.automationDescendantPolicy
                 ? []
                 : (spec.runMcpServers ?? []),
@@ -1721,6 +1726,7 @@ export async function openCreatedSession(
               hostId: startToken,
               shouldCancel: () => isAgentSessionCancelled(bksId, startToken),
               images: spec.images,
+              attachments: spec.attachments,
               mcpServers: spec.automationDescendantPolicy
                 ? []
                 : (spec.runMcpServers ?? []),
@@ -2805,16 +2811,17 @@ export async function handleCreateSessionMessage(
       });
     // Pasted blocks follow the message; the uploads note follows them, so the
     // parser's end-anchored note regex still finds it.
+    const openingAttachments = attachmentSources.map((attachment) => ({
+      name: attachment.name,
+      path: creationAttachmentPath(
+        bksId,
+        attachment.attachmentId,
+        attachment.name,
+      ),
+    }));
     let openingPrompt = withUploadsNote(
       withPastedTexts(prompt, pastedTextsFromWire(msg.pastedTexts)),
-      attachmentSources.map((attachment) => ({
-        name: attachment.name,
-        path: creationAttachmentPath(
-          bksId,
-          attachment.attachmentId,
-          attachment.name,
-        ),
-      })),
+      openingAttachments,
     );
     // @session:<id> mentions from the New-session box get the same
     // resolving footer as prompts on existing sessions (see
@@ -2932,6 +2939,7 @@ export async function handleCreateSessionMessage(
       pstackMode: createPstackMode,
       accountId: createAccountId,
       images,
+      attachments: openingAttachments,
       externalRefs: inheritedRefs,
       plainThreadId,
       persistMcpServers: createMcpServers?.length
@@ -3022,6 +3030,7 @@ export async function handleCreateSessionMessage(
           ...computedSpec,
           ...restoredSpec,
           images: computedSpec.images,
+          attachments: computedSpec.attachments,
           gitEnv: restoredGitEnv,
           materializeWorktree: restoredMaterializer,
           needsWorktree: !!restoredMaterializer,

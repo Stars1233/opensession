@@ -200,3 +200,17 @@ export interface ImageInput {
   mediaType: string;
   data: string;
 }
+
+/**
+ * A non-image composer attachment as it ships to a detached host: the
+ * person's filename plus raw base64 bytes. The server keeps its own staged
+ * copy for the transcript; this is the copy the engine's file tools can read
+ * where they actually run (a Runner, a Sandbox). `data` is absent when the
+ * server could not ship the bytes (over the per-turn payload cap, or
+ * unreadable): the host still learns the attachment exists and that its
+ * host path is out of reach.
+ */
+export interface PromptFile {
+  name: string;
+  data?: string;
+}

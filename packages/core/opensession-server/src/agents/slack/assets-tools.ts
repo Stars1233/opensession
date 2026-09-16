@@ -142,7 +142,7 @@ export function createAssetsMcpServer(
     ),
     tool(
       "list_assets",
-      "List this session's assets (path, size, modified time) and the configured storage location.",
+      "List this session's assets (path, size, modified time) and the configured storage location. Assets are files the agent saved with write_asset or received with send_file. Files and images the person attaches in chat are NOT assets: they arrive with that message, images inline plus an on-disk path in the same turn's attachment note. Nobody can upload to the Assets tab, so never ask the person to.",
       {},
       async () => {
         const sessionIds = assetSessionIds();
@@ -151,7 +151,9 @@ export function createAssetsMcpServer(
         if (!files.length)
           return text(
             "No assets yet. Save files with write_asset; they show up in the " +
-              "session's Assets tab with a live preview.",
+              "session's Assets tab with a live preview. Looking for something the " +
+              "person attached in chat? It is not an asset: the message that carried " +
+              "it lists where it is saved on disk, and nobody can upload to Assets.",
           );
         const lines = files.map(
           (f) =>

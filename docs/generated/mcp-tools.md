@@ -878,7 +878,7 @@ Save a file into this session's asset storage for preview in the Assets tab or a
 
 `mcp__opensession-assets__list_assets` · input: none
 
-List this session's assets (path, size, modified time) and the configured storage location.
+List this session's assets (path, size, modified time) and the configured storage location. Assets are files the agent saved with write_asset or received with send_file. Files and images the person attaches in chat are NOT assets: they arrive with that message, images inline plus an on-disk path in the same turn's attachment note. Nobody can upload to the Assets tab, so never ask the person to.
 
 ### `read_asset`
 

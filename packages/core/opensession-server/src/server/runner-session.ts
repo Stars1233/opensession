@@ -38,6 +38,8 @@ import { commitAuthorFor } from "./shared/user-mappings";
 import { makeAskHandler } from "./asks";
 import type { McpScope } from "./runner-shared";
 import type { StreamEvent } from "./agent-runner";
+import type { StagedAttachment } from "./prompt-attachments";
+import { readPromptFiles } from "./uploads";
 import type { ImageInput } from "./run-events";
 import { resolveSessionRunInputs, runAccountSpec } from "./session-run-inputs";
 import {
@@ -57,6 +59,9 @@ type RunnerLaunchOpts = {
   hostId?: string;
   engineSessionId?: string;
   images?: ImageInput[];
+  /** Server-staged file attachments; their bytes ship in the spec because
+   *  the Runner cannot read the server's uploads dir. */
+  attachments?: StagedAttachment[];
   mcpServers?: McpScope;
   user?: string;
   reposNote?: string;
@@ -174,6 +179,7 @@ export async function maybeLaunchRunnerRun(
     // Runner tries their own subscription before the automation's account.
     ...runAccountSpec(session, runInputs),
     images: opts.images,
+    files: await readPromptFiles(opts.attachments),
     mcpServers: runInputs.isAutomationSession
       ? (runInputs.mcpServers ?? [])
       : (opts.mcpServers ?? "all"),

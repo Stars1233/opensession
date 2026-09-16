@@ -105,6 +105,26 @@ const BASIC_LINES = [
   assistantLine("a2", "There are two files."),
 ];
 
+describe("user attachments", () => {
+  // A remote host appends a fenced note naming its scratch copies of the
+  // turn's files (prompt-attachments.ts). The end-anchored uploads note the
+  // UI reads for its chips must still be found once the fence is stripped.
+  it("keeps the uploads chips when a fenced in-host note follows the note", () => {
+    const uploadsNote =
+      "[The user attached 1 file(s), saved to disk — read them with your file tools if relevant:\n- brief.pdf: /srv/uploads/os-1/brief.pdf\n]";
+    const inHostNote =
+      '<opensession:context source="uploads-note">\nCopies are in your scratch dir:\n- brief.pdf: /home/ubuntu/.opensession/session-scratch/os-1/attachments/0123-brief.pdf\n</opensession:context>';
+    const path = writeFixture([
+      userLine("u1", `Summarize this\n\n${uploadsNote}\n\n${inHostNote}`),
+    ]);
+    const [entry] = parseTranscript(path);
+    expect(entry.content).toBe("Summarize this");
+    expect(entry.files).toEqual([
+      { name: "brief.pdf", path: "/srv/uploads/os-1/brief.pdf" },
+    ]);
+  });
+});
+
 describe("entriesForWire", () => {
   const pinnedGoal =
     "[Pinned session goal — keep working toward it and note how this turn advanced it: Ship the stable sandbox flow.]";

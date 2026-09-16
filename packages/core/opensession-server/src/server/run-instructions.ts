@@ -201,6 +201,23 @@ export function buildRunInstructions(input: {
     );
   }
 
+  // With an Assets tab in reach, runs handed a pasted screenshot invented a
+  // person-side step ("upload it in the Assets tab") that does not exist. The
+  // per-turn attachment note carries the paths; this states the standing
+  // contract once: Assets is the agent's output folder, not an inbox.
+  if (inproc["opensession-assets"]) {
+    parts.push(
+      "## Attachments\nChat attachments arrive with the message: images inline, every file " +
+        "saved to disk at the path a note on that turn lists." +
+        (input.sandboxed
+          ? " Open Session host paths are not reachable from the Sandbox; use the " +
+            "scratch copies the note lists."
+          : "") +
+        " The Assets tab only shows files you `write_asset`; nobody can upload there, so " +
+        "never ask for that. Ask in chat when an attachment is missing.",
+    );
+  }
+
   parts.push(
     "## Media\nShow results where they belong: `OPENSESSION_IMAGE: /abs/path.png`, " +
       "`OPENSESSION_VIDEO: /abs/path.mp4` (a plain line under one is its caption), " +

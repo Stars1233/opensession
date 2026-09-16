@@ -144,6 +144,7 @@ import { createGoalSelfMcpServer } from "../agents/slack/goal-tools";
 import { sendSlackMessage } from "../agents/slack/slack-api";
 import { runHostsDir, type RunHostSpec } from "../runner-host/protocol";
 import { maybeLaunchRunnerRun } from "./runner-session";
+import type { StagedAttachment } from "./prompt-attachments";
 import {
   shouldPersistModelSwitch,
   type ImageInput,
@@ -202,6 +203,7 @@ import {
 import { isShuttingDown } from "./shutdown-state";
 import {
   parseImageDataUrls,
+  readPromptFiles,
   stageFileAttachments,
   withUploadsNote,
 } from "./uploads";
@@ -1911,6 +1913,9 @@ export async function maybeLaunchSandboxedRun(
      *  undefined for machine turns and scheduled ticks. Run-rpc only. */
     humanPrompter?: string;
     images?: ImageInput[];
+    /** Server-staged file attachments; a remote sandbox gets their bytes in
+     *  the spec because it cannot read the server's uploads dir. */
+    attachments?: StagedAttachment[];
     mcpServers?: McpScope;
     deniedTools?: Record<string, string>;
     isAutomationSession: boolean;
@@ -2184,6 +2189,7 @@ export async function maybeLaunchSandboxedRun(
       model: portablePreset?.model ?? session.model,
       selectedModel: portablePreset?.selectedModel,
       images: opts.images,
+      files: await readPromptFiles(opts.attachments),
       // Interactive remote sandboxes keep Open Session's in-process tools
       // through proxyMcpServers below, but cannot run the host's external MCP
       // commands or reuse its dynamic OAuth state. Sending "all" made every
@@ -2936,7 +2942,9 @@ async function runSessionPromptInner(
       prompt = `${wrapContext(buildSessionContextNote(attachedDigests), "attached-session-excerpt")}\n\n${prompt}`;
   }
   // Non-image attachments: stage to disk and tell the agent where they landed.
-  prompt = withUploadsNote(prompt, stageFileAttachments(sessionId, rawFiles));
+  // A host on another machine also gets the bytes (see the launchers below).
+  const attachments = stageFileAttachments(sessionId, rawFiles);
+  prompt = withUploadsNote(prompt, attachments);
   // The goal guides the model on every turn, but it is session-level system
   // context, not text the person added to this message. Fence it so the model
   // sees it while transcript projections keep the user bubble unchanged.
@@ -3097,6 +3105,7 @@ async function runSessionPromptInner(
     shouldCancel: () => isAgentSessionCancelled(session.id, startToken),
     engineSessionId: engineSessionId || undefined,
     images,
+    attachments,
     mcpServers: mcpServers ?? "all",
     user,
     reposNote: isAutomationSession
@@ -3117,6 +3126,7 @@ async function runSessionPromptInner(
         accountUser: runInputs.accountUser,
         humanPrompter: runInputs.humanPrompter,
         images,
+        attachments,
         mcpServers: mcpServers ?? "all",
         deniedTools,
         isAutomationSession,

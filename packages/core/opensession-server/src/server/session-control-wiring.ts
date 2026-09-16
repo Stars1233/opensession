@@ -1192,16 +1192,17 @@ registerSessionControl({
       });
     // Pasted blocks follow the message; the uploads note follows them, so the
     // parser's end-anchored note regex still finds it.
+    const openingAttachments = attachmentSources.map((attachment) => ({
+      name: attachment.name,
+      path: creationAttachmentPath(
+        bksId,
+        attachment.attachmentId,
+        attachment.name,
+      ),
+    }));
     let openingPrompt = withUploadsNote(
       withPastedTexts(prompt, pastedTexts),
-      attachmentSources.map((attachment) => ({
-        name: attachment.name,
-        path: creationAttachmentPath(
-          bksId,
-          attachment.attachmentId,
-          attachment.name,
-        ),
-      })),
+      openingAttachments,
     );
     if (createMentionsNote)
       openingPrompt += `
@@ -1294,6 +1295,7 @@ ${createMentionsNote}`;
       pstackMode: createPstackMode || undefined,
       accountId: createAccountId,
       images,
+      attachments: openingAttachments,
       // Feed-item linkage follows the session's workspace (Video tab +
       // sidebar feed-row join — the feeds design).
       externalRefs: contextWorkspace?.externalRefs,
@@ -1377,6 +1379,7 @@ ${createMentionsNote}`;
           ...computedSpec,
           ...restoredSpec,
           images: computedSpec.images,
+          attachments: computedSpec.attachments,
           gitEnv: restoredGitEnv,
           materializeWorktree: restoredMaterializer,
           needsWorktree: !!restoredMaterializer,

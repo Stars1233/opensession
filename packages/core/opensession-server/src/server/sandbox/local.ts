@@ -87,6 +87,8 @@ function makeLocalSandbox(cwd: string): Sandbox {
         mode: spec.mode,
         model: spec.model,
         images: spec.images,
+        // spec.files is deliberately not threaded: this run executes on the
+        // host, where the uploads note's paths are readable as written.
         forkSession: spec.forkSession,
         resumeSessionAt: spec.resumeSessionAt,
         mcpServers: spec.mcpServers ?? "all",

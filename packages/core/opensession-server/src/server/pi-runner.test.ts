@@ -46,6 +46,7 @@ import {
   retractPendingSteer,
   runPi,
   runPiSmokeTurn,
+  steerPiRun,
 } from "./pi-runner";
 import type { PiBashAuditEvent } from "./pi-runner";
 import { __setCodexAccountsPathForTest } from "./codex-accounts";
@@ -924,6 +925,152 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
       });
     } finally {
       sdkState.__piSdkPromise = previousSdkPromise;
+    }
+  });
+
+  // An image steer stages its attachment on an async chain before it reaches
+  // pi's queue (prompt-attachments.ts). steerPiRun has already answered
+  // "accepted" by then, so a prompt that settles while the chain is still
+  // busy must not let the pump read pendingMessageCount === 0 and finish:
+  // the steer would be lost with a receipt that says it was taken.
+  test("a steer accepted while its image is staging is still driven to delivery", async () => {
+    writeFileSync(
+      storePath,
+      JSON.stringify({
+        accounts: [
+          {
+            id: "k1",
+            name: "org-key",
+            kind: "api_key",
+            value: "test-remote-runtime-key",
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+    const sessionKey = `pi-late-steer-${crypto.randomUUID()}`;
+    const scratchDir = join(dir, `scratch-${sessionKey}`);
+    mkdirSync(scratchDir, { recursive: true });
+    const png = {
+      mediaType: "image/png",
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    };
+    const steered: string[] = [];
+    let continues = 0;
+    const fakeSdk = {
+      ModelRuntime: {
+        create: async () => ({
+          getModel: (_provider: string, id: string) => ({ id, name: id }),
+          registerProvider: () => {},
+          setRuntimeApiKey: async () => {},
+        }),
+      },
+      SettingsManager: { inMemory: () => ({}) },
+      DefaultResourceLoader: class {
+        async reload() {}
+        getSkills() {
+          return { skills: [] };
+        }
+      },
+      SessionManager: { create: () => ({}), open: () => ({}) },
+      createAgentSession: async () => {
+        let listener: (event: any) => void = () => {};
+        const reply = (text: string) =>
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "stop",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                cost: { total: 0 },
+              },
+              content: [{ type: "text", text }],
+              timestamp: Date.now(),
+            },
+          });
+        const session = {
+          sessionId: "fake-late-steer",
+          pendingMessageCount: 0,
+          agent: {
+            continue: async () => {
+              continues++;
+              // Pi injects the queued steer as a user message, then answers.
+              const text = steered.shift()!;
+              session.pendingMessageCount--;
+              listener({
+                type: "message_end",
+                message: {
+                  role: "user",
+                  content: [{ type: "text", text }],
+                  timestamp: Date.now(),
+                },
+              });
+              reply("done with the icon");
+              listener({ type: "agent_settled" });
+            },
+          },
+          getActiveToolNames: () => [],
+          getLastAssistantText: () => "done with the icon",
+          setSteeringMode: () => {},
+          subscribe: (fn: (event: any) => void) => {
+            listener = fn;
+            return () => {};
+          },
+          prompt: async () => {
+            reply("ok");
+            // The steer lands after the last model boundary and before the
+            // prompt resolves; its image staging is still in flight when the
+            // pump sees the settled prompt.
+            expect(steerPiRun(sessionKey, "Use this icon", [png], "s1")).toBe(
+              true,
+            );
+            listener({ type: "agent_settled" });
+          },
+          steer: async (text: string) => {
+            steered.push(text);
+            session.pendingMessageCount++;
+          },
+          clearQueue: () => {
+            steered.length = 0;
+            session.pendingMessageCount = 0;
+          },
+          abort: async () => {},
+          abortRetry: () => {},
+          dispose: () => {},
+        };
+        return { session };
+      },
+    };
+
+    const sdkState = globalThis as any;
+    const previousSdkPromise = sdkState.__piSdkPromise;
+    sdkState.__piSdkPromise = Promise.resolve(fakeSdk);
+    try {
+      const events = await collect("pi/openai/gpt-5.6-sol", {
+        accountId: "k1",
+        accountStrict: true,
+        sessionId: sessionKey,
+        scratchDir,
+        disableLocalWorkspaceTools: true,
+      });
+      expect(continues).toBe(1);
+      expect(events.find((event) => event.type === "steer_delivered")).toEqual({
+        type: "steer_delivered",
+        steerId: "s1",
+      });
+      expect(events.find((event) => event.type === "done")).toMatchObject({
+        result: "done with the icon",
+      });
+    } finally {
+      sdkState.__piSdkPromise = previousSdkPromise;
+      rmSync(join(PI_STATE_DIR, "sessions", sessionKey), {
+        recursive: true,
+        force: true,
+      });
     }
   });
 

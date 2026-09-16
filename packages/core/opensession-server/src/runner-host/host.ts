@@ -581,6 +581,7 @@ try {
     selectedModel: spec.selectedModel,
     transientFallback: spec.transientFallback,
     images: spec.images,
+    files: spec.files,
     forkSession: spec.forkSession,
     resumeSessionAt: spec.resumeSessionAt,
     mcpServers: spec.mcpServers ?? "all",
