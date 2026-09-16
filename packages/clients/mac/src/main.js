@@ -427,6 +427,14 @@ function showSetup(
   });
 }
 
+function showServerPicker(target) {
+  if (!target || target.isDestroyed()) return;
+  const data = windowData.get(target);
+  if (data) data.setupReturnDestination = "status";
+  clearStallGuard(target);
+  target.loadFile(path.join(__dirname, "server-picker.html"));
+}
+
 // ---- Auto-update ------------------------------------------------------------
 // Electron's built-in Squirrel.Mac updater against the Open Session server's
 // release proxy (src/server/routes/os1-update.ts server-side). The server
@@ -1460,8 +1468,13 @@ app.whenReady().then(async () => {
     const target = eventWindow(e);
     return !!target && inActiveWindow(source, target);
   };
+  // The offline organization picker is a packaged local page. Give it the
+  // same list/add/switch operations, not edit/remove or a generic file:// grant.
+  const fromOrganizationPicker = (e) =>
+    fromActiveOrganizationPicker(e) ||
+    fromLocalPage(e, eventWindow(e), "server-picker.html");
   ipcMain.handle("os1:organizations-list", (e) => {
-    if (!fromActiveOrganizationPicker(e)) return null;
+    if (!fromOrganizationPicker(e)) return null;
     const stored = readStoredAccounts();
     return {
       activeId: accountForWindow(eventWindow(e), stored)?.id || stored.activeId,
@@ -1477,7 +1490,7 @@ app.whenReady().then(async () => {
   ipcMain.on("os1:organizations-switch", (e, id) => {
     const target = eventWindow(e);
     if (
-      fromActiveOrganizationPicker(e) &&
+      fromOrganizationPicker(e) &&
       typeof id === "string" &&
       target?.isFocused() &&
       e.senderFrame === target.webContents.mainFrame
@@ -1488,11 +1501,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     "os1:organizations-add",
     async (e, raw, check = true, activate = true) => {
-      if (!fromActiveOrganizationPicker(e)) return { ok: false };
+      if (!fromOrganizationPicker(e)) return { ok: false };
       const normalized = normalizeServerUrl(raw);
       const resolved = check
         ? await resolveServer(raw)
         : { ok: !!normalized, url: normalized };
+      // A cancelled local picker must not add or activate an organization
+      // after its in-flight server probe finishes.
+      if (!fromOrganizationPicker(e)) return { ok: false };
       if (!resolved.ok || !resolved.url) {
         return {
           ok: false,
@@ -1608,7 +1624,8 @@ app.whenReady().then(async () => {
   const fromShellPage = (e) => (e.senderFrame?.url ?? "").startsWith("file://");
 
   ipcMain.on("os1:server-open", (e) => {
-    if (fromShellPage(e)) showSetup("status", eventWindow(e));
+    const target = eventWindow(e);
+    if (fromLocalPage(e, target, "offline.html")) showServerPicker(target);
   });
   ipcMain.on("os1:server-cancel", (e) => {
     if (!fromShellPage(e)) return;

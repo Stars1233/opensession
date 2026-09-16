@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'"
+    />
+    <title>Switch organization</title>
+    <link rel="stylesheet" href="shell.css" />
+    <script src="server-picker.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <img class="mark" src="mark.png" width="76" height="76" alt="" />
+      <h1>Switch organization</h1>
+      <p class="message">
+        Choose a saved organization, or add one with its server address.
+      </p>
+      <form id="form" class="server-picker" autocomplete="off">
+        <select
+          class="field"
+          id="organization"
+          aria-label="Organization"
+          disabled
+        ></select>
+        <p class="host" id="host"></p>
+        <input
+          class="field"
+          id="url"
+          type="text"
+          inputmode="url"
+          spellcheck="false"
+          autocapitalize="off"
+          autocorrect="off"
+          placeholder="os.example.com"
+          aria-label="Server address"
+          hidden
+        />
+        <div class="actions">
+          <button class="button" id="submit" type="submit" disabled>
+            Connect
+          </button>
+          <button class="button ghost" id="anyway" type="button" hidden>
+            Add anyway
+          </button>
+          <button class="button ghost" id="cancel" type="button">Cancel</button>
+        </div>
+      </form>
+      <p id="status" role="status" aria-live="polite">
+        Reading saved organizations…
+      </p>
+    </main>
+  </body>
+</html>
