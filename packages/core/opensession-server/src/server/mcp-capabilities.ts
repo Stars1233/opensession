@@ -5,22 +5,33 @@
  * while mcp-catalog.ts imports every real server factory for docs and wiring
  * checks. Keeping the shared names and summaries here lets the prompt describe
  * the live capability set without pulling that factory graph into every run.
+ *
+ * Every MCP tool sits behind mcp_search, so a run can only find a tool it
+ * already knows to look for. The guidance below is that knowledge: it is
+ * rendered into the run prompt for each mounted server (see
+ * renderInternalMcpCapabilities), and it is the one place a new tool has to
+ * announce itself. It was dropped from the prompt in ae4df8f32 and
+ * suggest_task then went unused for weeks because no run knew it existed.
  */
 
 export interface InternalMcpCapability {
   /** One-line catalog description used in generated docs. */
   summary: string;
-  /** Decision guidance for docs and review. NOT rendered into the run prompt:
-   *  ff4542949 dropped that loop. A tool a run must know about needs a line
-   *  in run-instructions.ts, because every MCP tool hides behind mcp_search. */
+  /** When to reach for this server, rendered into the run prompt whenever
+   *  the server is mounted. Name the tools a run must know about unprompted;
+   *  a schema can be looked up, an intention cannot. */
   guidance: string;
 }
 
 export const INTERNAL_MCP_CAPABILITIES = {
   "opensession-sessions": {
     summary: "See and steer other sessions, and spawn worker sessions.",
+    // create_session is admin-only; the humanResume and automationSelf shapes
+    // mount spawn_task instead, and this text is shared, so it names both.
+    // The suggest_task trigger names what runs already do with such findings
+    // (mention them in the reply) so the tool replaces that habit.
     guidance:
-      "Create, inspect, steer, or cancel visible sessions and worker tasks. Use this rather than inventing an in-process worker when the user asks for a new session. When you notice a well-scoped follow-up outside the current request, record it with suggest_task instead of starting it.",
+      "Create, inspect, steer, or cancel visible sessions and worker tasks. A request for a new session means `create_session` (or `spawn_task` where that is the only one offered), not an in-process worker. A well-scoped follow-up you notice outside the request (a bug on the way, a missing tool or test) goes to `suggest_task`, not a line in your reply, and you do not start it.",
   },
   "opensession-admin": {
     summary: "Manage automations, MCP connections and channel memory.",
@@ -191,3 +202,32 @@ export const INTERNAL_MCP_CAPABILITIES = {
       "Manage this running goal's cadence, status, and durable fact ledger.",
   },
 } as const satisfies Record<string, InternalMcpCapability>;
+
+export type InternalMcpServerName = keyof typeof INTERNAL_MCP_CAPABILITIES;
+
+/**
+ * The `## Tools` section of the run prompt: one guidance line per mounted
+ * internal server, in catalog order whatever order the mount map has, so the
+ * bytes are identical for every run with the same shape and the prompt-cache
+ * prefix stays shared. Servers the run does not carry are not mentioned;
+ * unknown keys (external MCP connections) are skipped. Empty when nothing
+ * internal is mounted.
+ */
+export function renderInternalMcpCapabilities(
+  inProcessMcp: Record<string, unknown> | undefined,
+): string {
+  const mounted = new Set(Object.keys(inProcessMcp ?? {}));
+  const lines = (
+    Object.keys(INTERNAL_MCP_CAPABILITIES) as InternalMcpServerName[]
+  )
+    .filter((name) => mounted.has(name))
+    .map(
+      (name) => `- \`${name}\`: ${INTERNAL_MCP_CAPABILITIES[name].guidance}`,
+    );
+  if (!lines.length) return "";
+  return (
+    "## Tools\nThese servers are in reach through `mcp_search` (find the exact tool and its " +
+    "schema) and `mcp_call`. What each is for:\n" +
+    lines.join("\n")
+  );
+}

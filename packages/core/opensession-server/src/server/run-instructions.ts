@@ -9,6 +9,7 @@
 
 import { join } from "path";
 import { configuredServer, personaName } from "./config";
+import { renderInternalMcpCapabilities } from "./mcp-capabilities";
 import { githubLoginFor, type GitIdentity } from "./shared/user-mappings";
 
 const UI_BASE =
@@ -163,18 +164,12 @@ export function buildRunInstructions(input: {
   }
 
   const inproc = (input.inProcessMcp || {}) as Record<string, unknown>;
-  if (inproc["opensession-sessions"]) {
-    // suggest_task sits behind mcp_search like every MCP tool, so a run only
-    // learns it exists from this line. The trigger names what runs already do
-    // with such findings (mention them in the reply) so the tool replaces
-    // that habit rather than competing with it.
-    parts.push(
-      "## New sessions\nA request for a new session means `create_session`, not an " +
-        "in-process worker. A well-scoped follow-up you notice outside the request (a bug " +
-        "on the way, a missing tool or test) goes to `suggest_task`, not a line in your " +
-        "reply, and you do not start it.",
-    );
-  }
+  // One guidance line per mounted internal server. Every MCP tool hides
+  // behind mcp_search, so this is how a run learns which tools exist before
+  // it knows to search for them. The sections below add the standing rules
+  // (Portals, Attachments, Media) that a one-line intention cannot carry.
+  const tools = renderInternalMcpCapabilities(inproc);
+  if (tools) parts.push(tools);
   if (input.sandboxed) {
     parts.push(
       "## Sandbox\nThis session runs in its own Sandbox: a Linux machine with the " +
