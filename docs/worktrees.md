@@ -31,15 +31,13 @@ pick for a project that does not exist anywhere yet; a scratch session (Code
 with no repo) is only a working directory and never becomes one. The form
 asks where it lives:
 
-- **A GitHub organization the App is installed on.** The server creates a
-  private repository there with GitHub's first commit and clones it to
-  `~/checkouts/<name>`, exactly as adding a remote repository would, so the
-  registry entry has a `ghRepo` and the pull-request flow from the first
-  session. The create uses a one-request token carrying the App's
-  `administration` permission; see [github-authority.md](github-authority.md)
-  for what that grant does and does not widen. The repository is always
-  private. GitHub lets an installation create repositories only in an
-  organization, so a personal account is not offered.
+- **A GitHub owner.** Open Session opens GitHub's new-repository page with the
+  owner, name, private visibility and README option prefilled. Check those
+  choices and create on GitHub, then return and choose **Connect repository**.
+  This clones it to `~/checkouts/<name>` and records its `ghRepo`, so sessions
+  have GitHub pull-request support. Personal accounts and organizations both
+  work. Grant the App access to the new repository if its installation only
+  covers selected repositories. No Administration permission is requested.
 - **This server only.** A checkout with a bare origin beside it:
 
   ```

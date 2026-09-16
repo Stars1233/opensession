@@ -58,7 +58,6 @@ canonical permission set used when tokens are minted:
 | Scope                  | Access         | Why                                     |
 | ---------------------- | -------------- | --------------------------------------- |
 | Actions                | Read           | failing workflow logs for trusted fixes |
-| Administration         | Read and write | create private repositories (see below) |
 | Checks                 | Read           | check runs                              |
 | Commit statuses        | Read           | status rollups                          |
 | Contents               | Read and write | clone and push                          |
@@ -68,28 +67,25 @@ canonical permission set used when tokens are minted:
 | Pull requests          | Read and write | reviews, PRs, merges                    |
 | Members (organization) | Read           | roster and attribution                  |
 
-**Administration** is minted for exactly one call: creating a private
-repository in an organization from Settings → Repositories → Add repository →
-New, or from "New repository" in the New session palette. That token lives
-only in the request and is never cached or handed to a run. The server
-revokes it before cloning (best-effort, with GitHub expiry as the fallback). The read, write and
-code installation-token sets never include it, so those tokens cannot edit
-repository settings or rulesets. Connected-user tokens are not narrowed by
-these mint sets: they inherit the App grant intersected with the person's
-access, including Administration for repository administrators. Interactive
-code runs using those tokens gain that authority too; see
-[GitHub authority](../github-authority.md).
+**Repository creation does not need Administration.** From Settings →
+Repositories → Add repository → New, or the New session palette's "New
+repository", Open Session opens `https://github.com/new` with the owner, name,
+private visibility and README option prefilled. Review those choices and
+confirm on GitHub, then return and choose **Connect repository**. If you
+changed the owner or name on GitHub, update them in Open Session too. The
+server uses ordinary remote registration to clone it and save its GitHub
+identity. Personal accounts and organizations are both supported. If the
+App is installed on selected repositories only, grant it access to the new
+repository before connecting.
 
-For an existing App, its owner must first set **Repository permissions →
-Administration → Read and write** in the App's GitHub settings, then each
-installation owner must approve the updated permissions. Changing Open
-Session's grant definition does not update an existing App on GitHub.
-An installation that has not yet approved the added permission keeps working
-for everything else; only creation fails, with
-a message naming the approval page. GitHub lets an installation create
-repositories only in an organization, so a personal account is not offered as
-a location; the repository is always private and there is no visibility
-toggle.
+The App grant and all installation-token permission sets exclude
+Administration. Connected-user tokens inherit the App grant intersected with
+the person's access and are handed to interactive code runs, so adding
+Administration to the App would also broaden agent authority.
+
+**Existing Apps:** if Administration was enabled for the earlier automatic
+creation flow, remove it in the App's GitHub permission settings. Updating
+Open Session does not change the permissions of an existing App on GitHub.
 
 Enable **Device Flow**, generate a client secret and private key, then install
 the App only on the accounts and repositories Open Session should reach. One

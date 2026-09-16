@@ -49,10 +49,6 @@ import {
   withConfigMutationLock,
 } from "../config-mutation";
 import {
-  githubAppRepoCreateToken,
-  type GithubRepoCreateGrant,
-} from "../github-app";
-import {
   githubAppInstallUrl,
   githubCredentialForLogin,
   resolveGithubCredential,
@@ -82,13 +78,6 @@ export { githubCredentialHelperCommand };
 
 export function validGithubFullName(value: unknown): value is string {
   return typeof value === "string" && GITHUB_FULL_NAME_RE.test(value);
-}
-
-/** A GitHub account name: alphanumerics and single hyphens, at most 39. */
-const GITHUB_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
-
-export function validGithubOwner(value: unknown): value is string {
-  return typeof value === "string" && GITHUB_OWNER_RE.test(value);
 }
 
 /** After the shared shell/Markdown boundary check, let Git enforce the
@@ -651,8 +640,8 @@ function localOriginPath(id: string): string {
  *
  * Nothing is published: this is the "this server only" choice. Its registry
  * entry has no `ghRepo`; changing the remote or pushing later does not update
- * that identity or enable PR support. `createGithubRepo` creates and registers
- * a private GitHub repository with its identity from the start.
+ * that identity or enable PR support. For GitHub support, create on github.com
+ * and register the remote repository instead.
  */
 async function createLocalRepo(input: {
   name: string;
@@ -728,207 +717,6 @@ async function createLocalRepo(input: {
   }
 }
 
-/** The sentence for a create token GitHub would not mint. Each reason names
- *  what to do instead, because the form's other choice (this server only)
- *  always works and the person should know it is there. */
-function repoCreateGrantMessage(
-  owner: string,
-  grant: Extract<GithubRepoCreateGrant, { ok: false }>,
-): string {
-  switch (grant.reason) {
-    case "unconfigured":
-      return "GitHub is not connected. Set up the GitHub App in Settings → Integrations, or create the repository on this server only.";
-    case "not-installed":
-      return `The GitHub App is not installed on ${owner}. Install it there first, or create the repository on this server only.`;
-    case "personal-account":
-      return `${owner} is a personal account. GitHub only lets an App create repositories in an organization; create it on github.com and add it as a remote repository, or create it on this server only.`;
-    case "permission-pending":
-      return `The GitHub App's installation on ${owner} has not approved the Repository administration permission yet. Approve the updated permissions at https://github.com/organizations/${encodeURIComponent(owner)}/settings/installations/${grant.installationId}, then retry.`;
-    case "unavailable":
-      return `GitHub could not issue a token for ${owner} right now. Try again in a moment.`;
-  }
-}
-
-function githubApiHeaders(token: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-    "Content-Type": "application/json",
-  };
-}
-
-/** `POST /orgs/{owner}/repos`: one private repository with GitHub's own
- *  first commit (`auto_init`), so the clone that follows has a default branch
- *  to register. Private is not a choice here: a project on its first commit
- *  has no reason to be public, and a bot that could make things public is a
- *  bot that one day will. */
-async function createGithubRepository(
-  token: string,
-  owner: string,
-  name: string,
-): Promise<{ fullName: string; defaultBranch: string }> {
-  const res = await fetch(
-    `https://api.github.com/orgs/${encodeURIComponent(owner)}/repos`,
-    {
-      method: "POST",
-      headers: githubApiHeaders(token),
-      body: JSON.stringify({ name, private: true, auto_init: true }),
-      signal: AbortSignal.timeout(30_000),
-    },
-  );
-  const body = (await res.json().catch(() => null)) as {
-    full_name?: unknown;
-    default_branch?: unknown;
-    message?: unknown;
-    errors?: Array<{ message?: unknown }>;
-  } | null;
-  if (res.ok && typeof body?.full_name === "string") {
-    return {
-      fullName: body.full_name,
-      defaultBranch:
-        typeof body.default_branch === "string" && body.default_branch
-          ? body.default_branch
-          : "main",
-    };
-  }
-  const detail = [
-    body?.message,
-    ...(Array.isArray(body?.errors) ? body.errors : []).map(
-      (error) => error?.message,
-    ),
-  ]
-    .filter((part): part is string => typeof part === "string" && !!part)
-    .join(": ");
-  if (/already exists/i.test(detail)) {
-    throw setupRepoError(
-      `${owner}/${name} already exists on GitHub. Add it as a remote repository instead.`,
-      409,
-    );
-  }
-  if (res.status === 403 || res.status === 404) {
-    throw setupRepoError(
-      `GitHub refused to create ${owner}/${name} with the App's installation${detail ? ` (${detail})` : ""}. Check the installation's permissions on ${owner}.`,
-      409,
-    );
-  }
-  throw setupRepoError(
-    `GitHub could not create ${owner}/${name}${detail ? `: ${detail}` : ` (${res.status})`}.`,
-    res.status === 422 ? 400 : 502,
-  );
-}
-
-/** GitHub writes the `auto_init` commit right after the create answers, and
- *  a clone that races it comes back empty, which the registry then refuses.
- *  Wait for the default branch to be visible; give up quietly after a few
- *  seconds and let the clone report whatever it finds. */
-async function waitForGithubFirstCommit(
-  token: string,
-  fullName: string,
-  branch: string,
-): Promise<void> {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const res = await fetch(
-      `https://api.github.com/repos/${fullName}/branches/${encodeURIComponent(branch)}`,
-      { headers: githubApiHeaders(token), signal: AbortSignal.timeout(10_000) },
-    ).catch(() => null);
-    if (res?.ok) return;
-    await Bun.sleep(750);
-  }
-}
-
-/**
- * Start a repository that exists nowhere yet as a private GitHub repository
- * in `owner`, then register it exactly as "add a remote repository" would.
- * Check known registry and checkout conflicts before asking GitHub to create
- * anything. If registration still fails afterwards (the installation cannot
- * see the new repository, say), the error says the repository exists and how
- * to finish, and the GitHub side is left alone rather than deleted.
- *
- * The create token is minted for this call alone with the administration
- * permission; cloning uses the ordinary credential path instead. The
- * elevated token is revoked best-effort before registration.
- */
-async function createGithubRepo(input: {
-  owner: string;
-  name: string;
-  ctx: RouteContext;
-}): Promise<RepoSection & { id: string }> {
-  const requested = `${input.owner}/${input.name}`;
-  const id = repoIdFromName(input.name);
-  const registered = configuredRepos();
-  assertRepoSlotAvailable(id, registered);
-  if (
-    Object.values(registered).some(
-      (repo) => repo.ghRepo.toLowerCase() === requested.toLowerCase(),
-    )
-  ) {
-    throw setupRepoError(
-      `GitHub repository is already registered: ${requested}`,
-      409,
-    );
-  }
-  const dest = `${checkoutsRoot()}/${id}`;
-  assertRepoPathAvailable(dest, registered);
-  if (
-    await stat(dest).then(
-      () => true,
-      () => false,
-    )
-  ) {
-    throw setupRepoError(
-      `A checkout already exists at ${dest}. Register it as a local folder instead.`,
-      409,
-    );
-  }
-  await assertRepoOriginAvailable(
-    normalizeRepoOrigin(`https://github.com/${requested}.git`),
-    registered,
-  );
-  const grant = await githubAppRepoCreateToken(input.owner);
-  if (!grant.ok) {
-    throw setupRepoError(
-      repoCreateGrantMessage(input.owner, grant),
-      grant.reason === "unavailable" ? 502 : 409,
-    );
-  }
-  let created: Awaited<ReturnType<typeof createGithubRepository>>;
-  try {
-    created = await createGithubRepository(
-      grant.token,
-      input.owner,
-      input.name,
-    );
-    await waitForGithubFirstCommit(
-      grant.token,
-      created.fullName,
-      created.defaultBranch,
-    );
-  } finally {
-    // Drop the elevated credential before cloning. If GitHub is unavailable,
-    // its normal installation-token expiry still bounds the grant.
-    await fetch("https://api.github.com/installation/token", {
-      method: "DELETE",
-      headers: githubApiHeaders(grant.token),
-      signal: AbortSignal.timeout(5_000),
-    }).catch(() => null);
-  }
-  try {
-    const credential = await setupGithubCredential(input.ctx, created.fullName);
-    return await registerGithubRepo({
-      fullName: created.fullName,
-      id,
-      created: true,
-      ...(credential ? { credential } : {}),
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw setupRepoError(
-      `${created.fullName} was created on GitHub, but adding it here failed: ${detail} Once the App's installation can see it, add it as a remote repository.`,
-      statusForError(error),
-    );
-  }
-}
-
 async function configureGithubCredentialHelper(
   checkoutPath: string,
 ): Promise<void> {
@@ -972,8 +760,6 @@ async function registerGithubRepo(input: {
   id?: string;
   /** Connected user credential for the private clone and later Git operations. */
   credential?: GithubCredential;
-  /** The repository was created on GitHub by this request. */
-  created?: boolean;
 }): Promise<RepoSection & { id: string }> {
   const name = input.fullName.split("/")[1];
   const id = repoIdFromName(input.id?.trim() || name);
@@ -1022,7 +808,6 @@ async function registerGithubRepo(input: {
       registered,
       auditRepo: input.fullName,
       adopted: Boolean(adopted),
-      ...(input.created ? { created: true } : {}),
       entry: {
         label: name,
         repo: inspected.path,
@@ -1267,8 +1052,8 @@ export async function handleSetupRepoRoutes(
   const { req, path } = ctx;
 
   if (path === "/api/setup/github/owners" && req.method === "GET") {
-    // Where a new repository may be created: every account the App is
-    // installed on, typed so the form can offer the organizations. Null
+    // Suggested owners for the GitHub creation page: every account the App
+    // is installed on, including personal accounts. Null
     // owners means the App identity cannot answer, not that there are none.
     const {
       configuredGithubInstallationOwner,
@@ -1460,14 +1245,15 @@ export async function handleSetupRepoRoutes(
       if (body.owner === undefined || body.owner === "") {
         return registrationResponse(() => createLocalRepo({ name }));
       }
-      if (!validGithubOwner(body.owner)) {
-        return Response.json(
-          { error: "owner must be a GitHub account name" },
-          { status: 400 },
-        );
-      }
-      const owner = body.owner;
-      return registrationResponse(() => createGithubRepo({ owner, name, ctx }));
+      // Fail closed for older clients: never turn an intended GitHub create
+      // into an unnoticed local-only repository.
+      return Response.json(
+        {
+          error:
+            "Create the repository on https://github.com/new, then connect it as a remote repository.",
+        },
+        { status: 400 },
+      );
     }
     if (body?.source === "local") {
       if (typeof body.path !== "string" || !isAbsolute(body.path.trim())) {

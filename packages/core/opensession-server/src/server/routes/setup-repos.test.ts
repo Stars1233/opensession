@@ -1333,7 +1333,7 @@ describe("new repository creation", () => {
   });
 });
 
-describe("new repository creation on GitHub", () => {
+describe("GitHub browser creation handoff", () => {
   const originalFetch = globalThis.fetch;
   const originalClientId = process.env.OPENSESSION_GITHUB_CLIENT_ID;
 
@@ -1385,275 +1385,96 @@ describe("new repository creation on GitHub", () => {
     { id: 2, account: { login: "acme-org", type: "Organization" } },
   ];
 
-  interface GithubLog {
-    /** The permission set of every token mint, in order. */
-    mints: Record<string, string>[];
-    /** The body of every repository create. */
-    creates: unknown[];
-  }
-
-  function githubFetch(
-    log: GithubLog,
-    opts: {
-      /** The installation has not approved administration: that mint 422s. */
-      rejectAdminMint?: boolean;
-      createResponse?: { status: number; body: unknown };
-    } = {},
-  ): typeof fetch {
-    return (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
-      if (url.startsWith("https://api.github.com/app/installations?"))
-        return Response.json(installs);
-      if (
-        url === "https://api.github.com/installation/token" &&
-        init?.method === "DELETE"
-      ) {
-        expect(new Headers(init.headers).get("Authorization")).toBe(
-          "Bearer ghs_admin",
-        );
-        return new Response(null, { status: 204 });
-      }
-      if (/\/app\/installations\/\d+\/access_tokens$/.test(url)) {
-        const permissions = JSON.parse(String(init?.body)).permissions;
-        log.mints.push(permissions);
-        expect(url).toBe(
-          "https://api.github.com/app/installations/2/access_tokens",
-        );
-        if (permissions.administration && opts.rejectAdminMint) {
-          return Response.json(
-            { message: "The permissions requested are not granted" },
-            { status: 422 },
-          );
-        }
-        return Response.json({
-          token: permissions.administration ? "ghs_admin" : "ghs_read",
-          expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
-        });
-      }
-      if (
-        url === "https://api.github.com/orgs/acme-org/repos" &&
-        init?.method === "POST"
-      ) {
-        log.creates.push(JSON.parse(String(init.body)));
-        const response = opts.createResponse ?? {
-          status: 201,
-          body: {
-            full_name: "acme-org/widget",
-            default_branch: "main",
-            private: true,
-          },
-        };
-        return Response.json(response.body, { status: response.status });
-      }
-      if (
-        url.startsWith("https://api.github.com/repos/acme-org/widget/branches/")
-      )
-        return Response.json({ name: "main" });
-      throw new Error(`Unexpected request: ${url}`);
-    }) as typeof fetch;
-  }
-
   test.serial(
-    "creates a private repository in the organization and registers the clone",
-    async () => {
-      const root = localRoot();
-      const configPath = setUp(root);
-      const log: GithubLog = { mints: [], creates: [] };
-      globalThis.fetch = githubFetch(log);
-      // Stands in for `git clone https://github.com/acme-org/widget.git`: a
-      // checkout at the clone destination with a local bare origin, so
-      // inspection's ls-remote stays off the network.
-      __setGithubCloneForTest(async (fullName, dest) => {
-        expect(fullName).toBe("acme-org/widget");
-        expect(dest).toBe(join(root, "checkouts", "widget"));
-        createRemoteCheckout(join(root, "checkouts"), "widget", "main");
-      });
-
-      const response = await handleSetupRepoRoutes(
-        postRepo({
-          source: "new",
-          name: "widget",
-          owner: "acme-org",
-          private: false,
-          visibility: "public",
-        }),
-      );
-
-      expect(response?.status).toBe(201);
-      expect(await response?.json()).toMatchObject({
-        id: "widget",
-        label: "widget",
-        ghRepo: "acme-org/widget",
-        defaultBranch: "main",
-        default: true,
-      });
-      expect(log.creates).toEqual([
-        { name: "widget", private: true, auto_init: true },
-      ]);
-      // The administration token is minted once, for the create; the clone
-      // and everything after ride the ordinary read token.
-      expect(log.mints[0]).toEqual({
-        administration: "write",
-        contents: "read",
-        metadata: "read",
-      });
-      expect(log.mints.length).toBeGreaterThan(1);
-      for (const later of log.mints.slice(1))
-        expect(later.administration).toBeUndefined();
-      const saved = JSON.parse(readFileSync(configPath, "utf-8"));
-      expect(saved.repos.widget.ghRepo).toBe("acme-org/widget");
-    },
-  );
-
-  test.serial(
-    "asks for the permission approval before anything is created",
+    "refuses legacy GitHub creation without minting or creating anything",
     async () => {
       const root = localRoot();
       const configPath = setUp(root);
       const before = readFileSync(configPath, "utf-8");
-      const log: GithubLog = { mints: [], creates: [] };
-      globalThis.fetch = githubFetch(log, { rejectAdminMint: true });
-
-      const response = await handleSetupRepoRoutes(
-        postRepo({ source: "new", name: "widget", owner: "acme-org" }),
-      );
-
-      expect(response?.status).toBe(409);
-      expect(await response?.json()).toEqual({
-        error:
-          "The GitHub App's installation on acme-org has not approved the Repository administration permission yet. Approve the updated permissions at https://github.com/organizations/acme-org/settings/installations/2, then retry.",
-      });
-      expect(log.creates).toEqual([]);
+      const calls: string[] = [];
+      globalThis.fetch = (async (
+        input: string | URL | Request,
+      ): Promise<Response> => {
+        calls.push(String(input));
+        throw new Error("GitHub creation must not call the API");
+      }) as typeof fetch;
+      for (const owner of [
+        "acme-org",
+        "solo-dev",
+        "other-org",
+        "-invalid",
+        7,
+        null,
+      ]) {
+        const response = await handleSetupRepoRoutes(
+          postRepo({ source: "new", name: "widget", owner }),
+        );
+        expect(response?.status).toBe(400);
+        expect((await response?.json()).error).toContain(
+          "https://github.com/new",
+        );
+      }
+      expect(calls).toEqual([]);
       expect(existsSync(join(root, "checkouts"))).toBe(false);
       expect(readFileSync(configPath, "utf-8")).toBe(before);
     },
   );
 
-  test.serial("does not create under a personal account", async () => {
-    const root = localRoot();
-    setUp(root);
-    const log: GithubLog = { mints: [], creates: [] };
-    globalThis.fetch = githubFetch(log);
-
-    const response = await handleSetupRepoRoutes(
-      postRepo({ source: "new", name: "widget", owner: "solo-dev" }),
-    );
-
-    expect(response?.status).toBe(409);
-    const body = await response?.json();
-    expect(body.error).toStartWith("solo-dev is a personal account.");
-    expect(log.mints).toEqual([]);
-    expect(log.creates).toEqual([]);
-  });
-
-  test.serial("a name the organization already has is a 409", async () => {
-    const root = localRoot();
-    setUp(root);
-    const log: GithubLog = { mints: [], creates: [] };
-    globalThis.fetch = githubFetch(log, {
-      createResponse: {
-        status: 422,
-        body: {
-          message: "Repository creation failed.",
-          errors: [{ message: "name already exists on this account" }],
-        },
-      },
-    });
-
-    const response = await handleSetupRepoRoutes(
-      postRepo({ source: "new", name: "widget", owner: "acme-org" }),
-    );
-
-    expect(response?.status).toBe(409);
-    expect(await response?.json()).toEqual({
-      error:
-        "acme-org/widget already exists on GitHub. Add it as a remote repository instead.",
-    });
-    expect(existsSync(join(root, "checkouts"))).toBe(false);
-  });
-
   test.serial(
-    "says the repository exists when registering it afterwards fails",
+    "connects a browser-created repository using ordinary credentials",
     async () => {
       const root = localRoot();
-      setUp(root);
-      const log: GithubLog = { mints: [], creates: [] };
-      globalThis.fetch = githubFetch(log);
-      __setGithubCloneForTest(async () => {
-        throw new Error("repository not found");
+      const configPath = setUp(root);
+      const mints: Record<string, string>[] = [];
+      globalThis.fetch = (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        if (url.startsWith("https://api.github.com/app/installations?"))
+          return Response.json(installs);
+        expect(url).toBe(
+          "https://api.github.com/app/installations/2/access_tokens",
+        );
+        const permissions = JSON.parse(String(init?.body)).permissions;
+        mints.push(permissions);
+        expect(permissions.administration).toBeUndefined();
+        return Response.json({
+          token: "ghs_read",
+          expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+        });
+      }) as typeof fetch;
+      // The existing clone adapter is the only remote-git boundary replaced.
+      __setGithubCloneForTest(async (fullName, dest) => {
+        expect(fullName).toBe("acme-org/widget");
+        expect(dest).toBe(join(root, "checkouts", "widget"));
+        createRemoteCheckout(join(root, "checkouts"), "widget", "main");
       });
-
       const response = await handleSetupRepoRoutes(
-        postRepo({ source: "new", name: "widget", owner: "acme-org" }),
+        postRepo({ source: "github", fullName: "acme-org/widget" }),
       );
-
-      expect(response?.status).toBe(500);
-      const body = await response?.json();
-      expect(body.error).toStartWith(
-        "acme-org/widget was created on GitHub, but adding it here failed: repository not found",
-      );
-      expect(log.creates.length).toBe(1);
-      expect(existsSync(join(root, "checkouts", "widget"))).toBe(false);
-    },
-  );
-
-  test.serial("rejects an owner GitHub would not accept", async () => {
-    const root = localRoot();
-    setUp(root);
-    const log: GithubLog = { mints: [], creates: [] };
-    globalThis.fetch = githubFetch(log);
-
-    for (const owner of ["acme/org", "-acme", "acme--org", 7]) {
-      const response = await handleSetupRepoRoutes(
-        postRepo({ source: "new", name: "widget", owner }),
-      );
-      expect(response?.status).toBe(400);
-    }
-    expect(log.mints).toEqual([]);
-  });
-
-  test.serial(
-    "refuses an owner without an installation before minting",
-    async () => {
-      setUp(localRoot());
-      const log: GithubLog = { mints: [], creates: [] };
-      globalThis.fetch = githubFetch(log);
-      const response = await handleSetupRepoRoutes(
-        postRepo({ source: "new", name: "widget", owner: "other-org" }),
-      );
-      expect(response?.status).toBe(409);
-      expect((await response?.json()).error).toContain(
-        "not installed on other-org",
-      );
-      expect(log.mints).toEqual([]);
-      expect(log.creates).toEqual([]);
-    },
-  );
-
-  test.serial(
-    "rejects local checkout conflicts before publishing",
-    async () => {
-      const root = localRoot();
-      setUp(root);
-      const dest = join(root, "checkouts", "widget");
-      mkdirSync(dest, { recursive: true });
-      writeFileSync(join(dest, "keep.txt"), "untouched");
-      const log: GithubLog = { mints: [], creates: [] };
-      globalThis.fetch = githubFetch(log);
-      const response = await handleSetupRepoRoutes(
-        postRepo({ source: "new", name: "widget", owner: "acme-org" }),
-      );
-      expect(response?.status).toBe(409);
-      expect(log.mints).toEqual([]);
-      expect(log.creates).toEqual([]);
-      expect(readFileSync(join(dest, "keep.txt"), "utf8")).toBe("untouched");
+      expect(response?.status).toBe(201);
+      expect(await response?.json()).toMatchObject({
+        id: "widget",
+        ghRepo: "acme-org/widget",
+        defaultBranch: "main",
+      });
+      expect(mints.length).toBeGreaterThan(0);
+      expect(
+        JSON.parse(readFileSync(configPath, "utf-8")).repos.widget.ghRepo,
+      ).toBe("acme-org/widget");
     },
   );
 
   test.serial("lists the App's accounts for the location picker", async () => {
     const root = localRoot();
     setUp(root);
-    globalThis.fetch = githubFetch({ mints: [], creates: [] });
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      expect(String(input)).toStartWith(
+        "https://api.github.com/app/installations?",
+      );
+      return Response.json(installs);
+    }) as typeof fetch;
     const url = new URL("http://localhost/api/setup/github/owners");
 
     const response = await handleSetupRepoRoutes({

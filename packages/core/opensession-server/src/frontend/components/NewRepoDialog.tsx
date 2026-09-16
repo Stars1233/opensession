@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createRepoApi, type CreatedRepo } from "../lib/api";
+import { registerNewRepoApi, type CreatedRepo } from "../lib/api";
 import { errorMessage } from "../lib/error-message";
 import { Modal } from "../ui/modal";
 import { InlineAlert } from "../ui/state";
@@ -9,8 +9,8 @@ import { NewRepoForm } from "./NewRepoForm";
  * "New repository" from the New session palette's Project picker: the same
  * form Settings offers, in a dialog of its own so the palette can hand the
  * new repo straight back to the picker. A server-only create is a few git
- * commands; a GitHub one is a create call and a clone of a one-commit
- * repository. Both finish while the dialog is still up.
+ * commands; a GitHub one opens GitHub first, then connects the repository
+ * when the person returns to this dialog.
  */
 export function NewRepoDialog({
   open,
@@ -35,13 +35,20 @@ export function NewRepoDialog({
     setError(null);
     // A promise chain rather than try/finally: the React Compiler skips a
     // component whose function carries a `finally` clause.
-    await createRepoApi({ name, owner })
+    await registerNewRepoApi({ name, owner })
       .then((repo) => {
         onOpenChange(false);
         onCreated(repo);
       })
       .catch((cause: unknown) => {
-        setError(errorMessage(cause, "Failed to create the repository"));
+        setError(
+          errorMessage(
+            cause,
+            owner
+              ? "Failed to connect the repository"
+              : "Failed to create the repository",
+          ),
+        );
       });
     setBusy(false);
   }
@@ -59,7 +66,7 @@ export function NewRepoDialog({
             only repeated it. */}
         <Modal.Header title="New repository" />
         <div>
-          <NewRepoForm inputRef={inputRef} busy={busy} onCreate={create} />
+          <NewRepoForm inputRef={inputRef} busy={busy} onSubmit={create} />
           {error && <InlineAlert className="mt-2.5">{error}</InlineAlert>}
         </div>
       </Modal.Content>

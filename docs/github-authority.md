@@ -12,28 +12,18 @@ Ask runs, unattended runs, and machine-authored turns keep their App-token
 limits and publication guards. Run-scoped `GH_CONFIG_DIR`, bot commit authorship,
 `Co-authored-by` attribution, and audit error handling remain unchanged.
 
-The App's grant includes `administration: write` for one human-initiated
-call: creating a private repository in an organization from Settings →
-Repositories or the New session palette (`POST /api/setup/repos` with
-`source: "new"` and an `owner`). That permission is requested only by the
-dedicated create mint (`GITHUB_APP_REPO_CREATE_PERMISSIONS`), which is minted
-for the request, never cached, and never projected into a run. The read,
-write and code installation-token sets do not name it, and a test pins that,
-so these installation tokens cannot edit repository settings or rulesets.
-Connected-user tokens are different: GitHub grants the intersection of the
-App's permissions and the person's access, not these mint sets. A connected
-repository administrator's token can therefore now carry Administration,
-including when projected into an interactive code run. This is a deliberate
-widening of interactive authority, not a guarantee that all agent-accessible
-tokens remain unable to edit rulesets.
+The App grant and every installation-token mint exclude repository
+Administration. New repository creation happens in the person's GitHub
+browser session at `https://github.com/new`; Open Session only connects the
+resulting remote. There is no elevated repository-create token or API path.
+Connected-user tokens inherit the intersection of the App's permissions and
+the person's access, not the installation mint sets. Keeping Administration
+out of the App grant therefore matters for interactive runs too.
 
-The grant also widens the App private key: on host runs that key is readable
-by agent bash (see "Host hygiene"), and a process that reads it can now mint
-administration as well as contents. That was already a path to a human
-credential; it is now also a path to repository settings, and the
-Phase 3 isolation work (separate uid or Sandboxes by default) is what closes
-it. Boot-time posture logging still reads rulesets with the ordinary
-installation token.
+If an existing App was granted Administration for the previous automatic
+creation flow, its owner must remove that permission on GitHub. A code
+update cannot reduce an already installed App's grant. Host credential
+isolation remains a separate concern (see "Host hygiene").
 
 The credential rollback shipped in `773380904`; this change completes the
 interactive tooling/policy rollback of `a8ee01aeee`. See
@@ -401,9 +391,8 @@ a clear message instead of a 403, and so that the attempt is logged.
   `device_flow_disabled` is handled.
 - Boot logs the credential posture: App permissions per installation, whether
   any retired credential path is still configured, and which rulesets are
-  missing on covered repositories (read via the ordinary installation token;
-  the administration permission exists only in the repository-create mint
-  and is never used for this).
+  missing on covered repositories (read via the ordinary installation token,
+  without Administration).
 
 ## Migration
 

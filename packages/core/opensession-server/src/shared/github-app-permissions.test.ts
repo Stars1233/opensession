@@ -9,7 +9,6 @@ import {
   GITHUB_APP_CODE_PERMISSIONS,
   GITHUB_APP_GRANT_PERMISSIONS,
   GITHUB_APP_READ_PERMISSIONS,
-  GITHUB_APP_REPO_CREATE_PERMISSIONS,
   GITHUB_APP_WRITE_PERMISSIONS,
   withReadOnlyContents,
 } from "./github-app-permissions";
@@ -42,17 +41,10 @@ describe("github app permission sets", () => {
     expect(GITHUB_APP_CODE_PERMISSIONS.issues).toBe("write");
   });
 
-  test("the repository create mint is within the grant", () => {
-    expect(uncoveredScopes(GITHUB_APP_REPO_CREATE_PERMISSIONS)).toEqual([]);
-    expect(GITHUB_APP_REPO_CREATE_PERMISSIONS.administration).toBe("write");
-  });
-
-  test("only the create mint carries administration", () => {
-    // An ordinary installation token must never be able to edit repository
-    // settings or rulesets: those are the boundary that keeps bots off main
-    // (docs/github-authority.md). Creation is a human click in Settings or
-    // the palette, minted for that one request.
+  test("neither the App grant nor any mint carries administration", () => {
+    // User tokens inherit the App grant, not the installation mint subsets.
     for (const set of [
+      GITHUB_APP_GRANT_PERMISSIONS,
       GITHUB_APP_READ_PERMISSIONS,
       GITHUB_APP_WRITE_PERMISSIONS,
       GITHUB_APP_CODE_PERMISSIONS,

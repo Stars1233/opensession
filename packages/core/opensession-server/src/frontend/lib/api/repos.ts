@@ -1,4 +1,5 @@
 import { API_BASE, ApiError, request } from "./request";
+import { newRepoRegistration } from "../new-repo";
 import { rememberRepoColors } from "../repo-colors";
 import { rememberRepoCount } from "../repo-count";
 import {
@@ -227,24 +228,17 @@ export interface CreatedRepo {
   ghRepo?: string;
 }
 
-/**
- * Start a repository and register it (Settings → Repositories → New, and the
- * Project picker's "New repository"). With `owner`, a private repository is
- * created in that GitHub organization and cloned here; without, an empty
- * repository on this server. Either way the first commit exists, so the
- * answer is a repo a code session can branch from immediately. Admin-only,
- * like every setup route.
- */
-export async function createRepoApi(input: {
+/** Create on this server, or connect a repository the person created on GitHub. */
+export async function registerNewRepoApi(input: {
   name: string;
   owner?: string;
 }): Promise<CreatedRepo> {
   const repo = await request<CreatedRepo>("/setup/repos", {
     method: "POST",
-    // An undefined owner is dropped by JSON; the server reads its absence as
-    // "this server only".
-    body: { source: "new", name: input.name, owner: input.owner },
-    label: "Failed to create the repository",
+    body: newRepoRegistration(input.name, input.owner),
+    label: input.owner
+      ? "Failed to connect the repository"
+      : "Failed to create the repository",
   });
   notifyReposChanged();
   return repo;

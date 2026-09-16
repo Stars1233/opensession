@@ -30,6 +30,7 @@ import {
 } from "./icons";
 import { RepoTile } from "./RepoTile";
 import { GithubRepoAccess } from "./GithubRepoAccess";
+import { newRepoRegistration } from "../lib/new-repo";
 import { NewRepoForm } from "./NewRepoForm";
 import {
   REPO_TILE_COLORS,
@@ -880,10 +881,9 @@ function AddRepoPicker({
   async function createRepo(name: string, owner: string | undefined) {
     const label = owner ? `${owner}/${name}` : name;
     await registerRepo({
-      pending: { label, action: "create" },
-      // An empty owner means "this server only".
-      json: { source: "new", name, owner: owner ?? "" },
-      successMessage: `${label} created`,
+      pending: { label, action: owner ? "clone" : "create" },
+      json: newRepoRegistration(name, owner),
+      successMessage: `${label} ${owner ? "connected" : "created"}`,
     });
   }
 
@@ -932,7 +932,7 @@ function AddRepoPicker({
           <NewRepoForm
             inputRef={inputRef}
             busy={pendingRepo !== null}
-            onCreate={createRepo}
+            onSubmit={createRepo}
           />
         )}
         {mode === "local" && (

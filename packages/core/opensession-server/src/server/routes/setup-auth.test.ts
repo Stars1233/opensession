@@ -145,7 +145,6 @@ describe("GitHub App onboarding link", () => {
       // and issues (PR/issue comments) included, so a created App holds every
       // scope the installation-token mints request.
       actions: "read",
-      administration: "write",
       checks: "read",
       statuses: "read",
       contents: "write",
