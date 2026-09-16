@@ -89,6 +89,53 @@ describe("automation descendant opening policy", () => {
     ).toBe("alex-two");
   });
 
+  test("sandbox host spec proxies the automation-bar set only for non-descendant automation turns", () => {
+    const automationBar = ["opensession-papercuts", "opensession-sessions"];
+    // A person's turn in an automation-owned sandbox session proxies the set
+    // run-session computed (including the spawn suite) over run-rpc.
+    expect(
+      sandboxRunSecuritySpec(
+        { id: "os-auto", automation: "Health monitor" } as UnifiedSession,
+        {
+          isAutomationSession: true,
+          user: "Alex",
+          accountUser: "Alex",
+          mcpServers: ["tella-stage"],
+          automationProxyMcpServers: automationBar,
+        },
+      ),
+    ).toMatchObject({
+      mcpServers: ["tella-stage"],
+      proxyMcpServers: automationBar,
+      user: undefined,
+      accountUser: "Alex",
+      trustProfile: "automation",
+    });
+    // A descendant proxies nothing, whatever the caller passes.
+    expect(
+      sandboxRunSecuritySpec(
+        {
+          id: "os-child",
+          branch: "compat/layout",
+          automationDescendantPolicy: descendant,
+        } as UnifiedSession,
+        {
+          isAutomationSession: true,
+          mcpServers: [],
+          automationProxyMcpServers: automationBar,
+        },
+      ).proxyMcpServers,
+    ).toEqual([]);
+    // An interactive turn ignores it and keeps the interactive set.
+    expect(
+      sandboxRunSecuritySpec({ id: "os-plain" } as UnifiedSession, {
+        isAutomationSession: false,
+        user: "Alex",
+        automationProxyMcpServers: automationBar,
+      }).proxyMcpServers,
+    ).toContain("opensession-sessions");
+  });
+
   test("sandbox host spec preserves the complete descendant security boundary", () => {
     expect(
       sandboxRunSecuritySpec(

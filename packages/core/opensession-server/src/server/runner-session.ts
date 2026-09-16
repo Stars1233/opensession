@@ -61,6 +61,10 @@ type RunnerLaunchOpts = {
   user?: string;
   reposNote?: string;
   shouldCancel?: () => boolean;
+  /** The automation-bar server names a non-descendant automation-owned
+   *  turn proxies over run-rpc; computed once by run-session so the Runner,
+   *  sandbox, hosted and in-process paths describe the same set. */
+  automationProxyMcpServers?: string[];
 };
 
 type RunnerEvents = AsyncGenerator<StreamEvent> & { runnerId: string };
@@ -174,7 +178,9 @@ export async function maybeLaunchRunnerRun(
       ? (runInputs.mcpServers ?? [])
       : (opts.mcpServers ?? "all"),
     proxyMcpServers: runInputs.isAutomationSession
-      ? []
+      ? automationPolicy
+        ? []
+        : (opts.automationProxyMcpServers ?? [])
       : Object.keys(interactiveMcpServers(opts.user, session.id)),
     rpcToken: crypto.randomUUID(),
     wsToken: crypto.randomUUID(),
@@ -241,6 +247,7 @@ export async function maybeLaunchRunnerRun(
   registerRunToken(rpcToken, {
     sessionId: session.id,
     user: runUser,
+    humanPrompter: runInputs.accountUser,
     promptEntryId: opts.promptEntryId,
   });
   registerRunWsHost(hostId, wsToken);
@@ -452,6 +459,7 @@ export async function resumeRunnerRun(
   registerRunToken(spec.rpcToken!, {
     sessionId: session.id,
     user: spec.user,
+    humanPrompter: spec.accountUser,
     promptEntryId: spec.promptEntryId,
   });
   registerRunWsHost(spec.hostId, spec.wsToken!);

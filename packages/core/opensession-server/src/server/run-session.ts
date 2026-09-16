@@ -537,6 +537,7 @@ import {
 } from "./auto-continue";
 import {
   humanPrompter,
+  loopActor,
   sessionPrincipal,
   SYSTEM_RESTART_USER,
 } from "./session-actors";
@@ -1835,6 +1836,10 @@ export function sandboxRunSecuritySpec(
     accountUser?: string;
     mcpServers?: McpScope;
     deniedTools?: Record<string, string>;
+    /** The automation-bar server names this turn proxies over run-rpc
+     *  (`Object.keys(automationSessionMcp(...))`, computed once by the
+     *  caller). Only read for a non-descendant automation-owned turn. */
+    automationProxyMcpServers?: string[];
   },
 ): Pick<
   RunHostSpec,
@@ -1853,14 +1858,18 @@ export function sandboxRunSecuritySpec(
   const descendant = session.automationDescendantPolicy;
   return {
     mcpServers: opts.isAutomationSession ? (opts.mcpServers ?? []) : [],
-    proxyMcpServers: opts.isAutomationSession
+    // Descendants proxy nothing; other automation-owned turns proxy exactly
+    // the automation-bar set the run-rpc fallback builder serves them.
+    proxyMcpServers: descendant
       ? []
-      : [
-          ...Object.keys(
-            interactiveMcpServers(opts.user, session.id, opts.promptEntryId),
-          ),
-          ...(session.goalId ? ["opensession-goal-self"] : []),
-        ],
+      : opts.isAutomationSession
+        ? (opts.automationProxyMcpServers ?? [])
+        : [
+            ...Object.keys(
+              interactiveMcpServers(opts.user, session.id, opts.promptEntryId),
+            ),
+            ...(session.goalId ? ["opensession-goal-self"] : []),
+          ],
     reposNote: undefined,
     deniedTools: opts.deniedTools,
     publicationPolicy: descendant
@@ -1898,10 +1907,15 @@ export async function maybeLaunchSandboxedRun(
     cwd: string;
     user?: string;
     accountUser?: string;
+    /** The person who sent this turn themselves (RunInputs.humanPrompter);
+     *  undefined for machine turns and scheduled ticks. Run-rpc only. */
+    humanPrompter?: string;
     images?: ImageInput[];
     mcpServers?: McpScope;
     deniedTools?: Record<string, string>;
     isAutomationSession: boolean;
+    /** See sandboxRunSecuritySpec. */
+    automationProxyMcpServers?: string[];
     startToken?: string;
   },
 ): Promise<
@@ -2121,6 +2135,7 @@ export async function maybeLaunchSandboxedRun(
     registerRunToken(rpcToken, {
       sessionId: session.id,
       user: opts.isAutomationSession ? undefined : opts.user,
+      humanPrompter: opts.humanPrompter,
       promptEntryId: opts.promptEntryId,
     });
     // Detached sandbox hosts cannot read the server's workspace store. Resolve
@@ -3060,6 +3075,22 @@ async function runSessionPromptInner(
     throw new Error(
       "Automation descendants require a sandbox or an explicitly isolated Runner",
     );
+  // Resolved once, before a backend is chosen: the automation-bar server set
+  // is a catalog read, and the Runner, sandbox and hosted proxy name lists,
+  // the run-rpc fallback and the in-process mount below must all describe
+  // the same set. A person's own turn in an automation-owned session
+  // (runInputs.humanPrompter: undefined for the automation's ticks, every
+  // machine actor and a scheduled /loop tick sent in a person's name) adds
+  // the scoped spawn suite so the session can start the work they asked for;
+  // the automation's MCP allowlist and denials still apply. Sandboxed
+  // descendants carry none of it.
+  const automationMcp =
+    isAutomationSession && !session.automationDescendantPolicy
+      ? await automationSessionMcp(session, sessionId, {
+          humanPrompter: runInputs.humanPrompter,
+        })
+      : {};
+  const automationProxyMcpServers = Object.keys(automationMcp);
   const runnerRun = await maybeLaunchRunnerRun(session, {
     prompt,
     hostId: startToken,
@@ -3071,6 +3102,7 @@ async function runSessionPromptInner(
     reposNote: isAutomationSession
       ? undefined
       : await buildSessionNote(session, user),
+    automationProxyMcpServers,
   });
   const sandboxRun = runnerRun
     ? null
@@ -3083,10 +3115,12 @@ async function runSessionPromptInner(
         cwd,
         user,
         accountUser: runInputs.accountUser,
+        humanPrompter: runInputs.humanPrompter,
         images,
         mcpServers: mcpServers ?? "all",
         deniedTools,
         isAutomationSession,
+        automationProxyMcpServers,
         startToken,
       });
 
@@ -3136,12 +3170,6 @@ async function runSessionPromptInner(
   // scoping intact: proxy names come from the same fail-closed automation
   // set the run-rpc fallback builder serves, while the repos note and MCP
   // grant identity are withheld.
-  // Resolved once: the automation-bar server set is a catalog read, and the
-  // proxy name list, the run-rpc fallback and the in-process mount below must
-  // all describe the same set.
-  const automationMcp = isAutomationSession
-    ? await automationSessionMcp(session, sessionId)
-    : {};
   const hostedRun =
     !runnerRun && !sandboxRun && routedEngine === "pi"
       ? runAgentHosted({
@@ -3165,7 +3193,7 @@ async function runSessionPromptInner(
           proxyMcpServers: session.automationDescendantPolicy
             ? []
             : isAutomationSession
-              ? Object.keys(automationMcp)
+              ? automationProxyMcpServers
               : [
                   ...Object.keys(
                     interactiveMcpServers(
@@ -3873,7 +3901,7 @@ export function startLoopTicker(): void {
       void runSessionPromptAndDrain(
         session.id,
         loop.prompt,
-        loop.setBy ? `${loop.setBy} (loop)` : "loop",
+        loopActor(loop.setBy),
       ).catch((e) =>
         console.error(`[loop] Loop prompt failed for ${session.id}:`, e),
       );

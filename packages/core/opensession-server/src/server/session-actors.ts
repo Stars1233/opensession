@@ -35,6 +35,42 @@ export const GITHUB_ACTOR = "GitHub";
  *  `"<automation name> (automation)"` (automations.ts). */
 export const AUTOMATION_ACTOR_SUFFIX = " (automation)";
 
+/** Suffix a `/loop` tick carries as sender: `"<person who set it> (loop)"`
+ *  (run-session's loop ticker). `LOOP_ACTOR` is the senderless form. */
+export const LOOP_ACTOR_SUFFIX = " (loop)";
+export const LOOP_ACTOR = "loop";
+
+/** Sender for a scheduled `/loop` tick. The person who set the loop stays
+ *  in the name: the session is still theirs (ownership, commit identity,
+ *  provider account), but no person pressed send on this turn. */
+export function loopActor(setBy?: string | null): string {
+  const name = (setBy || "").trim();
+  return name ? `${name}${LOOP_ACTOR_SUFFIX}` : LOOP_ACTOR;
+}
+
+/**
+ * True for a sender our scheduler minted on a person's behalf (`loopActor`).
+ * Not a machine actor: the person is credited, so `humanPrompter` keeps the
+ * name. But nothing that requires a person to be present right now (the
+ * spawn suite an automation-owned session earns on a human's turn) may treat
+ * a scheduled tick as that person; use `interactivePrompter` there.
+ */
+export function isScheduledActor(sender?: string | null): boolean {
+  const lower = (sender || "").trim().toLowerCase();
+  return lower === LOOP_ACTOR || lower.endsWith(LOOP_ACTOR_SUFFIX);
+}
+
+/**
+ * The person who sent this turn themselves, or null: excludes every machine
+ * actor (`humanPrompter`) and every scheduled tick sent in a person's name
+ * (`isScheduledActor`). Decides capabilities a present person unlocks, never
+ * credit or billing.
+ */
+export function interactivePrompter(user?: string | null): string | null {
+  const name = humanPrompter(user);
+  return name && !isScheduledActor(name) ? name : null;
+}
+
 /** Sender for a worker session reporting back to the session that spawned it. */
 export function workerActor(sessionId: string): string {
   return `worker ${sessionId}`;

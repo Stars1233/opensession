@@ -4,8 +4,11 @@ import {
   agentActor,
   delegatedActorParent,
   humanPrompter,
+  interactivePrompter,
   isMachineActor,
+  isScheduledActor,
   isWorkerActor,
+  loopActor,
   machineActorLabel,
   providerAccountUser,
   sessionPrincipal,
@@ -91,6 +94,24 @@ describe("machine actors", () => {
     ]) {
       expect(humanPrompter(sender)).toBeNull();
     }
+  });
+
+  test("a scheduled loop tick keeps the person's credit but is not their presence", () => {
+    expect(loopActor("Kent")).toBe("Kent (loop)");
+    expect(loopActor(undefined)).toBe("loop");
+    for (const sender of [loopActor("Kent"), loopActor(null), "kent (LOOP)"]) {
+      expect(isScheduledActor(sender)).toBe(true);
+      // Not a machine actor: the session is still Kent's, so the recorded
+      // prompter, commit identity and provider account credit him.
+      expect(isMachineActor(sender)).toBe(false);
+      // But nobody pressed send, so nothing a present person unlocks fires.
+      expect(interactivePrompter(sender)).toBeNull();
+    }
+    expect(humanPrompter(loopActor("Kent"))).toBe("Kent (loop)");
+    expect(isScheduledActor("Kent")).toBe(false);
+    expect(interactivePrompter("Kent")).toBe("Kent");
+    expect(interactivePrompter(workerActor(SESSION))).toBeNull();
+    expect(interactivePrompter("Anonymous")).toBeNull();
   });
 
   test("a senderless turn acts for the last person who prompted, else the creator", () => {
