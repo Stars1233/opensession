@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { z } from "zod";
 import {
   viewerMessageSchema,
@@ -13,6 +13,7 @@ import { Spinner } from "../ui/spinner";
 
 export function SimulatorViewer() {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const touchCursor = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | null>(null);
   const gesture = useRef<{ x: number; y: number; pointerId: number } | null>(
     null,
@@ -114,6 +115,47 @@ export function SimulatorViewer() {
   }, [attempt]);
 
   const ready = state.phase === "ready" && connected && hasFrame;
+  function hideTouchCursor() {
+    if (touchCursor.current) touchCursor.current.hidden = true;
+    canvas.current?.removeAttribute("data-touch-cursor");
+  }
+  function updateTouchCursor(
+    event: React.PointerEvent<HTMLCanvasElement>,
+    location: { x: number; y: number } | null,
+  ) {
+    const cursor = touchCursor.current;
+    if (!cursor) return;
+    if (!ready || !location || event.pointerType !== "mouse") {
+      hideTouchCursor();
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    // Keep pointer motion out of React's render cycle and off the video canvas.
+    cursor.style.transform = `translate3d(${event.clientX - rect.left}px, ${event.clientY - rect.top}px, 0)`;
+    cursor.dataset.pressed = String((event.buttons & 1) !== 0);
+    cursor.hidden = false;
+    event.currentTarget.setAttribute("data-touch-cursor", "");
+  }
+  const hideCursorOnLifecycleChange = useEffectEvent(hideTouchCursor);
+  useEffect(() => {
+    if (!ready) {
+      hideCursorOnLifecycleChange();
+      return;
+    }
+    window.addEventListener("blur", hideCursorOnLifecycleChange);
+    window.addEventListener("resize", hideCursorOnLifecycleChange);
+    document.addEventListener("visibilitychange", hideCursorOnLifecycleChange);
+    return () => {
+      window.removeEventListener("blur", hideCursorOnLifecycleChange);
+      window.removeEventListener("resize", hideCursorOnLifecycleChange);
+      document.removeEventListener(
+        "visibilitychange",
+        hideCursorOnLifecycleChange,
+      );
+      hideCursorOnLifecycleChange();
+    };
+  }, [ready]);
+
   function send(input: ViewerInput) {
     if (!ready || socket.current?.readyState !== WebSocket.OPEN) return;
     setError("");
@@ -167,21 +209,25 @@ export function SimulatorViewer() {
           role="application"
           aria-label="Simulator screen. Click or swipe to interact. Type when focused."
           tabIndex={ready ? 0 : -1}
-          className="block h-full w-full touch-none object-contain outline-none focus-visible:outline-none"
+          className="block h-full w-full touch-none object-contain outline-none data-[touch-cursor]:cursor-none focus-visible:outline-none"
+          onPointerEnter={(event) => updateTouchCursor(event, point(event))}
+          onPointerLeave={hideTouchCursor}
           onPointerDown={(event) => {
             if (!ready || event.button !== 0 || !event.isPrimary) return;
             const start = point(event);
             if (!start) return;
+            updateTouchCursor(event, start);
             event.currentTarget.focus();
             event.currentTarget.setPointerCapture(event.pointerId);
             gesture.current = { ...start, pointerId: event.pointerId };
             send({ type: "touch", phase: "down", ...start });
           }}
           onPointerMove={(event) => {
-            const active = gesture.current;
-            if (!active || active.pointerId !== event.pointerId) return;
             const location = point(event);
-            if (!location) return;
+            updateTouchCursor(event, location);
+            const active = gesture.current;
+            if (!active || active.pointerId !== event.pointerId || !location)
+              return;
             gesture.current = { ...location, pointerId: active.pointerId };
             pendingMove.current = location;
             if (moveFrame.current !== null) return;
@@ -194,16 +240,25 @@ export function SimulatorViewer() {
             });
           }}
           onPointerUp={(event) => {
+            const location = point(event);
             if (gesture.current?.pointerId === event.pointerId)
-              finishTouch(point(event));
+              finishTouch(location);
+            updateTouchCursor(event, location);
           }}
           onPointerCancel={(event) => {
             if (gesture.current?.pointerId === event.pointerId) finishTouch();
+            hideTouchCursor();
           }}
           onLostPointerCapture={(event) => {
-            if (gesture.current?.pointerId === event.pointerId) finishTouch();
+            if (gesture.current?.pointerId === event.pointerId) {
+              finishTouch();
+              hideTouchCursor();
+            }
           }}
-          onBlur={() => finishTouch()}
+          onBlur={() => {
+            finishTouch();
+            hideTouchCursor();
+          }}
           onKeyDown={(event) => {
             if (
               !ready ||
@@ -226,6 +281,15 @@ export function SimulatorViewer() {
             }
           }}
         />
+        <div
+          ref={touchCursor}
+          hidden
+          aria-hidden="true"
+          data-simulator-touch-cursor
+          className="group pointer-events-none absolute top-0 left-0 transition-none"
+        >
+          <span className="block size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-fg/80 bg-panel/25 ring-1 ring-panel/70 transition-none group-data-[pressed=true]:scale-75 group-data-[pressed=true]:bg-fg/30" />
+        </div>
         {!ready ? (
           <div
             className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface p-4 text-center text-sm text-dim"
