@@ -1,4 +1,4 @@
-import { agentIdentity } from "./agent-identity";
+import { sessionAgentName } from "./markdown";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   resetResolvedSessionTitles,
@@ -181,7 +181,7 @@ test("an unresolved session projects its agent name while copying still uses its
   resetResolvedSessionTitles();
   const projection = projectComposerSessions(ID);
   expect(projection.displayText).toBe(
-    SESSION_GLYPH_SLOT + agentIdentity(ID).name,
+    SESSION_GLYPH_SLOT + sessionAgentName(ID),
   );
   expect(projection.canonicalText).toBe(ID);
   const selection = composerCanonicalSelection(

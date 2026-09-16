@@ -1,4 +1,4 @@
-import { agentIdentity } from "./agent-identity";
+import { sessionAgentName } from "./markdown";
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import {
   markdownAffordable,
@@ -123,7 +123,7 @@ describe("renderMarkdown session links", () => {
     );
     // the ~90-char URL is the href, never the chip's (nowrap) label
     expect(html).toContain(
-      `<span class="session-link-label">${agentIdentity("bks-019f9608-ab20-7000-b98e-4de52d5fe436").name}</span>`,
+      `<span class="session-link-label">${sessionAgentName("bks-019f9608-ab20-7000-b98e-4de52d5fe436")}</span>`,
     );
     expect(html).toContain(`href="${url}"`);
     expect(html).not.toContain(`>${url}</a>`);
@@ -262,7 +262,7 @@ describe("session chip labels", () => {
       const html = renderMarkdown(`Delegated to \`${id}\`.`);
       await Promise.resolve();
       expect(html).toContain(
-        `<span class="session-link-label">${agentIdentity(id).name}</span>`,
+        `<span class="session-link-label">${sessionAgentName(id)}</span>`,
       );
       expect(requested).toEqual([]);
     } finally {
@@ -335,10 +335,10 @@ describe("session chip labels", () => {
   it("falls back to an agent name without monospace styling", () => {
     const html = renderMarkdown(`Delegated to \`${id}\`.`);
     expect(html).toContain(
-      `<span class="session-link-label">${agentIdentity(id).name}</span>`,
+      `<span class="session-link-label">${sessionAgentName(id)}</span>`,
     );
     expect(html).not.toContain('data-session-label="id"');
-    expect(html).toContain(`title="Open ${agentIdentity(id).name}"`);
+    expect(html).toContain(`title="Open ${sessionAgentName(id)}"`);
   });
 
   it("names a current session ID", () => {
@@ -346,14 +346,14 @@ describe("session chip labels", () => {
       "Delegated to `os-019fd30a-785b-7000-ad89-9c2fb5b74a19`.",
     );
     expect(html).toContain(
-      `<span class="session-link-label">${agentIdentity("os-019fd30a-785b-7000-ad89-9c2fb5b74a19").name}</span>`,
+      `<span class="session-link-label">${sessionAgentName("os-019fd30a-785b-7000-ad89-9c2fb5b74a19")}</span>`,
     );
   });
 
   it("names legacy slug IDs too", () => {
     const html = renderMarkdown("Delegated to `bks-worker-two`.");
     expect(html).toContain(
-      `<span class="session-link-label">${agentIdentity("bks-worker-two").name}</span>`,
+      `<span class="session-link-label">${sessionAgentName("bks-worker-two")}</span>`,
     );
   });
 
@@ -370,7 +370,7 @@ describe("session chip labels", () => {
   it("re-labels already-rendered markdown when titles arrive", () => {
     const src = `Delegated to \`${id}\`.`;
     expect(renderMarkdown(src)).toContain(
-      `<span class="session-link-label">${agentIdentity(id).name}</span>`,
+      `<span class="session-link-label">${sessionAgentName(id)}</span>`,
     );
     setSessionTitles([[id, "Late title"]]);
     expect(renderMarkdown(src)).toContain(
@@ -420,7 +420,7 @@ describe("session chip labels", () => {
     const url = `http://127.0.0.1:3850/session/${id}`;
     const html = renderMarkdown(`Session: [${id}](${url})`);
     expect(html).toContain(
-      `<span class="session-link-label">${agentIdentity(id).name}</span>`,
+      `<span class="session-link-label">${sessionAgentName(id)}</span>`,
     );
     expect(html).not.toContain('data-session-label="id"');
   });
@@ -431,7 +431,7 @@ describe("session chip labels", () => {
       ["bks-someone-else", "Other"],
     ]);
     expect(renderMarkdown(`Delegated to \`${id}\`.`)).toContain(
-      `<span class="session-link-label">${agentIdentity(id).name}</span>`,
+      `<span class="session-link-label">${sessionAgentName(id)}</span>`,
     );
   });
 });

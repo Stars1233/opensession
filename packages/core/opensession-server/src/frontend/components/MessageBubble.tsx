@@ -1,4 +1,5 @@
-import React, { useId, useLayoutEffect, useRef, useState } from "react";
+import { useAgentMessageSummary } from "../hooks/useAgentMessageSummary";
+import React, { useId, useState } from "react";
 import { z } from "zod";
 import type { TranscriptEntry } from "../lib/types";
 import { markdownAffordable, renderMarkdown } from "../lib/markdown";
@@ -17,7 +18,13 @@ import { fullTime, shortTime } from "../lib/time";
 import { UserAvatar } from "./UserAvatar";
 import { openGalleryFrom } from "../lib/media-lightbox-gallery";
 import { unplacedMedia } from "../lib/placed-media";
-import { IconArrowRight, IconExpand, IconFileText2, IconPencil } from "./icons";
+import {
+  IconArrowRight,
+  IconChevronDown,
+  IconExpand,
+  IconFileText2,
+  IconPencil,
+} from "./icons";
 import { Collapsible, collapsiblePanelClasses } from "../ui/collapsible";
 import { pastedTextLineLabel } from "@tellahq/opensession-protocol/pasted-text";
 import { personKey } from "../lib/review-queue";
@@ -91,7 +98,7 @@ export function ClampedBody({
   entry,
   sessionId,
   transformContent,
-  compact = false,
+  summary,
 }: {
   content: string;
   className: string;
@@ -99,8 +106,8 @@ export function ClampedBody({
   sessionId?: string;
   /** Display-only repair applied again after a clamped entry hydrates. */
   transformContent?: (content: string) => string;
-  /** Agent correspondence starts with three visual lines and one disclosure. */
-  compact?: boolean;
+  /** Derived one-line preview; expansion uses the same full-content path. */
+  summary?: { text: string; label: string };
 }) {
   const wireClamped = !!entry?.contentClamped;
   const fullLength = entry?.contentLength ?? content.length;
@@ -108,23 +115,7 @@ export function ClampedBody({
   const [showAll, setShowAll] = useState(false);
   const [fetched, setFetched] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  const previewRef = useRef<HTMLDivElement>(null);
   const bodyId = useId();
-
-  useLayoutEffect(() => {
-    if (!compact || showAll) return;
-    const preview = previewRef.current;
-    if (!preview) return;
-    const measure = () =>
-      setOverflows(preview.scrollHeight > preview.clientHeight + 1);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(preview);
-    // Rich content (code highlighting, images, fences) can settle after paint.
-    if (preview.firstElementChild) observer.observe(preview.firstElementChild);
-    return () => observer.disconnect();
-  }, [compact, showAll, content]);
 
   // Cut the eager head at a line boundary so we don't render half a line of
   // a diff/log as its own paragraph.
@@ -142,7 +133,8 @@ export function ClampedBody({
   const repo = useMarkdownRepo();
   const assetPaths = useOpenAssetPaths();
   const markdown = { repo, sessionId, assetPaths };
-  const html = asMarkdown ? renderMarkdown(shown, markdown) : "";
+  const html =
+    asMarkdown && (!summary || showAll) ? renderMarkdown(shown, markdown) : "";
 
   const expand = async () => {
     if (wireClamped && !fetched && entry && sessionId) {
@@ -178,52 +170,87 @@ export function ClampedBody({
 
   return (
     <>
-      {compact ? (
-        <div
-          id={bodyId}
-          ref={previewRef}
-          className={cn(
-            "text-body leading-6",
-            !showAll && "max-h-[3lh] overflow-hidden",
-          )}
-          onFocusCapture={() => {
-            // Keyboard navigation must never leave focus in clipped markdown.
-            if (!showAll && overflows) {
-              setShowAll(true);
-              void expand();
+      {summary ? (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={fetching}
+            aria-expanded={showAll}
+            aria-controls={bodyId}
+            aria-label={`${showAll ? "Collapse" : "Expand"} message: ${summary.text}`}
+            title={`${summary.label}\n${summary.text}`}
+            onClick={showAll ? () => setShowAll(false) : expand}
+            icon={
+              <IconChevronDown
+                size={16}
+                className={showAll ? undefined : "-rotate-90"}
+              />
             }
-          }}
-        >
-          {body}
-        </div>
+            className="w-full min-w-0 justify-start border-0 px-0 text-left text-label font-normal text-dim phone:min-h-11"
+          >
+            <span className="min-w-0 truncate">
+              {fetching ? "Loading message…" : summary.text}
+            </span>
+          </Button>
+          <div
+            id={bodyId}
+            hidden={!showAll}
+            className={showAll ? "my-2" : undefined}
+          >
+            {showAll ? body : null}
+          </div>
+        </>
       ) : (
         body
       )}
-      {(isLong || (compact && overflows)) && (
+      {!summary && isLong && (
         <Button
           variant="ghost"
           size="sm"
           disabled={fetching}
           aria-expanded={showAll}
-          aria-controls={compact ? bodyId : undefined}
           onClick={showAll ? () => setShowAll(false) : expand}
-          className={cn(
-            "mt-1 min-h-0 justify-start whitespace-normal rounded-md border-0 px-2 py-1 text-left font-sans text-label font-medium leading-normal hover:bg-hover/40",
-            compact && "self-start text-dim phone:min-h-11",
-          )}
+          className="mt-1 min-h-0 justify-start whitespace-normal rounded-md border-0 px-2 py-1 text-left font-sans text-label font-medium leading-normal hover:bg-hover/40"
         >
           {fetching
             ? "Loading…"
-            : compact
-              ? showAll
-                ? "Show less"
-                : "Show more"
-              : showAll
-                ? "Collapse"
-                : `Show full message · ${sizeLabel(fullLength)}`}
+            : showAll
+              ? "Collapse"
+              : `Show full message · ${sizeLabel(fullLength)}`}
         </Button>
       )}
     </>
+  );
+}
+
+function AgentMessageBody({
+  entry,
+  content,
+  outgoing,
+  sessionId,
+}: {
+  entry: TranscriptEntry;
+  content: string;
+  outgoing: boolean;
+  sessionId?: string;
+}) {
+  const summary = useAgentMessageSummary(sessionId, entry.id, content);
+  return (
+    <ClampedBody
+      summary={summary}
+      className={cn(msgBody, "markdown text-fg")}
+      content={content}
+      entry={outgoing ? undefined : entry}
+      sessionId={sessionId}
+      transformContent={
+        outgoing
+          ? undefined
+          : (full) =>
+              classifyEntry({ ...entry, notice: undefined, content: full })
+                .content
+      }
+    />
   );
 }
 
@@ -801,9 +828,16 @@ export const MessageBubble = function MessageBubble({
         className={cn(msgRow, enterClass)}
         data-eid={e.id}
         data-agent-message={outgoing ? "outgoing" : "incoming"}
+        role="group"
+        aria-label={
+          outgoing ? "Outgoing agent message" : "Incoming agent message"
+        }
       >
         <div
-          className="mb-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint"
+          className={cn(
+            "mb-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 text-meta text-faint",
+            outgoing && "justify-end",
+          )}
           data-agent-message-header=""
         >
           <AgentIdentity
@@ -814,7 +848,7 @@ export const MessageBubble = function MessageBubble({
           {(outgoing?.to || sessionId) && (
             <>
               <span className="inline-flex shrink-0 items-center">
-                <IconArrowRight size={14} />
+                <IconArrowRight className="size-4" />
                 <span className="sr-only">to</span>
               </span>
               <AgentIdentity
@@ -836,24 +870,22 @@ export const MessageBubble = function MessageBubble({
         {e.notice?.kind === "worker-report" && (
           <span className="mb-1 text-meta text-faint">Worker report</span>
         )}
-        <div className="flex flex-col rounded-lg bg-panel px-3.5 py-2.5">
-          <ClampedBody
-            compact
-            className={cn(msgBody, "markdown text-fg")}
+        <div
+          className={cn(
+            msgBubbleUser,
+            "flex w-fit min-w-0 flex-col rounded-xl px-2.5 py-0.5",
+            outgoing ? "bg-accent/10" : "self-start",
+          )}
+        >
+          <AgentMessageBody
+            entry={entry}
             content={outgoing?.content ?? displayContent}
-            entry={outgoing ? undefined : e}
+            outgoing={!!outgoing}
             sessionId={sessionId}
-            transformContent={
-              outgoing
-                ? undefined
-                : (content) =>
-                    classifyEntry({ ...entry, notice: undefined, content })
-                      .content
-            }
           />
         </div>
         {outgoing && toolResult && (
-          <Collapsible.Root className="mt-1">
+          <Collapsible.Root className="mt-1 self-end">
             <Collapsible.Trigger className="rounded-control py-1 text-meta text-faint hover:text-fg phone:min-h-11">
               Delivery details
             </Collapsible.Trigger>

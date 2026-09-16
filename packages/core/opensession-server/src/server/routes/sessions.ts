@@ -1,3 +1,4 @@
+import { handleAgentMessageSummaryRoutes } from "./agent-message-summary";
 /**
  * Session listing, transcripts, transcript search/images, archive/title/status/review overrides, delete.
  *
@@ -1012,6 +1013,8 @@ export async function handleSessionsRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
   const { req, url, path, publicPrefix } = ctx;
+  const messageSummary = await handleAgentMessageSummaryRoutes(ctx);
+  if (messageSummary) return messageSummary;
 
   // Create a session. REST shape for the native iOS/macOS apps (prompting is
   // WS-only, but creation routes through the same SessionControl path the

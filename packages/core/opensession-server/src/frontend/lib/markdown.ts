@@ -1,4 +1,3 @@
-import { agentIdentity } from "./agent-identity";
 import { Marked, type Token, type TokenizerThis, type Tokens } from "marked";
 import { type CalloutIconKind, calloutIconMarkup } from "../components/icons";
 import { BASE_PATH } from "./base";
@@ -611,24 +610,11 @@ function syncRenderedSessionTitles(): void {
   }
 }
 
-/** Display name from the same on-demand metadata as session references.
- * Only worker parentage forms a family, never workspace membership or spawnedBy.
- * Unknown ancestors resolve through the bounded, visible-reference fetch path.
- */
+/** Agent references name their session's work, never a generated persona. */
 export function sessionAgentName(id: string): string {
-  const canonicalId = knownSessionMetadata(id)?.id ?? id;
-  let root = canonicalId;
-  const visited = new Set<string>();
-  for (;;) {
-    const row = knownSessionMetadata(root);
-    root = row?.id ?? root;
-    if (visited.has(root)) return agentIdentity(canonicalId).name;
-    visited.add(root);
-    if (!row) queueSessionTitleRequest(root);
-    if (!row?.parentSessionId) break;
-    root = row.parentSessionId;
-  }
-  return agentIdentity(canonicalId, root).name;
+  const row = knownSessionMetadata(id);
+  if (!row) queueSessionTitleRequest(id);
+  return row?.tab || row?.label || (row ? "Untitled session" : "Session");
 }
 
 /** Full task title for agent hover details, not a workspace label or short chip. */

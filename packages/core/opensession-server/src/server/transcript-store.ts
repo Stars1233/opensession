@@ -1898,9 +1898,8 @@ export class TranscriptStore {
     };
   }
 
-  /** Complete content-free outline for virtual scrolling. Existing stores
-   * backfill only the session being opened, then every write maintains the
-   * projection in the same transaction as its canonical row. */
+  /** Complete content-free outline for virtual scrolling. Writes maintain the
+   * projection transactionally; legacy notice roles are corrected per page. */
   readTranscriptIndex(
     sessionId: string,
     afterSeq = 0,
@@ -1908,9 +1907,15 @@ export class TranscriptStore {
   ): TranscriptOutline {
     const rows = this.db
       .query(
-        `SELECT uuid, seq, change_seq, ts, render_role, content_length, review_pr_number
-         FROM transcript_outline WHERE session_id = ? AND seq > ?
-         ORDER BY seq LIMIT ?`,
+        `SELECT o.uuid, o.seq, o.change_seq, o.ts, o.render_role, o.content_length, o.review_pr_number,
+                CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.notice.kind') END AS notice_kind,
+                CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.type') END AS entry_type,
+                CASE WHEN json_valid(e.data) THEN substr(json_extract(e.data, '$.content'), 1, 1024) END AS notice_prefix
+         FROM transcript_outline o
+         LEFT JOIN transcript_events e ON o.render_role = 'notice'
+           AND e.session_id = o.session_id AND e.seq = o.seq
+         WHERE o.session_id = ? AND o.seq > ?
+         ORDER BY o.seq LIMIT ?`,
       )
       .all(sessionId, afterSeq, limit) as Array<{
       uuid: string;
@@ -1920,13 +1925,30 @@ export class TranscriptStore {
       render_role: TranscriptIndexRole;
       content_length: number;
       review_pr_number: number | null;
+      notice_kind: string | null;
+      entry_type: TranscriptEntry["type"] | null;
+      notice_prefix: string | null;
     }>;
     const entries = rows.map((row) => ({
       id: row.uuid,
       seq: row.seq,
       changeSeq: row.change_seq,
       timestampMs: row.ts,
-      role: row.render_role,
+      // Correct legacy notice roles within this bounded page. Only prefixes
+      // of candidate rows are read; no other actors or bodies on the wire.
+      role:
+        row.render_role === "notice" &&
+        (row.notice_kind === "session-notice" ||
+          row.notice_kind === "worker-report" ||
+          (!row.notice_kind &&
+            transcriptOutlineProjection({
+              id: row.uuid,
+              type: row.entry_type ?? "user",
+              content: row.notice_prefix ?? "",
+              timestamp: "",
+            }).role === "agent_message"))
+          ? ("agent_message" as const)
+          : row.render_role,
       contentLength: row.content_length,
       ...(row.review_pr_number != null
         ? { reviewPrNumber: row.review_pr_number }
@@ -3231,6 +3253,11 @@ function transcriptOutlineProjection(entry: TranscriptEntry): {
     role = "review_handoff";
     const match = classified.notice.title.match(/PR #(\d+)/);
     if (match) reviewPrNumber = Number(match[1]);
+  } else if (
+    classified.notice?.kind === "session-notice" ||
+    classified.notice?.kind === "worker-report"
+  ) {
+    role = "agent_message";
   } else if (classified.notice) {
     role = "notice";
   } else if (classified.type === "user") {

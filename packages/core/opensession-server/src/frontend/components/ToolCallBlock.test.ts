@@ -1,4 +1,4 @@
-import { agentIdentity } from "../lib/agent-identity";
+import { sessionAgentName } from "../lib/markdown";
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -366,7 +366,7 @@ test("a sessions row links to the session it names", () => {
     createElement(ToolCallBlock, { entry, sessionId: "os-viewer" }),
   );
   expect(markup).toContain('data-session-id="os-target"');
-  expect(markup).toContain(`Open ${agentIdentity("os-target").name}`);
+  expect(markup).toContain(`Open ${sessionAgentName("os-target")}`);
   // A control the row's own button can carry: an anchor nested in a button
   // is dropped from the accessibility tree.
   expect(markup).not.toContain("<a ");
@@ -385,7 +385,7 @@ test("the run-rpc session key stays out of MCP summaries", () => {
       "",
       roots,
     ),
-  ).toBe(`id: ${agentIdentity("bks-1").name}`);
+  ).toBe(`id: ${sessionAgentName("bks-1")}`);
 });
 
 test("tool duration uses the result timestamp or a live clock", () => {

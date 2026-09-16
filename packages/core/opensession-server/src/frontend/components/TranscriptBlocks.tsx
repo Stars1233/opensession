@@ -16,7 +16,7 @@ import {
   turnScrollAnchor,
 } from "../lib/transcript-block-identity";
 import { MessageBubble } from "./MessageBubble";
-import { outgoingAgentMessage } from "../lib/agent-message";
+import { agentMessageText } from "../lib/agent-message";
 import { NoteBubble } from "./NoteBubble";
 import { ToolSection, TurnBlock } from "./TurnBlock";
 import {
@@ -488,10 +488,11 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   for (const entry of renderedEntries) {
     if (entry.type === "tool_result") {
       continue; // rendered inside turn blocks via toolResults
-    } else if (outgoingAgentMessage(entry)) {
-      flushTurn();
-      blocks.push({ kind: "entry", entry });
-    } else if (entry.type === "assistant" || entry.type === "tool_use") {
+    } else if (
+      agentMessageText(entry) !== null ||
+      entry.type === "assistant" ||
+      entry.type === "tool_use"
+    ) {
       turn.push(entry);
     } else {
       flushTurn();
@@ -1255,7 +1256,7 @@ function ReviewTurnSteps({
     | { kind: "message"; entry: TranscriptEntry }
   > = [];
   for (const entry of items) {
-    if (entry.type === "tool_use") {
+    if (entry.type === "tool_use" && agentMessageText(entry) === null) {
       const last = sections[sections.length - 1];
       if (last?.kind === "tools") last.items.push(entry);
       else sections.push({ kind: "tools", items: [entry] });
@@ -1279,6 +1280,11 @@ function ReviewTurnSteps({
       <MessageBubble
         key={section.entry.id}
         entry={section.entry}
+        toolResult={
+          section.entry.toolUseId
+            ? toolResults.get(section.entry.toolUseId)
+            : undefined
+        }
         enter={live && section.entry.type !== "user"}
         reasoning={isLegacyReasoningHeading(section.entry.content)}
         owner={owner}

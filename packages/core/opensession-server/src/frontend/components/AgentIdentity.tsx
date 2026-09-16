@@ -1,11 +1,11 @@
-import { useAgentName, useAgentSessionTitle } from "../hooks/useAgentName";
+import { useAgentName } from "../hooks/useAgentName";
 import { Tooltip } from "../ui/tooltip";
 import { IconHome } from "./icons";
 import { BASE_PATH } from "../lib/base";
 import { AgentAvatar } from "../ui/agent-avatar";
 import { cn } from "../ui/cn";
 
-/** Human ownership stays separate from this session's generated agent persona. */
+/** Session titles identify agents without changing their ownership or link targets. */
 export function AgentIdentity({
   sessionId,
   linked = false,
@@ -18,22 +18,21 @@ export function AgentIdentity({
   className?: string;
 }) {
   const name = useAgentName(sessionId);
-  const title = useAgentSessionTitle(sessionId);
   const tooltip = (
     <AgentTooltipLabel
-      name={current ? "Current agent" : name}
-      sessionTitle={title}
+      name={name}
+      sessionTitle={current ? "Current agent" : "Agent"}
     />
   );
   const content = (
     <>
       {sessionId && (
         <span className="relative inline-flex shrink-0">
-          <AgentAvatar sessionId={sessionId} />
+          <AgentAvatar sessionId={sessionId} className="size-4.5" />
           {current && (
             <IconHome
               size={14}
-              className="absolute -bottom-1 -right-1 rounded-full bg-surface text-dim"
+              className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-surface text-dim"
             />
           )}
         </span>
@@ -42,7 +41,7 @@ export function AgentIdentity({
     </>
   );
   const classes = cn(
-    "inline-flex min-w-0 items-center gap-2 text-label font-medium text-dim",
+    "inline-flex min-w-0 max-w-[min(20rem,calc((100%-2rem)/2))] items-center gap-2 text-label font-medium text-dim",
     className,
   );
   if (current)
@@ -51,7 +50,7 @@ export function AgentIdentity({
         <span
           role="img"
           tabIndex={0}
-          aria-label={`Current agent: ${name}`}
+          aria-label={`Current session: ${name}`}
           className={cn(
             classes,
             "rounded-control focus-visible:outline-2 focus-visible:outline-focus-ring phone:min-h-11",
@@ -67,7 +66,7 @@ export function AgentIdentity({
         <a
           href={`${BASE_PATH}/session/${encodeURIComponent(sessionId)}`}
           data-session-id={sessionId}
-          aria-label={`Open ${name}'s session`}
+          aria-label={`Open session: ${name}`}
           className={cn(
             classes,
             "rounded-control hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring phone:min-h-11",

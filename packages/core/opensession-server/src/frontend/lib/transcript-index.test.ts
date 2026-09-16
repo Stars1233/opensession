@@ -75,7 +75,13 @@ function referenceMerge(
   let changed = false;
   for (const entry of incoming) {
     const previous = bySeq.get(entry.seq);
-    if (!previous || entry.changeSeq > previous.changeSeq) {
+    if (
+      !previous ||
+      entry.changeSeq > previous.changeSeq ||
+      (entry.changeSeq === previous.changeSeq &&
+        previous.role === "notice" &&
+        entry.role === "agent_message")
+    ) {
       bySeq.set(entry.seq, entry);
       changed = true;
     }
@@ -84,6 +90,7 @@ function referenceMerge(
 }
 
 const ROLES: TranscriptIndexEntry["role"][] = [
+  "agent_message",
   "user",
   "assistant",
   "tool_use",
@@ -293,4 +300,24 @@ describe("mergeTranscriptIndexEntries", () => {
       else expect(merged).not.toBe(frozenCurrent);
     }
   });
+});
+
+test("agent correspondence does not split indexed work ranges", () => {
+  const ranges = buildTranscriptRanges([
+    row(1, "user"),
+    row(2, "tool_use"),
+    row(3, "agent_message"),
+    row(4, "tool_use"),
+    row(5, "assistant"),
+    row(6, "user"),
+  ]);
+  expect(ranges).toHaveLength(2);
+  expect(ranges[0]!.entryIds).toHaveLength(5);
+});
+
+test("legacy notice projections upgrade without inventing a transcript change", () => {
+  const legacy = row(2, "notice", { changeSeq: 3 });
+  const current = row(2, "agent_message", { changeSeq: 3 });
+  expect(mergeTranscriptIndexEntries([legacy], [current])).toEqual([current]);
+  expect(mergeTranscriptIndexEntries([current], [legacy])).toEqual([current]);
 });

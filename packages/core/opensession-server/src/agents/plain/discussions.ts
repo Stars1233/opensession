@@ -195,8 +195,8 @@ export function abortDiscussionActions(discussionId: string): number {
 // --- Session mapping -------------------------------------------------------
 
 async function findDiscussionSession(discussionId: string) {
-  const { getCachedSessions } = await import("../../server/session-cache");
-  return getCachedSessions()
+  const { getCachedSessionsAsync } = await import("../../server/session-cache");
+  return (await getCachedSessionsAsync())
     .filter((s) => s.plainDiscussionId === discussionId && !s.archived)
     .sort(
       (a, b) =>

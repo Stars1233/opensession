@@ -799,3 +799,37 @@ describe("transcript outline and random-access ranges", () => {
     });
   });
 });
+
+test("correspondence is work in new and historical transcript outlines", async () => {
+  const sid = "bks-agent-message-outline";
+  await store.appendTranscriptEvents(sid, [
+    entry(
+      "agent-in",
+      "[agent bks-peer] <!--os:session-notice-->\nPlease check retries.",
+      { type: "user" },
+    ),
+    entry(
+      "worker-in",
+      "[worker bks-worker] <!--os:worker-report-->\nChecks passed.",
+      { type: "user" },
+    ),
+    entry("human-in", "Thanks", { type: "user" }),
+  ]);
+  expect(store.readTranscriptIndex(sid).entries.map((e) => e.role)).toEqual([
+    "agent_message",
+    "agent_message",
+    "user",
+  ]);
+  const raw = new Database(dbPath);
+  raw.run(
+    "UPDATE transcript_outline SET render_role = 'notice' WHERE session_id = ? AND seq <= 2",
+    [sid],
+  );
+  raw.close();
+  // Production index reads correct legacy rows without a separate backfill.
+  expect(store.readTranscriptIndex(sid).entries.map((e) => e.role)).toEqual([
+    "agent_message",
+    "agent_message",
+    "user",
+  ]);
+});

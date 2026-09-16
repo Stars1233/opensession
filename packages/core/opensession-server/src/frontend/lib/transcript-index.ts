@@ -78,7 +78,7 @@ export function buildTranscriptRanges(
       current.assistantChars += entry.contentLength;
       current.lastAssistantChars = entry.contentLength;
       current.lastTurnRole = "assistant";
-    } else if (entry.role === "tool_use") {
+    } else if (entry.role === "tool_use" || entry.role === "agent_message") {
       current.toolUseCount++;
       current.lastTurnRole = "tool_use";
     }
@@ -137,7 +137,13 @@ export function mergeTranscriptIndexEntries(
   let changed = false;
   for (const entry of incoming) {
     const previous = bySeq.get(entry.seq);
-    if (!previous || entry.changeSeq > previous.changeSeq) {
+    if (
+      !previous ||
+      entry.changeSeq > previous.changeSeq ||
+      (entry.changeSeq === previous.changeSeq &&
+        previous.role === "notice" &&
+        entry.role === "agent_message")
+    ) {
       bySeq.set(entry.seq, entry);
       changed = true;
     }
@@ -179,6 +185,11 @@ export function transcriptIndexEntryFromPayload(entry: {
     role = "review_handoff";
     const match = entry.notice.title?.match(/PR #(\d+)/);
     if (match) reviewPrNumber = Number(match[1]);
+  } else if (
+    entry.notice?.kind === "session-notice" ||
+    entry.notice?.kind === "worker-report"
+  ) {
+    role = "agent_message";
   } else if (entry.notice) {
     role = "notice";
   } else if (entry.type === "user") {

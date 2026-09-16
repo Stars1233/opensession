@@ -220,10 +220,7 @@ export function SessionHeader({
         )}
         <Tooltip
           label={
-            <AgentTooltipLabel
-              name={`Current agent: ${agentName}`}
-              sessionTitle={session.title}
-            />
+            <AgentTooltipLabel name={agentName} sessionTitle="Current agent" />
           }
           multiline
           side="bottom"
@@ -231,10 +228,10 @@ export function SessionHeader({
           <span
             role="img"
             tabIndex={0}
-            aria-label={`Current agent: ${agentName}`}
+            aria-label={`Current session: ${agentName}`}
             className="inline-flex size-8 shrink-0 items-center justify-center rounded-control focus-visible:outline-2 focus-visible:outline-focus-ring"
           >
-            <AgentAvatar sessionId={session.id} />
+            <AgentAvatar sessionId={session.id} className="size-4.5" />
           </span>
         </Tooltip>
         {/* Where the session came FROM, as a quiet mark AFTER the name. It

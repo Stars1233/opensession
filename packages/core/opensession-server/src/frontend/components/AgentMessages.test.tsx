@@ -1,9 +1,15 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { setTurnPrefs } from "./TranscriptBlocks.test-setup";
-import { agentIdentity } from "../lib/agent-identity";
+import { sessionAgentName } from "../lib/markdown";
 import { setSessionTitles, resetResolvedSessionTitles } from "../lib/markdown";
+beforeEach(() => {
+  setSessionTitles([
+    ["os-self", "Fix upload retries"],
+    ["os-peer", "Check cancellation"],
+  ]);
+});
 afterEach(() => {
   setSessionTitles([]);
   resetResolvedSessionTitles();
@@ -38,13 +44,14 @@ test("peer messages show their body and identity, never the human owner or envel
   const html = renderToStaticMarkup(
     <MessageBubble entry={incoming} sessionId="os-self" owner="Alex" />,
   );
-  expect(html).toContain(agentIdentity("os-peer").name);
-  expect(html).toContain("<strong>Ready</strong>");
+  expect(html).toContain(sessionAgentName("os-peer"));
+  expect(html).toContain("Expand message:");
+  expect(html).not.toContain("<strong>Ready</strong>");
   expect(html).toContain('data-agent-message="incoming"');
   expect(html).toContain("/session/os-peer");
   expect(html).not.toContain("Alex");
   expect(html).not.toContain("os:session-notice");
-  expect(html).not.toContain("aria-expanded");
+  expect(html).toContain('aria-expanded="false"');
 });
 
 test("old worker reports without an ID do not invent a sender", () => {
@@ -57,12 +64,12 @@ test("old worker reports without an ID do not invent a sender", () => {
       sessionId="os-self"
     />,
   );
-  expect(html).toContain("Unknown agent");
+  expect(html).toContain("Unknown session");
   expect(html).toContain("Worker report");
-  expect(html).toContain("Checked the upload test.");
+  expect(html).toContain("Expand message:");
 });
 
-test("outgoing messages remain in order and visible when work is collapsed", () => {
+test("agent correspondence stays inside one collapsed work block", () => {
   setTurnPrefs("closed");
   const entries: TranscriptEntry[] = [
     {
@@ -92,13 +99,25 @@ test("outgoing messages remain in order and visible when work is collapsed", () 
       virtualize={false}
     />,
   );
-  expect(html).toContain("Please check <strong>phone</strong> too.");
-  expect(html).toContain(">Sent</span>");
-  expect(html).toContain(agentIdentity("os-self").name);
-  expect(html.match(/data-agent-message="outgoing"/g)).toHaveLength(1);
-  expect(html.indexOf("Please check")).toBeLessThan(html.indexOf("Ready"));
-  expect(html.indexOf("Ready")).toBeLessThan(html.indexOf("All checked."));
+  expect(html).not.toContain('data-agent-message="outgoing"');
+  expect(html).not.toContain('data-agent-message="incoming"');
+  expect(html).toContain("All checked.");
   expect(html).not.toContain("src/app.ts");
+  expect(new Set(html.match(/data-eid="[^"]+#turn"/g)).size).toBe(1);
+  setTurnPrefs("open");
+  const open = renderToStaticMarkup(
+    <TranscriptBlocks
+      entries={entries}
+      sessionId="os-self"
+      virtualize={false}
+    />,
+  );
+  expect(open.match(/data-agent-message="outgoing"/g)).toHaveLength(1);
+  expect(open.match(/data-agent-message="incoming"/g)).toHaveLength(1);
+  expect(open.indexOf('data-agent-message="outgoing"')).toBeLessThan(
+    open.indexOf('data-agent-message="incoming"'),
+  );
+  expect(open).toContain("Sent");
 });
 
 test("failed and unconfirmed sends are not presented as delivered", () => {
@@ -128,8 +147,8 @@ test("ordinary replies stay uncluttered while system notices and humans stay sep
     />,
   );
   expect(html).toContain("Done.");
-  expect(html).not.toContain(agentIdentity("os-self").name);
-  expect(html).not.toContain("Current agent");
+  expect(html).not.toContain(sessionAgentName("os-self"));
+  expect(html).not.toContain("Current session");
   expect(html).not.toContain("<svg");
   const system = renderToStaticMarkup(
     <MessageBubble
@@ -142,7 +161,7 @@ test("ordinary replies stay uncluttered while system notices and humans stay sep
       sessionId="os-self"
     />,
   );
-  expect(system).not.toContain(agentIdentity("os-self").name);
+  expect(system).not.toContain(sessionAgentName("os-self"));
   const human = renderToStaticMarkup(
     <MessageBubble
       entry={{
@@ -155,7 +174,7 @@ test("ordinary replies stay uncluttered while system notices and humans stay sep
       sessionId="os-self"
     />,
   );
-  expect(human).not.toContain(agentIdentity("os-self").name);
+  expect(human).not.toContain(sessionAgentName("os-self"));
 });
 
 test("identifies the local agent and keeps sender and recipient in one header", () => {
@@ -166,19 +185,19 @@ test("identifies the local agent and keeps sender and recipient in one header", 
     const header = html
       .split('data-agent-message-header=""')[1]!
       .split("</div>")[0]!;
-    expect(header).toContain(agentIdentity("os-self").name);
-    expect(header).toContain(agentIdentity("os-peer").name);
+    expect(header).toContain(sessionAgentName("os-self"));
+    expect(header).toContain(sessionAgentName("os-peer"));
     expect(header).toContain(
-      `aria-label="Current agent: ${agentIdentity("os-self").name}"`,
+      `aria-label="Current session: ${sessionAgentName("os-self")}"`,
     );
-    expect(header).not.toContain(">Current agent</span>");
+    expect(header).not.toContain(">Current session</span>");
     expect(header).toContain('sr-only">to</span>');
     expect(header).not.toContain('data-session-id="os-self"');
     expect(header).toContain('data-session-id="os-peer"');
     const from = entry === incoming ? "os-peer" : "os-self";
     const to = entry === incoming ? "os-self" : "os-peer";
-    expect(header.indexOf(agentIdentity(from).name)).toBeLessThan(
-      header.indexOf(agentIdentity(to).name),
+    expect(header.indexOf(sessionAgentName(from))).toBeLessThan(
+      header.indexOf(sessionAgentName(to)),
     );
   }
 });
@@ -215,16 +234,16 @@ test("the top bar keeps only an accessible avatar, with its name in the tooltip"
     />,
   );
   expect(html).toContain(
-    `aria-label="Current agent: ${agentIdentity("os-self").name}"`,
+    `aria-label="Current session: ${sessionAgentName("os-self")}"`,
   );
   expect(html).toContain('tabindex="0"');
   expect(html).toContain("<svg");
-  expect(html).not.toContain(`>${agentIdentity("os-self").name}</span>`);
-  expect(html).not.toContain(">Current agent</span>");
+  expect(html).not.toContain(`>${sessionAgentName("os-self")}</span>`);
+  expect(html).not.toContain(">Current session</span>");
   expect(html).toContain("Check the retry loop");
 });
 
-test("a worker message uses its family surname, not its independent surname", () => {
+test("a worker message uses its own task title", () => {
   setSessionTitles([
     ["os-self", "Parent"],
     ["os-peer", "Worker", false, null, undefined, "os-self"],
@@ -232,8 +251,8 @@ test("a worker message uses its family surname, not its independent surname", ()
   const html = renderToStaticMarkup(
     <MessageBubble entry={incoming} sessionId="os-self" />,
   );
-  expect(html).toContain(agentIdentity("os-peer", "os-self").name);
-  expect(html).not.toContain(agentIdentity("os-peer").name);
+  expect(html).toContain("Worker");
+  expect(html).not.toContain("Emberfall");
   expect(html).toContain('data-session-id="os-peer"');
 });
 
@@ -247,7 +266,7 @@ test("agent tooltip gives the session title secondary emphasis", async () => {
   expect(html).toContain(">Fix retries</span>");
 });
 
-test("agent correspondence uses a three-line preview but normal replies do not", () => {
+test("agent correspondence uses a single-line summary but normal replies do not", () => {
   for (const entry of [
     incoming,
     outgoing,
@@ -259,7 +278,8 @@ test("agent correspondence uses a three-line preview but normal replies do not",
     const html = renderToStaticMarkup(
       <MessageBubble entry={entry} sessionId="os-self" />,
     );
-    expect(html).toContain("max-h-[3lh] overflow-hidden");
+    expect(html).toContain("min-w-0 truncate");
+    expect(html).toContain("Expand message:");
   }
   const html = renderToStaticMarkup(
     <MessageBubble
@@ -284,6 +304,54 @@ test("wire-clamped agent messages keep one accessible expansion control", () => 
   );
   expect(html).toContain('aria-expanded="false"');
   expect(html).toContain("aria-controls=");
-  expect(html.match(/>Show more</g)).toHaveLength(1);
+  expect(html.match(/aria-controls=/g)).toHaveLength(1);
   expect(html).not.toContain("Show full message");
+});
+
+test("a failed outgoing send retains its delivery state inside the work block", () => {
+  setTurnPrefs("open");
+  const html = renderToStaticMarkup(
+    <TranscriptBlocks
+      entries={[
+        outgoing,
+        {
+          id: "failed-send",
+          type: "tool_result",
+          toolUseId: "send-1",
+          timestamp,
+          content: "Delivery failed",
+          isError: true,
+        },
+        {
+          id: "final",
+          type: "assistant",
+          timestamp,
+          content: "Could not deliver.",
+        },
+      ]}
+      sessionId="os-self"
+      virtualize={false}
+    />,
+  );
+  expect(html).toContain("Not sent");
+  expect(html).toContain("Could not deliver.");
+  expect(html).toContain('data-agent-message="outgoing"');
+});
+
+test("agent chat bubbles share user-message sizing but keep their provenance clear", () => {
+  const received = renderToStaticMarkup(
+    <MessageBubble entry={incoming} sessionId="os-self" />,
+  );
+  const sent = renderToStaticMarkup(
+    <MessageBubble entry={outgoing} sessionId="os-self" />,
+  );
+  expect(received).toContain('aria-label="Incoming agent message"');
+  expect(sent).toContain('aria-label="Outgoing agent message"');
+  expect(received).toContain("self-start");
+  expect(sent).toContain("self-end");
+  for (const html of [received, sent]) {
+    expect(html).toContain("w-fit");
+    expect(html).toContain("max-w-[min(600px,90%)]");
+    expect(html).toContain("size-4.5");
+  }
 });

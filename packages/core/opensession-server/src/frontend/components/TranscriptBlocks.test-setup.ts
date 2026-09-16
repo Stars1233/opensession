@@ -2,6 +2,7 @@
 // file's browser surface without replacing it or depending on test order.
 const testWindow = Object.assign(globalThis.window ?? {}, {
   addEventListener: () => {},
+  removeEventListener: () => {},
   matchMedia: () => ({ matches: false }),
 });
 Object.defineProperty(globalThis, "window", {
@@ -11,6 +12,8 @@ Object.defineProperty(globalThis, "window", {
 });
 
 const testDocument = Object.assign(globalThis.document ?? {}, {
+  addEventListener: () => {},
+  removeEventListener: () => {},
   documentElement: { dataset: {}, style: {} },
   querySelector: () => null,
 });

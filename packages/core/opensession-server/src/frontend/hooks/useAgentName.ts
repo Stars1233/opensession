@@ -8,7 +8,7 @@ import {
 /** Metadata can arrive after a message, including an archived worker's parent. */
 export function useAgentName(sessionId?: string): string {
   const snapshot = () =>
-    sessionId ? sessionAgentName(sessionId) : "Unknown agent";
+    sessionId ? sessionAgentName(sessionId) : "Unknown session";
   return useSyncExternalStore(onSessionTitlesChanged, snapshot, snapshot);
 }
 

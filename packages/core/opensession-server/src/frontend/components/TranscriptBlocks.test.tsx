@@ -349,7 +349,7 @@ describe("TranscriptBlocks compact tool runs", () => {
     expect(html).toContain("The repository is clean.");
   });
 
-  test("lets a worker report split work without leaving tool calls bare", () => {
+  test("keeps a worker report inside the same collapsed work block", () => {
     setTurnPrefs(null);
     const html = renderToStaticMarkup(
       <TranscriptBlocks
@@ -373,13 +373,8 @@ describe("TranscriptBlocks compact tool runs", () => {
       />,
     );
 
-    expect(html.match(/>Worked<\/span>/g)).toHaveLength(2);
-    expect(html.indexOf(">Worked</span>")).toBeLessThan(
-      html.indexOf("Worker report"),
-    );
-    expect(html.indexOf("Worker report")).toBeLessThan(
-      html.lastIndexOf(">Worked</span>"),
-    );
+    expect(html.match(/>Worked<\/span>/g)).toHaveLength(1);
+    expect(html).not.toContain("Found the relevant file.");
     expect(html).not.toContain("git status");
     expect(html).not.toContain("package.json");
     expect(html).toContain("Finished both checks.");

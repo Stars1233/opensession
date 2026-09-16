@@ -171,6 +171,7 @@ export interface TranscriptEntry {
 
 /** Display role needed to group a transcript without downloading its bodies. */
 export type TranscriptIndexRole =
+  | "agent_message"
   | "user"
   | "notice"
   | "review_handoff"
