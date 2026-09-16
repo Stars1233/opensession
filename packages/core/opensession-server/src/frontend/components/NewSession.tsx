@@ -405,9 +405,12 @@ export function NewSession({
   const busy = status.kind === "creating" || status.kind === "reconnecting";
   // "New repository" at the foot of the Project picker: a project that exists
   // nowhere yet starts here rather than in a scratch dir. It is a setup call,
-  // so it follows the same admin rule Settings uses to show that page.
+  // so it follows the same admin rule Settings uses to show that page. A
+  // palette scoped to a workspace (`forceRepo`) exists to create in that
+  // project, and the effect above holds the selection there, so it has no row.
   const [newRepoOpen, setNewRepoOpen] = useState(false);
-  const canCreateRepo = useAuthStatus()?.admin !== false;
+  const admin = useAuthStatus()?.admin;
+  const canCreateRepo = !forceRepo && admin !== false;
   function adoptCreatedRepo(created: { id: string; label?: string }) {
     setRepos((current) =>
       current.some((option) => option.id === created.id)

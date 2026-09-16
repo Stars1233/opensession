@@ -8,6 +8,13 @@ describe("validNewRepoName", () => {
     expect(validNewRepoName("A")).toBe(true);
   });
 
+  test("rejects the ids the registry object cannot hold", () => {
+    for (const name of ["__proto__", "constructor", "Prototype"]) {
+      expect(validNewRepoName(name)).toBe(false);
+    }
+    expect(validNewRepoName("constructor-kit")).toBe(true);
+  });
+
   test("rejects non-strings, empty names, and a leading separator", () => {
     expect(validNewRepoName(undefined)).toBe(false);
     expect(validNewRepoName(42)).toBe(false);

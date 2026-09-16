@@ -19,6 +19,7 @@ import {
   rmSync,
   writeFileSync,
 } from "fs";
+import { mkdir, rm, stat, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { basename, isAbsolute, join } from "path";
 import { audit } from "../audit";
@@ -507,7 +508,9 @@ function assertRepoSlotAvailable(
   id: string,
   registered: Record<string, Repo>,
 ): void {
-  if (registered[id]) {
+  // Own keys only: the registry is a plain object, so a bare index would find
+  // Object's `constructor` on an empty one.
+  if (Object.hasOwn(registered, id)) {
     throw setupRepoError(`Repository id already registered: ${id}`, 409);
   }
   if (Object.values(registered).some((repo) => repo.wtPrefix === id)) {
@@ -639,13 +642,19 @@ async function createLocalRepo(input: {
   const dest = `${root}/${id}`;
   const origin = localOriginPath(id);
   assertRepoPathAvailable(dest, registered);
-  if (existsSync(dest) || existsSync(origin)) {
+  // This runs on the gateway thread, so every filesystem step here is async.
+  const exists = (path: string) =>
+    stat(path).then(
+      () => true,
+      () => false,
+    );
+  if ((await exists(dest)) || (await exists(origin))) {
     throw setupRepoError(
       `A checkout already exists at ${dest}. Register it as a local folder instead.`,
       409,
     );
   }
-  mkdirSync(root, { recursive: true });
+  await mkdir(root, { recursive: true });
   const git = async (argv: string[]) => {
     const result = await runCommand(["git", ...argv], 60_000);
     if (result.exitCode !== 0)
@@ -654,7 +663,7 @@ async function createLocalRepo(input: {
   try {
     await git(["init", "--quiet", "--bare", "-b", "main", origin]);
     await git(["init", "--quiet", "-b", "main", dest]);
-    writeFileSync(join(dest, "README.md"), `# ${input.name}\n`);
+    await writeFile(join(dest, "README.md"), `# ${input.name}\n`);
     await git(["-C", dest, "add", "README.md"]);
     // The same identity the worktree layer signs an empty remote's root
     // commit with (worktree.ts): the commit is the server's, not a person's.
@@ -691,8 +700,8 @@ async function createLocalRepo(input: {
   } catch (error) {
     // Both halves are this call's own; a failure leaves nothing behind that a
     // retry would then refuse as "already exists".
-    rmSync(dest, { recursive: true, force: true });
-    rmSync(origin, { recursive: true, force: true });
+    await rm(dest, { recursive: true, force: true });
+    await rm(origin, { recursive: true, force: true });
     throw error;
   }
 }

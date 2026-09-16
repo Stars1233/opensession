@@ -1234,7 +1234,19 @@ describe("new repository creation", () => {
     process.env.HOME = root;
     process.env.OPENSESSION_CONFIG = configPath;
 
-    for (const name of ["", "acme/widget", "widget.git", "..", "a b", 7]) {
+    for (const name of [
+      "",
+      "acme/widget",
+      "widget.git",
+      "..",
+      "a b",
+      7,
+      // The registry is a plain object; these are its prototype's keys, and
+      // the update route refuses them as ids already.
+      "__proto__",
+      "constructor",
+      "Prototype",
+    ]) {
       const response = await handleSetupRepoRoutes(
         postRepo({ source: "new", name }),
       );
@@ -1271,6 +1283,25 @@ describe("new repository creation", () => {
       expect(JSON.parse(readFileSync(configPath, "utf-8"))).toEqual({
         repos: {},
       });
+    },
+  );
+
+  test.serial(
+    "an inherited key on an empty registry does not read as taken",
+    async () => {
+      const root = localRoot();
+      const checkout = createRemoteCheckout(root, "constructor");
+      const configPath = join(root, "config.json");
+      writeFileSync(configPath, JSON.stringify({ repos: {} }));
+      process.env.HOME = root;
+      process.env.OPENSESSION_CONFIG = configPath;
+
+      const response = await handleSetupRepoRoutes(
+        postRepo({ source: "local", path: checkout }),
+      );
+
+      expect(response?.status).toBe(201);
+      expect(await response?.json()).toMatchObject({ id: "constructor" });
     },
   );
 
