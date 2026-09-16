@@ -1172,6 +1172,9 @@ export class BoxProvider implements SandboxProvider {
         repoId: repo.id,
         trustProfile: trust.trustProfile,
       },
+      spec.restoreCheckpoint
+        ? { restoreCheckpoint: spec.restoreCheckpoint }
+        : {},
     );
     mark("workspace ready");
     if (resumingExistingWorkspace) {

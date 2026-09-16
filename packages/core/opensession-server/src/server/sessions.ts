@@ -1085,6 +1085,7 @@ export function nativeSessionRow(data: NativeSessionFile): UnifiedSession {
       data.archivedReason ||
       (archived ? getArchiveReason(data.id) || "manual" : undefined),
     plainThreadId: data.plainThreadId,
+    plainDiscussionId: data.plainDiscussionId,
     externalRefs: data.externalRefs,
     // The MCP allowlist the session was created with. Dropping it here left
     // `sessionMcpScopeSource`'s "session" branch unreachable, so a session
@@ -1109,6 +1110,8 @@ export function nativeSessionRow(data: NativeSessionFile): UnifiedSession {
     loop: data.loop,
     slackThreads: data.slackThreads,
     sandbox: data.sandbox,
+    sandboxCheckpoint: data.sandboxCheckpoint,
+    portalSandbox: data.portalSandbox,
     lastActivity: data.lastActivity,
     createdAt: data.createdAt,
     isRunning: false,

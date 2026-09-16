@@ -527,6 +527,27 @@ export function NewSession({
       })
       .catch(() => {});
   }, []);
+  // A project can be set to always start in a Sandbox (Workspace >
+  // Sandboxes > Projects). Follow it whenever the project changes until the
+  // person picks for themselves; the choice stays visible in "Run in".
+  const repoSandboxDefault = sandboxStatus?.defaults?.repos?.[repo];
+  useEffect(() => {
+    if (sandboxSelectionTouched.current || !sandboxStatus) return;
+    const ready: string[] = sandboxStatus.connections?.length
+      ? sandboxStatus.connections
+          .filter((connection) => connection.state === "ready")
+          .map((connection) => connection.provider)
+      : (sandboxStatus.providers || [])
+          .filter((p) => p.configured && p.certified)
+          .map((p) => p.id);
+    setSandboxProvider(
+      repoSandboxDefault &&
+        repoSandboxDefault !== "none" &&
+        ready.includes(repoSandboxDefault)
+        ? repoSandboxDefault
+        : "",
+    );
+  }, [repo, repoSandboxDefault, sandboxStatus]);
   const readySandboxProviders: string[] = sandboxStatus?.connections?.length
     ? sandboxStatus.connections
         .filter((connection) => connection.state === "ready")

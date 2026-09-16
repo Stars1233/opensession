@@ -20,6 +20,15 @@ export interface SessionSandboxStatus {
   canResume?: boolean;
   canDesktop?: boolean;
   logs?: { setup?: string; resume?: string };
+  /** The last workspace checkpoint pushed to origin; absent until the first
+   *  clean turn finishes or when the repository cannot hold one. */
+  checkpoint?: SandboxCheckpointInfo;
+}
+
+export interface SandboxCheckpointInfo {
+  at: string;
+  commit: string;
+  branch: string;
 }
 
 export interface SandboxDesktopLink {
@@ -69,15 +78,36 @@ export function attachSandbox(
   });
 }
 
+/** Lifecycle actions. A rebuild first checkpoints the Sandbox; when that is
+ * impossible on a reachable Sandbox the server answers 428 and only
+ * `discard: true` lets the rebuild throw the Sandbox's files away. */
 export function sandboxAction(
   sessionId: string,
-  action: "pause" | "resume" | "recreate",
+  action: "pause" | "resume" | "recreate" | "checkpoint",
+  options: { discard?: boolean } = {},
 ): Promise<SessionSandboxStatus> {
   const path = `/sessions/${encodeURIComponent(sessionId)}/sandbox/${action}`;
   const label = `Failed to ${action} sandbox`;
-  return action === "recreate"
-    ? request(path, { method: "POST", body: { confirm: true }, label })
-    : request(path, { method: "POST", label });
+  if (action !== "recreate") return request(path, { method: "POST", label });
+  const body = options.discard
+    ? { confirm: true, discard: true }
+    : { confirm: true };
+  return request(path, { method: "POST", body, label });
+}
+
+/** Moves a Sandbox session back to this machine: the Sandbox's work is
+ * checkpointed, restored into a worktree here, and the Sandbox is released.
+ * A 428 means the Sandbox cannot be reached and no checkpoint exists; repeat
+ * with `confirm` to move with the branch as origin has it. */
+export function detachSandbox(
+  sessionId: string,
+  opts: { confirm?: boolean } = {},
+): Promise<SessionSandboxStatus> {
+  return request(`/sessions/${encodeURIComponent(sessionId)}/sandbox/detach`, {
+    method: "POST",
+    body: opts.confirm ? { confirm: true } : {},
+    label: "Failed to move the session to this machine",
+  });
 }
 
 export interface SandboxConnectionsResponse {
@@ -99,6 +129,9 @@ export interface SandboxEnvironmentInfo {
   failureSummary?: string;
   mode?: "template" | "per_session";
   settings?: SandboxMachineSettings;
+  /** One prepared Sandbox is kept waiting for this project. */
+  keepReady?: boolean;
+  readyState?: "ready" | "preparing" | "failed";
 }
 
 export interface SandboxMachineSettings {
@@ -170,6 +203,21 @@ export function fetchSandboxEnvironments(): Promise<{
   return request("/sandbox/environments", {
     label: "Failed to load sandbox environments",
   });
+}
+
+export function setSandboxKeepReady(
+  repo: string,
+  provider: SandboxConnectionInfo["provider"],
+  enabled: boolean,
+): Promise<{ environments: SandboxEnvironmentInfo[] }> {
+  return request(
+    `/sandbox/environments/${encodeURIComponent(repo)}/${provider}/keep-ready`,
+    {
+      method: "PUT",
+      body: { enabled },
+      label: `Failed to update the ready Sandbox for ${repo}`,
+    },
+  );
 }
 
 export function rebuildSandboxEnvironment(

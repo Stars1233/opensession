@@ -5,10 +5,13 @@ import type { SandboxProviderId } from "./provider";
 import {
   RUNNABLE_SANDBOX_PROVIDERS,
   type RunnableSandboxProviderId,
+  repoSandboxDefault,
   resolveRequestedSandbox,
   sandboxConfig,
   sandboxProviderCertified,
   sandboxProviderConfigured,
+  setRepoPortalSandbox,
+  setRepoSandboxDefault,
   setWorkspaceSandboxDefault,
 } from "./config";
 import {
@@ -23,7 +26,14 @@ export type PersonalSandboxDefault = WorkspaceSandboxDefault | "workspace";
 export interface SandboxDefaultsStatus {
   workspace: WorkspaceSandboxDefault;
   personal: PersonalSandboxDefault;
+  /** What a new session starts in, for `repo` when one was named. */
   effective: WorkspaceSandboxDefault;
+  /** Per-repo overrides; a repo absent here follows workspace and personal. */
+  repos: Record<string, WorkspaceSandboxDefault>;
+  /** Repos whose Portals run in a Sandbox of their own for sessions on this
+   * machine (repo id → provider); a repo absent here runs them beside the
+   * session. */
+  portals: Record<string, RunnableSandboxProviderId>;
 }
 
 const PERSONAL_PREF_KEY = "sandbox-default";
@@ -47,20 +57,57 @@ export function personalSandboxDefault(user: string): PersonalSandboxDefault {
   return "workspace";
 }
 
-export function sandboxDefaultsStatus(user: string): SandboxDefaultsStatus {
+export function repoSandboxDefaults(): Record<string, WorkspaceSandboxDefault> {
+  const out: Record<string, WorkspaceSandboxDefault> = {};
+  for (const [repoId, override] of Object.entries(
+    sandboxConfig().perRepo || {},
+  )) {
+    if (override.sessionDefault) out[repoId] = override.sessionDefault;
+  }
+  return out;
+}
+
+export function repoPortalSandboxes(): Record<
+  string,
+  RunnableSandboxProviderId
+> {
+  const out: Record<string, RunnableSandboxProviderId> = {};
+  for (const [repoId, override] of Object.entries(
+    sandboxConfig().perRepo || {},
+  )) {
+    if (override.portalSandbox) out[repoId] = override.portalSandbox;
+  }
+  return out;
+}
+
+export function sandboxDefaultsStatus(
+  user: string,
+  repoId?: string,
+): SandboxDefaultsStatus {
   const workspace = workspaceSandboxDefault();
   const personal = personalSandboxDefault(user);
   return {
     workspace,
     personal,
-    effective: effectiveSandboxDefault(workspace, personal),
+    effective: effectiveSandboxDefault(
+      workspace,
+      personal,
+      repoSandboxDefault(repoId),
+    ),
+    repos: repoSandboxDefaults(),
+    portals: repoPortalSandboxes(),
   };
 }
 
+/** Precedence: the repo's own default, then the person's, then the
+ * workspace's. A repo that should always run in a Sandbox therefore does,
+ * whatever a person set for themselves; only a per-session choice beats it. */
 export function effectiveSandboxDefault(
   workspace: WorkspaceSandboxDefault,
   personal: PersonalSandboxDefault,
+  repo?: WorkspaceSandboxDefault | null,
 ): WorkspaceSandboxDefault {
+  if (repo) return repo;
   return personal === "workspace" ? workspace : personal;
 }
 
@@ -89,6 +136,28 @@ export function saveWorkspaceSandboxDefault(
   return sandboxDefaultsStatus("Anonymous");
 }
 
+export function saveRepoSandboxDefault(
+  repoId: string,
+  value: string,
+): SandboxDefaultsStatus {
+  const normalized = value.trim().toLowerCase();
+  if (normalized !== "workspace" && normalized !== "none")
+    assertAvailable(normalized);
+  setRepoSandboxDefault(repoId, normalized);
+  return sandboxDefaultsStatus("Anonymous", repoId);
+}
+
+/** `none` runs the repo's Portals beside the session again. */
+export function saveRepoPortalSandbox(
+  repoId: string,
+  value: string,
+): SandboxDefaultsStatus {
+  const normalized = value.trim().toLowerCase();
+  if (normalized !== "none") assertAvailable(normalized);
+  setRepoPortalSandbox(repoId, normalized);
+  return sandboxDefaultsStatus("Anonymous", repoId);
+}
+
 export function savePersonalSandboxDefault(
   user: string,
   value: string,
@@ -113,7 +182,7 @@ export function resolveInteractiveSandbox(
   if (requested !== undefined && requested !== null) {
     return resolveRequestedSandbox(requested, repoId, model);
   }
-  const selected = sandboxDefaultsStatus(user || "Anonymous").effective;
+  const selected = sandboxDefaultsStatus(user || "Anonymous", repoId).effective;
   return resolveRequestedSandbox(
     selected === "none" ? "local" : selected,
     repoId,

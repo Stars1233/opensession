@@ -106,6 +106,8 @@ import { suggestBranchName } from "../suggest-branch";
 import { searchIndex } from "../session-index";
 import { resolvePrTarget } from "../session-repos";
 import { destroySessionSandbox } from "../session-sandbox";
+import { deleteSessionCheckpoint } from "../sandbox/checkpoint";
+import { withSessionLifecycleLane } from "../sandbox/lifecycle-lane";
 import { stopAllPortalServices } from "../portal-supervisor";
 import { dropRunnerPortalRoutes } from "../runner-portals";
 import { cleanupRunnerWorkspace } from "../runner-ws";
@@ -2083,7 +2085,12 @@ export async function handleSessionsRoutes(
         searchIndex().remove(`session:${id}`);
       } catch {}
     };
-    const finishDeletion = async () => {
+    // Every deletion step works on the record as it stands once the lifecycle
+    // lane is held, not on the one this request found before it waited: a
+    // checkpoint that finished meanwhile recorded its ref on the session,
+    // and a deletion still holding the earlier copy would leave that ref,
+    // uncommitted files included, on origin for good.
+    const finishDeletion = async (session: UnifiedSession) => {
       // Runner workspace deletion is opt-in on the Runner. It remains
       // best-effort so an offline machine never blocks deleting a session.
       if (session.runner && session.repo && session.worktreeDir) {
@@ -2108,6 +2115,13 @@ export async function handleSessionsRoutes(
       // loss is the mode's documented contract). Best-effort and detached:
       // a docker hiccup must never block the delete.
       destroySessionSandbox(session, "delete");
+      // The hidden checkpoint ref on origin goes with the session; an
+      // archived session keeps it because it may be the only copy of its work.
+      // Awaited on the lifecycle lane this deletion holds, so no checkpoint
+      // still queued behind the last turn can push the ref back afterwards
+      // (it finds no session and skips). Best-effort: a refused push is
+      // logged there and never blocks the delete.
+      await deleteSessionCheckpoint(session).catch(() => {});
       // If that was the workspace's last session, delete the workspace too.
       // Otherwise auto-wrapped 1:1 workspaces linger as undeletable empty
       // sidebar rows. PR-backed workspaces (`key`) stay because they regroup new
@@ -2137,15 +2151,17 @@ export async function handleSessionsRoutes(
     // the session file. That leaves a visible ghost which the mailbox correctly
     // refuses to mutate. Finish that already-authorized deletion without trying
     // to re-enter its permanently closed mailbox.
-    const recoverTombstonedDeletion = async () => {
-      try {
-        await removeTombstonedSessionArtifacts(session);
-        await finishDeletion();
-        return Response.json({ ok: true });
-      } catch (e: any) {
-        return Response.json({ error: e.message }, { status: 500 });
-      }
-    };
+    const recoverTombstonedDeletion = () =>
+      withSessionLifecycleLane(session.id, async () => {
+        try {
+          const ghost = (await findSessionAsync(session.id)) ?? session;
+          await removeTombstonedSessionArtifacts(ghost);
+          await finishDeletion(ghost);
+          return Response.json({ ok: true });
+        } catch (e: any) {
+          return Response.json({ error: e.message }, { status: 500 });
+        }
+      });
     if (await sessionTombstoneState(session.id))
       return recoverTombstonedDeletion();
 
@@ -2172,49 +2188,63 @@ export async function handleSessionsRoutes(
         return Response.json(replay.body, { status: replay.status });
       }
       deleteExecuting = true;
-      const result = await withSessionMutationLock(session.id, async () => {
-        try {
-          const runIds = [
-            session.claudeSessionId,
-            session.codexThreadId,
-            session.id,
-          ];
-          if (
-            runIds.some((id) => !!id && isAgentSessionBusy(id!)) &&
-            !(await cancelAgentRunAndWait(runIds))
-          ) {
-            return {
-              status: 409,
-              body: {
-                error: "The session is still stopping. Retry deletion shortly.",
-              },
-            };
+      // Deletion is a Sandbox lifecycle operation like a move or a rebuild:
+      // it runs on the session's lifecycle lane so it waits for a checkpoint
+      // or move already in flight, and one queued behind it finds no session
+      // and refuses instead of acting on the deleted one. The mutation lock
+      // is taken inside the lane, the same order every lifecycle operation
+      // uses when it writes the session record.
+      const result = await withSessionLifecycleLane(session.id, () =>
+        withSessionMutationLock(session.id, async () => {
+          try {
+            // The lane may have been held by a checkpoint or a move; what
+            // they wrote is what gets deleted. A session gone meanwhile has
+            // been deleted by someone else, which is the outcome asked for.
+            const current = await findSessionAsync(session.id);
+            if (!current) return { status: 200, body: { ok: true } };
+            const runIds = [
+              current.claudeSessionId,
+              current.codexThreadId,
+              current.id,
+            ];
+            if (
+              runIds.some((id) => !!id && isAgentSessionBusy(id!)) &&
+              !(await cancelAgentRunAndWait(runIds))
+            ) {
+              return {
+                status: 409,
+                body: {
+                  error:
+                    "The session is still stopping. Retry deletion shortly.",
+                },
+              };
+            }
+            // Local Portals are their own detached process groups. Stop them before
+            // deleting session metadata or optionally removing the worktree.
+            if (current.runner)
+              await dropRunnerPortalRoutes(
+                current.id,
+                current.runner.id,
+                current.startedBy || undefined,
+              );
+            else if (current.worktreeDir && !current.sandbox?.sandboxId)
+              await stopAllPortalServices({
+                sessionId: current.id,
+                worktreeDir: current.worktreeDir,
+              });
+            // The serialized delete must remove the file before its permanent tombstone.
+            // Tombstoning first drops this active kernel from the map, so deleteSession's
+            // nested compatibility write re-enters through a fresh kernel and is fenced
+            // as a late writer, leaving a visible but immutable ghost session behind.
+            await deleteSession(current);
+            await tombstoneSessionKernel(current.id);
+            await finishDeletion(current);
+            return { status: 200, body: { ok: true } };
+          } catch (e: any) {
+            return { status: 500, body: { error: e.message } };
           }
-          // Local Portals are their own detached process groups. Stop them before
-          // deleting session metadata or optionally removing the worktree.
-          if (session.runner)
-            await dropRunnerPortalRoutes(
-              session.id,
-              session.runner.id,
-              session.startedBy || undefined,
-            );
-          else if (session.worktreeDir && !session.sandbox?.sandboxId)
-            await stopAllPortalServices({
-              sessionId: session.id,
-              worktreeDir: session.worktreeDir,
-            });
-          // The serialized delete must remove the file before its permanent tombstone.
-          // Tombstoning first drops this active kernel from the map, so deleteSession's
-          // nested compatibility write re-enters through a fresh kernel and is fenced
-          // as a late writer, leaving a visible but immutable ghost session behind.
-          await deleteSession(session);
-          await tombstoneSessionKernel(session.id);
-          await finishDeletion();
-          return { status: 200, body: { ok: true } };
-        } catch (e: any) {
-          return { status: 500, body: { error: e.message } };
-        }
-      });
+        }),
+      );
       deletePhysicalFinished = true;
       await sessionGatewayCommand({
         op: "complete",

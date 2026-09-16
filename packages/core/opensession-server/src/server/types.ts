@@ -216,6 +216,8 @@ export interface UnifiedSession {
    */
   slim?: boolean;
   plainThreadId?: string;
+  /** Plain discussion (Ask Sidekick) this session answers; every turn is mirrored there. */
+  plainDiscussionId?: string;
   /** Generic external-object linkage (feed items: videos, …) — the
    *  successor to per-source foreign keys like plainThreadId (see
    *  the feeds design). A session can carry several. */
@@ -342,6 +344,14 @@ export interface UnifiedSession {
       | "needs_attention";
     lastLifecycleError?: string;
   };
+  /** The last workspace checkpoint a Sandbox session pushed to origin
+   * (sandbox/checkpoint.ts). Kept beside `sandbox` rather than inside it so
+   * lifecycle writers that replace the whole `sandbox` object cannot drop it. */
+  sandboxCheckpoint?: SandboxCheckpointRecord;
+  /** The Sandbox that runs this session's Portals while the session itself
+   * stays on this machine (portal-sandbox.ts). Never set beside a workspace
+   * Sandbox, whose Portals run in it. */
+  portalSandbox?: PortalSandboxRecord;
   /** Persistent, explicitly trusted machine selected for this session. Unlike
    * a Sandbox, a Runner is not an isolation boundary. */
   runner?: {
@@ -618,6 +628,7 @@ export interface NativeSessionFile {
   automationEvent?: string;
 
   plainThreadId?: string; // Plain thread this session is triaging
+  plainDiscussionId?: string; // Plain discussion (Ask Sidekick) this session answers
   externalRefs?: ExternalRef[]; // generic feed-item linkage (the feeds design)
   model?: string; // model id for this session's runs; unset = default
   /** Original selection displaced by an automatic usage fallback. `null` means
@@ -680,6 +691,10 @@ export interface NativeSessionFile {
       | "needs_attention";
     lastLifecycleError?: string;
   };
+  /** See UnifiedSession.sandboxCheckpoint. */
+  sandboxCheckpoint?: SandboxCheckpointRecord;
+  /** See UnifiedSession.portalSandbox. */
+  portalSandbox?: PortalSandboxRecord;
   runner?: {
     id: string;
     name: string;
@@ -687,6 +702,30 @@ export interface NativeSessionFile {
     lifecycle?: "preparing" | "awake" | "offline" | "needs_attention";
     lastLifecycleError?: string;
   };
+}
+
+/** A synthetic commit on origin holding the session branch tip (`head`) plus
+ * the working tree as it was (`tree`), reachable from `ref`. Restoring it
+ * anywhere reproduces the branch with the same uncommitted changes. */
+export interface SandboxCheckpointRecord {
+  ref: string;
+  commit: string;
+  head: string;
+  tree: string;
+  branch: string;
+  at: string;
+}
+
+/** A Sandbox provisioned only to run a host session's Portals: its workspace
+ * is a clone of the session branch landed on the session's checkpoints, never
+ * the agent's checkout. `syncedCommit` is the checkpoint commit its checkout
+ * last landed on. */
+export interface PortalSandboxRecord {
+  provider: string;
+  sandboxId?: string;
+  lifecycle?: "preparing" | "awake" | "sleeping" | "waking" | "needs_attention";
+  lastLifecycleError?: string;
+  syncedCommit?: string;
 }
 
 // Moved to the protocol package; re-exported for existing import sites.

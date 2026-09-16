@@ -122,6 +122,20 @@ describe("sessionInProcessMcpBranch", () => {
   test("a normal session gets the interactive set", () => {
     expect(sessionInProcessMcpBranch(plain)).toBe("interactive");
   });
+
+  test("a Plain discussion session gets only its approval server", () => {
+    expect(
+      sessionInProcessMcpBranch({ ...plain, plainDiscussionId: "disc_1" }),
+    ).toBe("plain-discussion");
+    // Even with a goal: the interactive set never reaches ticket text.
+    expect(
+      sessionInProcessMcpBranch({
+        ...plain,
+        plainDiscussionId: "disc_1",
+        goalId: "g1",
+      }),
+    ).toBe("plain-discussion");
+  });
 });
 
 describe("resolveSessionRunInputs", () => {
@@ -181,6 +195,24 @@ describe("resolveSessionRunInputs", () => {
     expect(inputs.accountUser).toBeUndefined();
     expect(inputs.humanPrompter).toBeUndefined();
     expect(inputs.inProcessMcpBranch).toBe("automation-self-improve");
+  });
+
+  test("a Plain discussion session drops the user and denies customer and money writes", async () => {
+    const inputs = await resolveSessionRunInputs(
+      { ...plain, plainDiscussionId: "disc_1" },
+      { user: "Kent" },
+    );
+    expect(inputs.isAutomationSession).toBe(false);
+    // Untrusted ticket text: no user for the allowedUsers gate, same as an
+    // automation run, even when a person prompts it from the UI.
+    expect(inputs.user).toBeUndefined();
+    expect(inputs.accountUser).toBe("Kent");
+    expect(inputs.deniedTools).toHaveProperty("mcp__plain__reply_to_thread");
+    expect(inputs.deniedTools).toHaveProperty("mcp__stripe__create_refund");
+    expect(inputs.deniedTools).toHaveProperty(
+      "mcp__workos__get_impersonation_url",
+    );
+    expect(inputs.inProcessMcpBranch).toBe("plain-discussion");
   });
 
   test("a scheduled loop tick in a person's name never gets the spawn suite", async () => {

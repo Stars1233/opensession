@@ -57,6 +57,14 @@ configuration for the run.
   deny-by-default on journal kind: interactive kinds
   (prompt/goal/create/linear/slack), unattended kinds
   (automation/plain/action/security-scan/github-*), everything else refused.
+- A Plain Ask Sidekick discussion session (`plainDiscussionId`,
+  `docs/setup/plain.md`) is prompted by a teammate but reads the same untrusted
+  ticket text, so every one of its turns carries the automation deny-set plus
+  the Plain customer-facing writes and the Stripe money movers, passes no
+  user, gets no AWS credentials, and mounts only `opensession-plain-discussion`
+  (the Approve/Deny-gated customer reply and Stripe execution) in place of the
+  interactive set. The run-rpc fallback builder serves that same set, so a
+  hosted or sandboxed turn cannot ask for more.
 - `mode` is per automation. Ask has guarded read/find/grep/ls/bash tools but
   no Write/Edit. For an unsandboxed ordinary repository it uses a stable,
   shared detached worktree pinned to `origin/<defaultBranch>`; only a
@@ -229,10 +237,14 @@ human repository administrator changes GitHub's PR creation policy to allow all
 users, operators must qualify the Daytona provider, enable the review
 automation, and keep fork-origin GitHub Actions disabled or approval-gated. The
 shipped PR workflows additionally skip every job whose head repository differs
-from the base repository. The GitHub App intentionally has no repository
-Administration permission; changing
-and auditing those GitHub settings is a one-time human-admin task, not runtime
-authority.
+from the base repository. Ordinary App installation tokens exclude repository Administration.
+The App grant includes it for the admin-only private repository creation
+route, which mints a separate uncached token. Connected-user tokens inherit
+the widened grant intersected with the person's permissions, including in
+interactive code runs; they cannot be narrowed by the installation-token
+mint sets. Changing and auditing public-intake settings remains a one-time
+human-admin task. See [GitHub authority](github-authority.md) for the
+connected-user and host-private-key implications.
 
 ## GitHub credential scoping (out-of-org writes fail server-side)
 

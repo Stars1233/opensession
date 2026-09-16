@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   buildBranchNote,
+  buildReposNote,
   planCreateAttachRepos,
   resolvePrTarget,
   resolveSessionRepoContext,
@@ -31,6 +32,17 @@ beforeAll(() => {
         },
         "tella-fusion": { repo: join(configDir, "attached") },
         infra: { repo: join(configDir, "infra") },
+        direct: {
+          repo: join(configDir, "direct"),
+          sharedCheckout: true,
+          publicationMode: "direct",
+          defaultBranch: "trunk",
+        },
+        storage: {
+          repo: join(configDir, "storage"),
+          host: "codestorage",
+          publicationMode: "direct",
+        },
       },
     }),
   );
@@ -61,6 +73,139 @@ const session = {
 };
 
 describe("buildBranchNote", () => {
+  const directSession = () => ({
+    mode: "code" as const,
+    branch: "change",
+    worktreeDir: join(configDir, "worktrees/direct-change"),
+  });
+
+  test("direct publication keeps worktree isolation and safe default-branch pushes", () => {
+    const note = buildBranchNote(directSession());
+    expect(note).toContain("## Branch discipline (direct publication)");
+    expect(note).toContain("git push origin HEAD:refs/heads/trunk");
+    expect(note).toContain("git merge-base --is-ancestor origin/trunk HEAD");
+    expect(note).toContain("clean index and worktree");
+    expect(note).toContain("rebase-merge, rebase-apply, or MERGE_HEAD");
+    expect(note).toContain("rerun all required checks on the final candidate");
+    expect(note).toContain("Never force-push or delete the default branch");
+    expect(note).toContain("this branch already has an open PR");
+    expect(note).toContain("If the user explicitly requests a PR");
+    expect(note).toContain("grants no additional credentials or permissions");
+    expect(note).not.toContain("git push -u origin change");
+  });
+
+  test.each([
+    { prUrl: "https://github.com/acme/direct/pull/1" },
+    { prNumber: 1 },
+    {
+      prs: [
+        {
+          repo: "direct",
+          branch: "change",
+          source: "primary" as const,
+          state: "OPEN" as const,
+          number: 1,
+        },
+      ],
+    },
+    { stackedOn: { repo: "direct", branch: "base" } },
+    { existingBranch: true },
+    { pstackMode: true },
+    { automation: "nightly" },
+    {
+      automationDescendantPolicy: {} as NonNullable<
+        UnifiedSession["automationDescendantPolicy"]
+      >,
+    },
+  ])(
+    "explicit PR contexts and automation do not get direct publication: %j",
+    (context) => {
+      const note = buildBranchNote({ ...directSession(), ...context });
+      expect(note).toContain("This workspace keeps ONE pull request");
+      expect(note).not.toContain("HEAD:refs/heads/trunk");
+    },
+  );
+
+  test("ask and actual main-checkout sessions do not get worktree instructions", () => {
+    expect(
+      buildBranchNote({ ...directSession(), mode: "ask" }),
+    ).toBeUndefined();
+    expect(
+      buildBranchNote({
+        ...directSession(),
+        worktreeDir: join(configDir, "direct"),
+      }),
+    ).toBeUndefined();
+  });
+
+  test("code storage keeps its existing publication rules", () => {
+    const note = buildBranchNote({
+      ...directSession(),
+      worktreeDir: join(configDir, "worktrees/storage-change"),
+    });
+    expect(note).toContain("a pushed branch IS the change request");
+    expect(note).not.toContain("HEAD:refs/heads/");
+  });
+
+  test("attached repos get their own publication instructions", () => {
+    const note = buildReposNote({
+      ...directSession(),
+      repo: "direct",
+      attachedRepos: [
+        {
+          repo: "infra",
+          dir: join(configDir, "worktrees/infra-other"),
+          branch: "other",
+        },
+      ],
+    } as UnifiedSession);
+    expect(note).toContain("HEAD:refs/heads/trunk");
+    expect(note).toContain("git push -u origin other");
+    expect(note).toContain("This workspace keeps ONE pull request");
+  });
+
+  test("an attached repo's open PR overrides its direct default", () => {
+    const note = buildReposNote({
+      ...directSession(),
+      repo: "infra",
+      worktreeDir: join(configDir, "worktrees/infra-change"),
+      attachedRepos: [
+        {
+          repo: "direct",
+          dir: join(configDir, "worktrees/direct-other"),
+          branch: "other",
+        },
+      ],
+      prs: [
+        {
+          repo: "direct",
+          branch: "other",
+          source: "attached",
+          number: 2,
+          state: "OPEN",
+        },
+      ],
+    } as UnifiedSession);
+    expect(note).toContain("git push -u origin other");
+    expect(note).not.toContain("HEAD:refs/heads/trunk");
+  });
+
+  test("another branch's PR does not change the direct default", () => {
+    const note = buildBranchNote({
+      ...directSession(),
+      prs: [
+        {
+          repo: "direct",
+          branch: "different",
+          source: "linked",
+          number: 2,
+          state: "OPEN",
+        },
+      ],
+    });
+    expect(note).toContain("HEAD:refs/heads/trunk");
+  });
+
   test("requires explicit user authorization before merging a PR", () => {
     const note = buildBranchNote({
       mode: "code",

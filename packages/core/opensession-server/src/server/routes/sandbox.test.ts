@@ -11,6 +11,7 @@ import { describe, expect, test } from "bun:test";
 import {
   recreateSandboxSpec,
   sandboxAttachRefusal,
+  sandboxDetachRefusal,
   unpublishedWorkSummary,
 } from "./sandbox";
 
@@ -73,13 +74,19 @@ describe("sandboxAttachRefusal", () => {
     expect(sandboxAttachRefusal(host)).toBeNull();
   });
 
-  test("a session already in a Sandbox may not move again", () => {
+  test("a session already in a Sandbox may not move to the same provider", () => {
+    const inBox = { ...host, sandbox: { provider: "box", sandboxId: "bx_1" } };
+    expect(sandboxAttachRefusal(inBox)).toMatch(/already runs on box/);
+    expect(sandboxAttachRefusal(inBox, "box")).toMatch(/already runs on box/);
+  });
+
+  test("a session in a Sandbox may move to another provider", () => {
     expect(
-      sandboxAttachRefusal({
-        ...host,
-        sandbox: { provider: "box", sandboxId: "bx_1" },
-      }),
-    ).toMatch(/already runs in a Sandbox/);
+      sandboxAttachRefusal(
+        { ...host, sandbox: { provider: "box", sandboxId: "bx_1" } },
+        "daytona",
+      ),
+    ).toBeNull();
   });
 
   test("a move that has not materialized may be retried", () => {
@@ -113,6 +120,57 @@ describe("sandboxAttachRefusal", () => {
     expect(sandboxAttachRefusal({ mode: "code", repo: undefined })).toMatch(
       /code sessions/,
     );
+  });
+});
+
+describe("sandboxDetachRefusal", () => {
+  const inSandbox = {
+    mode: "code" as const,
+    repo: "opensession",
+    sandbox: { provider: "daytona", sandboxId: "dt_1" },
+  };
+
+  test("a Sandbox code session may move back to this machine", () => {
+    expect(sandboxDetachRefusal(inSandbox)).toBeNull();
+  });
+
+  test("a host session, an automation, and a non-code session are refused", () => {
+    expect(
+      sandboxDetachRefusal({ ...inSandbox, sandbox: { provider: "local" } }),
+    ).toMatch(/already runs on this machine/);
+    expect(sandboxDetachRefusal({ ...inSandbox, sandbox: undefined })).toMatch(
+      /already runs on this machine/,
+    );
+    expect(
+      sandboxDetachRefusal({ ...inSandbox, automationId: "plain-triage" }),
+    ).toMatch(/automation/);
+    expect(sandboxDetachRefusal({ ...inSandbox, mode: "ask" })).toMatch(
+      /code sessions/,
+    );
+  });
+});
+
+describe("recreateSandboxSpec checkpoint", () => {
+  test("carries the session's last checkpoint so the rebuild restores it", () => {
+    const checkpoint = {
+      ref: `refs/opensession/checkpoints/${session.id}`,
+      commit: "c".repeat(40),
+      head: "h".repeat(40),
+      tree: "t".repeat(40),
+      branch: session.branch,
+      at: "2026-09-16T10:00:00.000Z",
+    };
+    expect(
+      recreateSandboxSpec({ ...session, sandboxCheckpoint: checkpoint }, null)
+        .restoreCheckpoint,
+    ).toEqual({
+      ref: checkpoint.ref,
+      commit: checkpoint.commit,
+      branch: checkpoint.branch,
+    });
+    expect(
+      recreateSandboxSpec(session, null).restoreCheckpoint,
+    ).toBeUndefined();
   });
 });
 

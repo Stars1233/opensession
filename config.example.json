@@ -4,7 +4,8 @@
     "Environment variables override config values. Repositories are authoritative: when `repos` is present, only those entries are registered.",
     "With no `repos` configured, a server install registers this Open Session checkout itself as a shared `opensession` repo. Set `repos` for real team projects.",
     "External integrations and instance seed routines are opt-in (`enabled: true`).",
-    "selfDev controls sessions on the self-hosted Open Session repo itself: 'shared' (default) = all sessions edit the live shared checkout on the default branch; 'worktree' = self-sessions get isolated worktrees + the normal branch/PR flow like every other repo.",
+    "selfDev controls checkout isolation: 'shared' (default) = sessions edit the registered shared checkout; 'worktree' = isolated branch worktrees. It does not select publication policy.",
+    "Each repo can set publicationMode: 'pull-request' (default) or 'direct' (interactive code sessions publish a checked fast-forward to the default branch without a PR). Explicit PR tasks and automation restrictions remain unchanged.",
     "Repos are GitHub-hosted by default. To host one on code.storage instead, set host: 'codestorage' and csRepo (the repo id/path) on the repo entry \u2014 see the 'widget-cs' example \u2014 and configure integrations.codestorage (org + PKCS8 private key that signs the customer-issued JWTs)."
   ],
   "onboardingCompleted": true,
@@ -65,7 +66,8 @@
       "wtPrefix": "opensession",
       "defaultBranch": "main",
       "ghRepo": "acme/opensession",
-      "sharedCheckout": true
+      "sharedCheckout": true,
+      "publicationMode": "pull-request"
     },
     "widget-cs": {
       "_comment": "Example code.storage-hosted repo (delete or fill in): no ghRepo/PRs \u2014 branches are reviewed against defaultBranch and merged via the code.storage merge API. Requires integrations.codestorage below.",

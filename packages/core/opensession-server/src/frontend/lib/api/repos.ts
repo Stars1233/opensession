@@ -217,30 +217,58 @@ export async function registerRepoApi(input: {
   return repo;
 }
 
-/** What `POST /api/setup/repos` answers for a repository this server just
- *  started: enough for a picker to select it before `/repos` reloads. */
+/** What `POST /api/setup/repos` answers for a repository just started:
+ *  enough for a picker to select it before `/repos` reloads. */
 export interface CreatedRepo {
   id: string;
   label?: string;
   defaultBranch?: string;
+  /** `owner/name` when it was created on GitHub; absent for server-only. */
+  ghRepo?: string;
 }
 
 /**
- * Start an empty repository on this server and register it (Settings →
- * Repositories → New, and the Project picker's "New repository"). Admin-only,
- * like every setup route. The server makes the first commit, so the answer
- * is a repo a code session can branch from immediately.
+ * Start a repository and register it (Settings → Repositories → New, and the
+ * Project picker's "New repository"). With `owner`, a private repository is
+ * created in that GitHub organization and cloned here; without, an empty
+ * repository on this server. Either way the first commit exists, so the
+ * answer is a repo a code session can branch from immediately. Admin-only,
+ * like every setup route.
  */
 export async function createRepoApi(input: {
   name: string;
+  owner?: string;
 }): Promise<CreatedRepo> {
   const repo = await request<CreatedRepo>("/setup/repos", {
     method: "POST",
-    body: { source: "new", name: input.name },
+    // An undefined owner is dropped by JSON; the server reads its absence as
+    // "this server only".
+    body: { source: "new", name: input.name, owner: input.owner },
     label: "Failed to create the repository",
   });
   notifyReposChanged();
   return repo;
+}
+
+export interface GithubOwner {
+  login: string;
+  /** GitHub's account type: "User" or "Organization". */
+  type: string;
+  /** The instance's default installation, when one is pinned. */
+  selected: boolean;
+}
+
+/** The accounts the GitHub App is installed on, for choosing where a new
+ *  repository lives. `owners` is null when the App identity cannot answer
+ *  (no App, or GitHub unreachable), which is "unknown", not "none". */
+export function fetchGithubOwnersApi(): Promise<{
+  appConfigured: boolean;
+  appInstallUrl: string | null;
+  owners: GithubOwner[] | null;
+}> {
+  return request("/setup/github/owners", {
+    label: "Failed to load GitHub accounts",
+  });
 }
 
 export interface AttachedRepo {

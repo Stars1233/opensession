@@ -10,6 +10,7 @@ import {
 } from "../lib/api/sandboxes";
 import { IconBox, IconConnections } from "./icons";
 import { errorMessage } from "../lib/error-message";
+import { ApiError } from "../lib/api/request";
 
 type SandboxRef = {
   provider: string;
@@ -151,11 +152,25 @@ export function SandboxBadge({
         ? "bg-yellow"
         : "bg-faint";
 
-  async function act(action: "pause" | "resume" | "recreate") {
+  const checkpointAge = (() => {
+    const at = status?.checkpoint?.at;
+    if (!at) return null;
+    const minutes = Math.max(
+      0,
+      Math.round((Date.now() - Date.parse(at)) / 60_000),
+    );
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `${hours} h ago`;
+    return `${Math.round(hours / 24)} d ago`;
+  })();
+
+  async function act(action: "pause" | "resume" | "recreate" | "checkpoint") {
     if (
       action === "recreate" &&
       !window.confirm(
-        "Recreate this sandbox? Unpushed files that exist only inside it will be deleted.",
+        "Rebuild this sandbox on a fresh machine? Its current files are checkpointed first and restored on the new one.",
       )
     )
       return;
@@ -165,6 +180,23 @@ export function SandboxBadge({
       setStatus(await sandboxAction(sessionId, action));
     })()
       .catch(async (cause) => {
+        // 428 on rebuild: the Sandbox is reachable but its files cannot be
+        // checkpointed. Only an explicit second answer throws them away.
+        if (
+          action === "recreate" &&
+          cause instanceof ApiError &&
+          cause.status === 428
+        ) {
+          if (!window.confirm(cause.message)) return;
+          try {
+            setStatus(
+              await sandboxAction(sessionId, action, { discard: true }),
+            );
+          } catch (again) {
+            setError(errorMessage(again, "Could not rebuild sandbox"));
+          }
+          return;
+        }
         setError(errorMessage(cause, `Could not ${action} sandbox`));
       })
       .finally(async () => {
@@ -237,6 +269,20 @@ export function SandboxBadge({
               {status.cwd}
             </div>
           ) : null}
+          {status ? (
+            <div
+              className="mt-1 text-meta text-faint"
+              title={
+                status.checkpoint
+                  ? `Checkpoint ${status.checkpoint.commit.slice(0, 12)} on ${status.checkpoint.branch}, saved to origin`
+                  : undefined
+              }
+            >
+              {checkpointAge
+                ? `Checkpoint saved ${checkpointAge}`
+                : "No checkpoint yet"}
+            </div>
+          ) : null}
         </div>
         {lifecycle === "awake" && status?.canDesktop ? (
           <button
@@ -266,15 +312,25 @@ export function SandboxBadge({
             {working === "resume" ? "Waking…" : "Wake sandbox"}
           </button>
         ) : null}
+        {lifecycle === "awake" ? (
+          <button
+            className={actionClass}
+            disabled={Boolean(working || status?.busy)}
+            onClick={() => void act("checkpoint")}
+          >
+            {working === "checkpoint" ? "Saving…" : "Save checkpoint now"}
+          </button>
+        ) : null}
         {status?.materialized !== false || state !== "gone" ? (
           <button
-            className={cn(actionClass, "text-red hover:text-red")}
+            className={cn(
+              actionClass,
+              status?.checkpoint ? undefined : "text-red hover:text-red",
+            )}
             disabled={Boolean(working || status?.busy)}
             onClick={() => void act("recreate")}
           >
-            {working === "recreate"
-              ? "Recreating…"
-              : "Recreate from clean image"}
+            {working === "recreate" ? "Rebuilding…" : "Rebuild sandbox"}
           </button>
         ) : null}
         {status?.logs?.setup || status?.logs?.resume ? (

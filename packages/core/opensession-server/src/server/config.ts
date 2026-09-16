@@ -84,6 +84,9 @@ export interface IngressSection {
  *  configuredSelfDev(). */
 export type SelfDevMode = "shared" | "worktree";
 
+/** Publication preference for interactive code sessions, not a grant of authority. */
+export type RepoPublicationMode = "pull-request" | "direct";
+
 /** A `repos` entry in config.json — partial; merged over the built-in repo
  *  with the same id, or (with at least `repo`) adds a new one. */
 export interface RepoSection {
@@ -102,6 +105,8 @@ export interface RepoSection {
   /** code.storage repo id/path (the JWT `repo` claim), e.g. "acme/widget". */
   csRepo?: string;
   sharedCheckout?: boolean;
+  /** Worktree publication preference; absent = pull-request. */
+  publicationMode?: RepoPublicationMode;
   /** Marks this repo as the instance default (see defaultRepo()). */
   default?: boolean;
   /** PNG served as the repo's tile icon (absolute path, or relative to the
@@ -272,6 +277,8 @@ export interface Repo {
   // branch (see "Open Session dev workflow" in AGENTS.md: add → commit → push,
   // never reset/discard the shared repo).
   sharedCheckout?: boolean;
+  /** Worktree publication preference; absent = pull-request. */
+  publicationMode?: RepoPublicationMode;
   /** Instance default repo (defaultRepo()). */
   default?: boolean;
   /** Tile-icon PNG path (see RepoSection.icon). */
@@ -373,6 +380,10 @@ function parseRepoSection(v: unknown): RepoSection | undefined {
   // Unknown host values are dropped → the repo stays a plain GitHub repo.
   const host: RepoSection["host"] =
     rawHost === "github" || rawHost === "codestorage" ? rawHost : undefined;
+  const publicationMode: RepoPublicationMode | undefined =
+    o.publicationMode === "direct" || o.publicationMode === "pull-request"
+      ? o.publicationMode
+      : undefined;
   const rawIconSource = str(o.iconSource);
   const iconSource: RepoSection["iconSource"] =
     rawIconSource === "github" || rawIconSource === "upload"
@@ -388,6 +399,7 @@ function parseRepoSection(v: unknown): RepoSection | undefined {
     host,
     csRepo: str(o.csRepo),
     sharedCheckout: bool(o.sharedCheckout),
+    publicationMode,
     default: bool(o.default),
     icon: str(o.icon),
     iconSource,
@@ -774,6 +786,7 @@ export function configuredRepos(): Record<string, Repo> {
           host: entry.host,
           csRepo: entry.csRepo,
           sharedCheckout: entry.sharedCheckout,
+          publicationMode: entry.publicationMode,
           default: entry.default,
           icon: entry.icon,
           iconSource: entry.iconSource,

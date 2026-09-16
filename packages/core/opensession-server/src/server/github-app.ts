@@ -29,6 +29,7 @@ import { writeFileAtomic } from "./shared/atomic-write";
 import {
   GITHUB_APP_CODE_PERMISSIONS as CODE_PERMISSIONS,
   GITHUB_APP_READ_PERMISSIONS as READ_PERMISSIONS,
+  GITHUB_APP_REPO_CREATE_PERMISSIONS as REPO_CREATE_PERMISSIONS,
   GITHUB_APP_WRITE_PERMISSIONS as WRITE_PERMISSIONS,
   withReadOnlyContents,
 } from "../shared/github-app-permissions";
@@ -525,6 +526,83 @@ export async function commitGithubAppKeyMutation<T>(
     else writeFileAtomic(path, previous, 0o600);
     clearAppCaches();
     throw error;
+  }
+}
+
+export type GithubRepoCreateGrant =
+  | { ok: true; token: string; installationId: number }
+  | {
+      ok: false;
+      reason:
+        | "unconfigured"
+        | "not-installed"
+        | "personal-account"
+        | "permission-pending"
+        | "unavailable";
+      installationId?: number;
+    };
+
+/**
+ * The one-shot token behind "New repository" on GitHub: administration:write
+ * against the installation for `owner`, minted for this call and never
+ * cached, so nothing that later reads the token cache can find it. GitHub
+ * lets an installation create repositories only in an organization (a
+ * personal account needs the person's own token), and an installation that
+ * has not approved the added permission refuses the mint, so both come back
+ * as reasons the caller can turn into a sentence rather than a bare failure.
+ */
+export async function githubAppRepoCreateToken(
+  owner: string,
+): Promise<GithubRepoCreateGrant> {
+  if (!githubConfiguredCredential())
+    return { ok: false, reason: "unconfigured" };
+  const headers = await appAuthHeaders().catch(() => null);
+  if (!headers) return { ok: false, reason: "unconfigured" };
+  const wanted = owner.toLowerCase();
+  let installs = await listGithubAppInstallations();
+  let installation = installs?.find((i) => i.login.toLowerCase() === wanted);
+  if (!installation && installs) {
+    installs = await listGithubAppInstallations({ fresh: true });
+    installation = installs?.find((i) => i.login.toLowerCase() === wanted);
+  }
+  if (!installs) return { ok: false, reason: "unavailable" };
+  if (!installation) return { ok: false, reason: "not-installed" };
+  if (installation.type !== "Organization") {
+    return {
+      ok: false,
+      reason: "personal-account",
+      installationId: installation.id,
+    };
+  }
+  try {
+    const res = await fetch(
+      `https://api.github.com/app/installations/${installation.id}/access_tokens`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ permissions: REPO_CREATE_PERMISSIONS }),
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    const tok = (await res.json().catch(() => null)) as {
+      token?: string;
+    } | null;
+    if (res.ok && tok?.token) {
+      return { ok: true, token: tok.token, installationId: installation.id };
+    }
+    // A set that names a permission the installation does not hold is
+    // refused as a whole (422); the operator has not approved the update yet.
+    return {
+      ok: false,
+      reason: res.status === 422 ? "permission-pending" : "unavailable",
+      installationId: installation.id,
+    };
+  } catch {
+    return {
+      ok: false,
+      reason: "unavailable",
+      installationId: installation.id,
+    };
   }
 }
 

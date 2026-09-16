@@ -53,6 +53,20 @@ afterEach(() => {
 });
 
 describe("workspace setup authorization", () => {
+  test("owner discovery and GitHub creation require an administrator", async () => {
+    roleAwareConfig();
+    for (const [path, method] of [
+      ["/api/setup/github/owners", "GET"],
+      ["/api/setup/repos", "POST"],
+    ]) {
+      const ctx = context("grace");
+      ctx.url = new URL(`http://localhost${path}`);
+      ctx.path = path!;
+      ctx.req = new Request(ctx.url, { method });
+      expect((await handleSetupRoutes(ctx))?.status).toBe(403);
+    }
+  });
+
   test("rejects configured non-admin teammates", async () => {
     roleAwareConfig();
     const response = await handleSetupRoutes(context("grace"));
@@ -131,6 +145,7 @@ describe("GitHub App onboarding link", () => {
       // and issues (PR/issue comments) included, so a created App holds every
       // scope the installation-token mints request.
       actions: "read",
+      administration: "write",
       checks: "read",
       statuses: "read",
       contents: "write",

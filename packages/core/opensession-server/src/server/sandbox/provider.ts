@@ -71,6 +71,11 @@ export interface SandboxSessionSpec {
    * verification. Skips templates, private seed files, runner bootstrap,
    * dial-back, and repository lifecycle hooks. */
   sourceVerification?: boolean;
+  /** A workspace checkpoint on origin (sandbox/checkpoint.ts) to restore when
+   * this ensure() materializes a FRESH workspace: the branch lands on the
+   * checkpoint's head with its uncommitted changes in place. A workspace
+   * that already exists on the sandbox disk keeps that disk instead. */
+  restoreCheckpoint?: { ref: string; commit: string; branch: string };
 }
 
 export interface ExecOpts {

@@ -29,6 +29,7 @@ import { createDesktopMcpServer } from "./desktop-mcp";
 import { getSandboxProvider } from "./sandbox";
 import { createWalkthroughMcpServer } from "../agents/slack/walkthrough-tools";
 import { createSlackComposeMcpServer } from "../agents/slack/slack-compose-tools";
+import { createPlainDiscussionMcpServer } from "../agents/plain/discussion-tools";
 import { createMemoryMcpServer } from "../agents/slack/memory-tools";
 import {
   createGoalsMcpServer,
@@ -74,6 +75,7 @@ import {
 import { makeAskHandler } from "./asks";
 import { createScheduleMcpServer } from "./schedule-mcp";
 import { activeSandboxFor } from "./session-sandbox";
+import { portalsInSandbox, sandboxForPortals } from "./portal-sandbox";
 
 /** The session's primary repo id, for the papercuts toggle (undefined =
  *  session-only session, which logs under no repo and is always enabled). */
@@ -126,6 +128,29 @@ function desktopServerFor(sessionId: string): Record<string, unknown> {
           ? provider.desktopControl(sandbox.id)
           : null;
       },
+    }),
+  };
+}
+
+/**
+ * The whole in-process set for a session that answers a Plain discussion
+ * (plainDiscussionId): the approval-gated customer reply / Stripe action
+ * (discussion-tools.ts) and nothing else. A teammate drives the discussion,
+ * but the ticket text the session reads is untrusted, so it gets the triage
+ * automation's surface — external connectors under the discussion deny-set,
+ * none of the interactive siblings (admin, sessions, workflows, publish,
+ * self-deploy, keychain). Served on the opening turn, every resume, and the
+ * run-rpc fallback builder below, so a hosted or sandboxed run cannot ask
+ * for more.
+ */
+export function plainDiscussionSessionMcp(
+  sessionId: string,
+  discussionId: string,
+): Record<string, unknown> {
+  return {
+    "opensession-plain-discussion": createPlainDiscussionMcpServer({
+      sessionId,
+      discussionId,
     }),
   };
 }
@@ -269,12 +294,25 @@ export function interactiveMcpServers(
           "opensession-portals": createPortalsMcpServer({
             sessionId,
             worktreeDir: () => findSession(sessionId)?.worktreeDir || undefined,
+            // Portals run in the session's workspace Sandbox, or, for a
+            // session on this machine whose project asks for it, in a
+            // Portal Sandbox provisioned on the first start (portal-sandbox.ts).
             sandbox: async (options) => {
               const session = findSession(sessionId);
-              return session ? activeSandboxFor(session, options) : null;
+              return session
+                ? sandboxForPortals(session, {
+                    wake: options?.wake,
+                    provision: options?.wake,
+                    // The agent's own call, mid-turn: its worktree is at
+                    // rest while the tool runs.
+                    ownTurn: true,
+                  })
+                : null;
             },
-            hasSandbox: () =>
-              Boolean(findSession(sessionId)?.sandbox?.sandboxId),
+            hasSandbox: () => {
+              const session = findSession(sessionId);
+              return Boolean(session && portalsInSandbox(session));
+            },
             runner: () => findSession(sessionId),
             verifyEditorFixture: (leaseId) => {
               const session = findSession(sessionId);
@@ -495,6 +533,11 @@ registerInteractiveMcpBuilder(
     const session = sessionId ? findSession(sessionId) : undefined;
     if (sessionId && session?.automation) {
       return automationSessionMcp(session, sessionId, { humanPrompter });
+    }
+    // Same fail-closed rule for a Plain discussion session: untrusted ticket
+    // text, so only the approval server (plainDiscussionSessionMcp above).
+    if (sessionId && session?.plainDiscussionId) {
+      return plainDiscussionSessionMcp(sessionId, session.plainDiscussionId);
     }
     const servers = interactiveMcpServers(user, sessionId, promptEntryId);
     const goalId = session?.goalId;

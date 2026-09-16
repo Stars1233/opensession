@@ -37,6 +37,19 @@ export interface PreviewStatus {
     | "sleeping"
     | "waking"
     | "needs_attention";
+  /** Set for a session on this machine whose Portals run in a Sandbox of
+   *  their own: the provider and, when the machine is not the live one, its
+   *  state. */
+  portalSandbox?: {
+    provider: string;
+    lifecycle?:
+      | "preparing"
+      | "awake"
+      | "sleeping"
+      | "waking"
+      | "needs_attention";
+    error?: string;
+  };
 }
 
 export async function fetchPreview(
