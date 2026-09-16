@@ -33,6 +33,7 @@ import {
   findSessionAsync,
   touchNativeSession,
   touchNativeSessionStrict,
+  updateSessionFile,
 } from "./session-cache";
 import {
   activePortalSandboxFor,
@@ -214,17 +215,28 @@ async function provisionPortalSandbox(
   // The machine mirrors this worktree, and the checkpoint just taken is the
   // only faithful copy of it. Captured before anything is recorded: a
   // session at work is refused outright, which is nobody's failure to show.
+  // The preparing record is written on that same lane step, after the
+  // session is seen to still want a Portal Sandbox: a move queued behind
+  // it then finds the record and releases it, instead of the record landing
+  // beside the workspace Sandbox the move recorded meanwhile.
   const outcome = await withSessionLifecycleLane(session.id, async () => {
     if (!ownTurn) refuseWhileTurnRuns(session.id);
-    return checkpointHostWorkspace(session, dir);
-  });
-  await touchNativeSessionStrict(session.id, {
-    portalSandbox: { provider, lifecycle: "preparing" },
+    const current = await findSessionAsync(session.id);
+    if (!current) throw new Error("the session was deleted");
+    if (workspaceSandboxClaimed(current))
+      throw new Error("the session is moving into a Sandbox");
+    const captured = await checkpointHostWorkspace(current, dir);
+    if (captured.state === "skipped") return captured;
+    await touchNativeSessionStrict(session.id, {
+      portalSandbox: { provider, lifecycle: "preparing" },
+    });
+    return captured;
   });
   // What the failure path may write: the preparing record until the machine
   // is recorded on the session; nothing once it is recorded (the record then
   // carries the machine, and a refresh failure is noted on it by the
-  // refresh itself) or once the session stopped wanting a Portal Sandbox.
+  // refresh itself). Once the session stopped wanting a Portal Sandbox, only
+  // the removal of a preparing record this attempt left behind.
   // (Assigned inside the lane callback, which the narrowing does not see.)
   let phase = "preparing" as "preparing" | "recorded" | "disowned";
   try {
@@ -296,6 +308,17 @@ async function provisionPortalSandbox(
             : String(teardownError),
         ),
       );
+      // The preparing record this attempt wrote, if it survived the move
+      // that disowned the machine, would show the Portals panel a Portal
+      // Sandbox preparing that never comes. Only that record, nothing a
+      // later attempt or the move wrote.
+      await updateSessionFile(session.id, (data) =>
+        data.portalSandbox?.provider === provider &&
+        !data.portalSandbox.sandboxId &&
+        data.portalSandbox.lifecycle === "preparing"
+          ? { ...data, portalSandbox: undefined }
+          : data,
+      ).catch(() => {});
       throw error;
     }
     console.log(
