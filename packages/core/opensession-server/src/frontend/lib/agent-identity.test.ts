@@ -31,3 +31,16 @@ test("uses the full identifier and distributes thousands of agents", () => {
   expect(names.size).toBeGreaterThan(9950);
   expect(avatars.size).toBeGreaterThan(1000);
 });
+
+test("workers inherit only the root surname, keeping their own first name and avatar", () => {
+  const parent = agentIdentity("main");
+  const worker = agentIdentity("worker");
+  const family = agentIdentity("worker", "main");
+  expect(family.name.split(" ")[0]).toBe(worker.name.split(" ")[0]);
+  expect(family.name.split(" ")[1]).toBe(parent.name.split(" ")[1]);
+  expect(family.seed).toBe(worker.seed);
+  expect(family.seed).not.toBe(parent.seed);
+  expect(agentIdentity("peer").name.split(" ")[1]).not.toBe(
+    parent.name.split(" ")[1],
+  );
+});

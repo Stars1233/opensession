@@ -647,14 +647,14 @@ export async function taskStatusImpl(
 
 /** Whether `taskId` is a child spawned by `caller` (its persisted
  *  parentSessionId), read from the live summary or the session file. */
-function spawnedByCaller(
+async function spawnedByCaller(
   taskId: string,
   caller: string | undefined,
   deps: SpawnTaskDeps,
-): boolean {
+): Promise<boolean> {
   if (!caller) return false;
   const parent =
-    deps.control.getSession(taskId)?.parentSessionId ??
+    (await deps.control.getSession(taskId))?.parentSessionId ??
     deps.readSessionFile(taskId)?.parentSessionId;
   return parent === caller;
 }
@@ -668,7 +668,10 @@ export async function cancelTaskImpl(
   // Without isAdmin (automationSelf, humanResume) this is not cancel_session
   // in disguise: only the caller's own spawned children may be cancelled,
   // however many other sessions list_sessions shows.
-  if (!ctx.isAdmin && !spawnedByCaller(args.taskId, ctx.currentSessionId, deps))
+  if (
+    !ctx.isAdmin &&
+    !(await spawnedByCaller(args.taskId, ctx.currentSessionId, deps))
+  )
     return `\`${args.taskId}\` was not spawned by this session; cancel_task only cancels tasks this session started with spawn_task.`;
   const ok = await deps.control.cancelSession(args.taskId, { requestId });
   return ok

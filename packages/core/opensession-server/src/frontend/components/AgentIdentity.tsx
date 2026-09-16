@@ -1,4 +1,6 @@
-import { agentIdentity } from "../lib/agent-identity";
+import { useAgentName, useAgentSessionTitle } from "../hooks/useAgentName";
+import { Tooltip } from "../ui/tooltip";
+import { IconHome } from "./icons";
 import { BASE_PATH } from "../lib/base";
 import { AgentAvatar } from "../ui/agent-avatar";
 import { cn } from "../ui/cn";
@@ -15,37 +17,69 @@ export function AgentIdentity({
   current?: boolean;
   className?: string;
 }) {
-  const name = sessionId ? agentIdentity(sessionId).name : "Unknown agent";
+  const name = useAgentName(sessionId);
+  const title = useAgentSessionTitle(sessionId);
+  const tooltip = [current ? "Current agent" : name, title]
+    .filter(Boolean)
+    .join("\n");
   const content = (
     <>
-      {sessionId && <AgentAvatar sessionId={sessionId} />}
-      <span className="min-w-0">
-        <span className="block truncate">{name}</span>
-        {current && (
-          <span className="block text-meta font-normal text-faint">
-            Current agent
-          </span>
-        )}
-      </span>
+      {sessionId && (
+        <span className="relative inline-flex shrink-0">
+          <AgentAvatar sessionId={sessionId} />
+          {current && (
+            <IconHome
+              size={14}
+              className="absolute -bottom-1 -right-1 rounded-full bg-surface text-dim"
+            />
+          )}
+        </span>
+      )}
+      <span className="truncate">{name}</span>
     </>
   );
   const classes = cn(
     "inline-flex min-w-0 items-center gap-2 text-label font-medium text-dim",
     className,
   );
-  return linked && !current && sessionId ? (
-    <a
-      href={`${BASE_PATH}/session/${encodeURIComponent(sessionId)}`}
-      data-session-id={sessionId}
-      aria-label={`Open ${name}'s session`}
-      className={cn(
-        classes,
-        "rounded-control hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring phone:min-h-11",
+  if (current)
+    return (
+      <Tooltip label={tooltip} multiline>
+        <span
+          role="img"
+          tabIndex={0}
+          aria-label={`Current agent: ${name}`}
+          className={cn(
+            classes,
+            "rounded-control focus-visible:outline-2 focus-visible:outline-focus-ring phone:min-h-11",
+          )}
+        >
+          {content}
+        </span>
+      </Tooltip>
+    );
+  return (
+    <Tooltip label={tooltip} multiline>
+      {linked && sessionId ? (
+        <a
+          href={`${BASE_PATH}/session/${encodeURIComponent(sessionId)}`}
+          data-session-id={sessionId}
+          aria-label={`Open ${name}'s session`}
+          className={cn(
+            classes,
+            "rounded-control hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring phone:min-h-11",
+          )}
+        >
+          {content}
+        </a>
+      ) : (
+        <span className={classes}>{content}</span>
       )}
-    >
-      {content}
-    </a>
-  ) : (
-    <span className={classes}>{content}</span>
+    </Tooltip>
   );
+}
+
+/** Plain text for compact session references, using the same reactive identity. */
+export function AgentName({ sessionId }: { sessionId: string }) {
+  return useAgentName(sessionId);
 }
