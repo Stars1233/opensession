@@ -28,6 +28,9 @@ const {
 } = require("./account-navigation");
 const packageConfig = require("../package.json").opensession || {};
 const nativeDictation = new NativeDictation();
+const { profileId } = require("./tailscale");
+const { TailnetWindows, fromLocalPage } = require("./tailnet-ui");
+let tailnetWindows = null;
 
 // AppKit can show its persistent-window crash-recovery prompt before Electron
 // finishes launching. On macOS 26 that modal can trap the browser process and
@@ -204,6 +207,7 @@ function readStoredAccounts() {
             label: String(account.label || new URL(url).host),
             url,
             lastUrl: resumableAccountUrl(url, account.lastUrl),
+            tailscaleProfileId: profileId(account.tailscaleProfileId),
           },
         ];
       });
@@ -1203,12 +1207,43 @@ function syncBackgroundAccountWindows() {
   }
 }
 
-function switchAccount(id, targetURL = null, target = activeWindow()) {
-  if (!target || target.isDestroyed()) return;
+async function switchAccount(
+  id,
+  targetURL = null,
+  target = activeWindow(),
+  switchNetwork = false,
+) {
+  if (
+    !target ||
+    target.isDestroyed() ||
+    tailnetWindows?.switching ||
+    tailnetWindows?.settingsWindow
+  )
+    return;
+  const requested = readStoredAccounts().accounts.find(
+    (account) => account.id === id,
+  );
+  if (!requested) return;
+  // Only explicit picker/menu/recovery actions opt in. Launch, focus, deep links
+  // and notifications must never change the Mac's network in the background.
+  if (switchNetwork && requested.tailscaleProfileId) {
+    rememberWindowAccountUrl(target);
+    if (
+      !(await tailnetWindows.connect(target, requested)) ||
+      target.isDestroyed()
+    )
+      return;
+  }
   const stored = readStoredAccounts();
   const account = stored.accounts.find((candidate) => candidate.id === id);
   const current = accountForWindow(target, stored);
-  if (!account || account.id === current?.id) return;
+  if (
+    !account ||
+    (!switchNetwork && account.id === current?.id) ||
+    account.url !== requested.url ||
+    account.tailscaleProfileId !== requested.tailscaleProfileId
+  )
+    return;
 
   // Keep each organization at its exact in-app URL. Loading the account root
   // delegated this to the web app's generic cold-start fallback, which could
@@ -1252,7 +1287,7 @@ function organizationAccountMenuItems(stored = readStoredAccounts()) {
     type: "radio",
     checked: account.id === selectedID,
     accelerator: index < 9 ? `CommandOrControl+Shift+${index + 1}` : undefined,
-    click: () => switchAccount(account.id),
+    click: () => switchAccount(account.id, null, activeWindow(), true),
   }));
 }
 
@@ -1279,6 +1314,13 @@ function buildAppMenu() {
                 click: () => {
                   const target = showWindow();
                   showSetup("app", target, true);
+                },
+              },
+              {
+                label: "Tailscale profiles…",
+                click: () => {
+                  const target = showWindow();
+                  tailnetWindows.settings(target, accountForWindow(target)?.id);
                 },
               },
               {
@@ -1358,6 +1400,20 @@ app.whenReady().then(async () => {
     },
   );
 
+  tailnetWindows = new TailnetWindows({
+    readAccounts: readStoredAccounts,
+    writeAccounts: writeStoredAccounts,
+    probe: probeServer,
+    connectAccount: (id, target) => void switchAccount(id, null, target, true),
+    isQuitting: () => quitting,
+  });
+  tailnetWindows.register();
+  ipcMain.on("os1:tailnet-choose", (event) => {
+    const target = eventWindow(event);
+    if (!fromLocalPage(event, target, "offline.html")) return;
+    tailnetWindows.settings(target, accountForWindow(target)?.id);
+  });
+
   ipcMain.on("os1:set-badge", (e, count) => {
     const source = e.senderFrame?.url ?? "";
     if (!inWindow(source)) return;
@@ -1419,8 +1475,14 @@ app.whenReady().then(async () => {
     };
   });
   ipcMain.on("os1:organizations-switch", (e, id) => {
-    if (fromActiveOrganizationPicker(e) && typeof id === "string") {
-      switchAccount(id, null, eventWindow(e));
+    const target = eventWindow(e);
+    if (
+      fromActiveOrganizationPicker(e) &&
+      typeof id === "string" &&
+      target?.isFocused() &&
+      e.senderFrame === target.webContents.mainFrame
+    ) {
+      void switchAccount(id, null, target, true);
     }
   });
   ipcMain.handle(

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'"
+    />
+    <title>Connecting to your tailnet</title>
+    <link rel="stylesheet" href="shell.css" />
+    <link rel="stylesheet" href="tailnet.css" />
+    <script src="tailnet-connecting.js" defer></script>
+  </head>
+  <body>
+    <main class="tailnet">
+      <img class="mark" src="mark.png" width="76" height="76" alt="" />
+      <h1 id="title">Connecting…</h1>
+      <p class="host" id="host"></p>
+      <p class="message" id="message" role="status" aria-live="polite">
+        Switching Tailscale and checking the server.
+      </p>
+      <div class="actions">
+        <button class="button" id="retry" hidden>Retry</button>
+        <button class="button ghost" id="back" hidden>Switch back</button>
+        <button class="button ghost" id="choose" hidden>
+          Choose another profile
+        </button>
+      </div>
+      <div class="actions secondary">
+        <button class="button ghost" id="open">Open Tailscale</button>
+        <button class="button ghost" id="close" hidden>
+          Keep current network
+        </button>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+  </body>
+</html>

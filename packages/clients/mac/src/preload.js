@@ -25,6 +25,21 @@ contextBridge.exposeInMainWorld("os1", {
     remove: (id) => ipcRenderer.invoke("os1:organizations-remove", id),
     manage: () => ipcRenderer.send("os1:organizations-manage"),
   },
+  // Local shell windows only. The main process checks the exact packaged page
+  // and main frame; remote servers cannot enumerate profiles or set bindings.
+  tailnet: {
+    choose: () => ipcRenderer.send("os1:tailnet-choose"),
+    settings: () => ipcRenderer.invoke("os1:tailnet-settings"),
+    save: (id, profileId, connect) =>
+      ipcRenderer.invoke("os1:tailnet-save", id, profileId, connect),
+    state: () => ipcRenderer.invoke("os1:tailnet-state"),
+    action: (action) => ipcRenderer.invoke("os1:tailnet-action", action),
+    onState: (cb) => {
+      const listener = (_event, state) => cb(state);
+      ipcRenderer.on("os1:tailnet-state", listener);
+      return () => ipcRenderer.removeListener("os1:tailnet-state", listener);
+    },
+  },
   // Electron does not connect Chromium's Web Speech API to a recognition
   // service. Stream the renderer's microphone PCM to the shell's signed native
   // helper instead, which uses Apple's on-device recognizer when available.

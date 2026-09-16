@@ -1,0 +1,44 @@
+.tailnet {
+  width: 440px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 24px;
+}
+.tailnet h1 {
+  margin-top: 0;
+}
+.tailnet .mark + h1 {
+  margin-top: 20px;
+}
+.tailnet form {
+  width: 100%;
+  text-align: left;
+  margin-top: 24px;
+}
+.tailnet label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.tailnet .field {
+  width: 100%;
+  margin: 0 0 18px;
+  min-height: 40px;
+  text-align: left;
+}
+.tailnet .warning {
+  font-size: 13px;
+  margin: 0;
+}
+.tailnet .button {
+  min-height: 40px;
+  font-size: 13px;
+}
+.tailnet .secondary {
+  margin-top: 12px;
+}
+.tailnet #status {
+  font-size: 12px;
+  color: var(--text-dim);
+}

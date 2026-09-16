@@ -15,6 +15,7 @@
       <p class="host" id="host"></p>
       <div class="actions">
         <button class="button" id="retry">Try again</button>
+        <button class="button ghost" id="tailnet">Choose tailnet…</button>
         <button class="button ghost" id="change">Change server</button>
       </div>
       <p id="status" role="status" aria-live="polite"></p>
@@ -46,6 +47,9 @@
       // here, and only one of them is fixed by waiting.
       document.getElementById("change").addEventListener("click", () => {
         if (window.os1 && window.os1.server) window.os1.server.open();
+      });
+      document.getElementById("tailnet").addEventListener("click", () => {
+        window.os1?.tailnet?.choose();
       });
       probe();
       setInterval(probe, 5000);

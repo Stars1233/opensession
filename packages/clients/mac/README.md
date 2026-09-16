@@ -91,6 +91,42 @@ the first-run screen offers with `opensession.defaultServer` in `package.json`
 (or `OS1_CLOUD_URL`); a profile that already worked keeps using it and is never
 asked.
 
+## Local Tailscale profiles
+
+**OS → Organizations → Tailscale profiles…** binds an organization to a saved
+Tailscale profile on this Mac. Choose **Save only** to configure it without
+changing networks, or **Save and connect** to connect now. Profiles must already
+be signed in through Tailscale. **Don't change Tailscale** is the default and
+removes an existing binding.
+
+The top-left organization picker and the native organization menu switch to the
+bound profile before opening the organization's saved page. This changes
+networking for the **whole Mac**, including other apps, SSH connections, and
+other Open Session windows. Enabling a binding requires a native confirmation.
+Launch, window focus, notifications, deep links, and background windows never
+switch networks automatically.
+
+If a server is unreachable, **Choose tailnet…** on the offline screen opens the
+same local settings, even without a server connection. The connection window
+has **Retry**, **Switch back** (when a previous profile is known), **Choose another
+profile**, and **Open Tailscale** recovery actions. Closing a failed attempt
+keeps the current network and the previous organization. Switching back is
+explicit and will not override a profile changed outside Open Session.
+
+Only the profile ID is stored alongside the organization in the local
+`server.json`; nothing is sent to the server and no Tailscale credentials are
+stored. The shell uses the installed Tailscale app's CLI, or the Homebrew CLI
+when the app binary is absent. It requires `tailscale switch --list --json`
+support. CLI calls and server probes have deadlines, never invoke a shell or
+request sudo, and errors leave the local recovery UI available. Only the shell's
+owned, packaged main-frame settings pages can enumerate profiles or change
+bindings. Remote content can only request a switch to an already configured
+organization from the focused organization picker.
+
+Verification: `bun test ./packages/clients/mac/src/`. Unit tests use a fake CLI
+and never change the host's network. Real profile switching still needs macOS
+verification with two already signed-in Tailscale profiles.
+
 ## Architecture
 
 - `src/main.js` — sandboxed `BrowserWindow`s that each own an organization and
