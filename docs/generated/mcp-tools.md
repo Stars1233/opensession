@@ -56,7 +56,7 @@ touches an in-process tool:
 | [`opensession-desktop`](#opensession-desktop) | 8 | interactive | Needs a sandboxed session. |
 | [`opensession-walkthrough`](#opensession-walkthrough) | 2 | interactive | Needs a session id. |
 | [`opensession-slack`](#opensession-slack) | 1 | interactive | Needs a session id. |
-| [`opensession-plain-discussion`](#opensession-plain-discussion) | 2 | interactive | Only a session that answers a Plain discussion (plainDiscussionId), which carries this server alone instead of the interactive set. |
+| [`opensession-plain-discussion`](#opensession-plain-discussion) | 2 | interactive | Only a session that answers a Plain discussion (plainDiscussionId): an Ask Sidekick session carries this server alone instead of the interactive set; an auto-triage session that reports into a discussion carries it beside the automation-bar set on its later turns. |
 | [`opensession-ask`](#opensession-ask) | 1 | interactive, Slack loop | Needs a session id. |
 | [`opensession-workflows`](#opensession-workflows) | 8 | interactive, automation | Automation runs get it ONLY with the human-set `workflows` flag. |
 | [`opensession-assets`](#opensession-assets) | 4 | interactive | Needs a session id. Works in read-only Ask mode — assets land outside the checkout. |
@@ -794,7 +794,7 @@ Reply to the customer or run a Stripe action from a Plain Ask Sidekick discussio
 - **Source** `packages/core/opensession-server/src/agents/plain/discussion-tools.ts`
 - **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`, `packages/core/opensession-server/src/server/session-create.ts`, `packages/core/opensession-server/src/server/run-session.ts`
 - **Runs** interactive
-- **Condition** Only a session that answers a Plain discussion (plainDiscussionId), which carries this server alone instead of the interactive set.
+- **Condition** Only a session that answers a Plain discussion (plainDiscussionId): an Ask Sidekick session carries this server alone instead of the interactive set; an auto-triage session that reports into a discussion carries it beside the automation-bar set on its later turns.
 
 ### `reply_to_customer`
 

@@ -818,7 +818,9 @@ export async function handleWebhook(
     );
   }
 
-  // Archive triage sessions when their ticket is done
+  // Archive triage sessions when their ticket is done. Their discussions are
+  // resolved on the same path (plain-archive.ts), which the safety sweep
+  // shares, so a missed webhook or a failed resolution is retried there.
   if (
     eventType === "thread.thread_status_transitioned" &&
     thread.status === "DONE"

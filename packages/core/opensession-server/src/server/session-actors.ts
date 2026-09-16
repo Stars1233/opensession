@@ -31,6 +31,11 @@ export const AUTOMATION_MACHINE_USER = "Automation";
 /** Sender for sessions the GitHub review agent starts. */
 export const GITHUB_ACTOR = "GitHub";
 
+/** Sender of a turn relayed from a Plain discussion (Ask Sidekick). A
+ *  teammate wrote it, but the name is the channel, not a person: it must
+ *  not unlock what a present person unlocks, nor bill a subscription. */
+export const PLAIN_ACTOR = "Plain";
+
 /** Suffix an automation's own ticks carry as `createdBy`/sender:
  *  `"<automation name> (automation)"` (automations.ts). */
 export const AUTOMATION_ACTOR_SUFFIX = " (automation)";
@@ -126,6 +131,7 @@ export function isMachineActor(createdBy?: string | null): boolean {
     lower === SYSTEM_RESTART_USER ||
     lower === AUTOMATION_MACHINE_USER.toLowerCase() ||
     lower === GITHUB_ACTOR.toLowerCase() ||
+    lower === PLAIN_ACTOR.toLowerCase() ||
     lower.endsWith(AUTOMATION_ACTOR_SUFFIX) ||
     // The agent's own name: a session it started with no person to credit.
     sameBrand(name, personaName()) ||

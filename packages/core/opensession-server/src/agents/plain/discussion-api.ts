@@ -112,6 +112,51 @@ export function keyedOrder(): <T>(
 /** Run `fn` after every earlier API call queued for this discussion. */
 export const withDiscussionOrder = keyedOrder();
 
+/** Open an AGENT_SESSION discussion on a thread, owned by this agent, seeded
+ *  with `markdownContent` as the agent's own first message. Returns its id. */
+export async function createDiscussion(input: {
+  threadId: string;
+  markdownContent: string;
+}): Promise<string> {
+  const d = await gql<{
+    createDiscussion: {
+      discussion: { id: string } | null;
+      error: MutationError;
+    };
+  }>(
+    `mutation($input: CreateDiscussionInput!) {
+      createDiscussion(input: $input) { discussion { id } error { message code } }
+    }`,
+    {
+      input: {
+        threadId: input.threadId,
+        type: "AGENT_SESSION",
+        agentMachineUserId: await agentMachineUserId(),
+        markdownContent: input.markdownContent,
+      },
+    },
+  );
+  assertOk("createDiscussion", d.createDiscussion.error);
+  const id = d.createDiscussion.discussion?.id;
+  if (!id) throw new Error("createDiscussion returned no discussion");
+  return id;
+}
+
+export async function resolveDiscussion(discussionId: string): Promise<void> {
+  const d = await gql<{
+    changeThreadDiscussionStatus: { error: MutationError };
+  }>(
+    `mutation($input: ChangeThreadDiscussionStatusInput!) {
+      changeThreadDiscussionStatus(input: $input) { error { message code } }
+    }`,
+    { input: { threadDiscussionId: discussionId, status: "RESOLVED" } },
+  );
+  assertOk(
+    "changeThreadDiscussionStatus",
+    d.changeThreadDiscussionStatus.error,
+  );
+}
+
 export async function sendDiscussionMessage(
   discussionId: string,
   markdownContent: string,

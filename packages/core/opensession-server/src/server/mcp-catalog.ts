@@ -367,7 +367,7 @@ export const MCP_SERVER_CATALOG: McpServerCatalogEntry[] = [
     ],
     runClasses: ["interactive"],
     condition:
-      "Only a session that answers a Plain discussion (plainDiscussionId), which carries this server alone instead of the interactive set.",
+      "Only a session that answers a Plain discussion (plainDiscussionId): an Ask Sidekick session carries this server alone instead of the interactive set; an auto-triage session that reports into a discussion carries it beside the automation-bar set on its later turns.",
     build: () =>
       createPlainDiscussionMcpServer({
         sessionId: SESSION_ID,

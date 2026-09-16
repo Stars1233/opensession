@@ -492,12 +492,21 @@ export function interactiveMcpServers(
  * every scheduled /loop tick sent in a person's name (`"Kent (loop)"`), so a
  * caller that only has the persisted account user still fails closed.
  * Descendants (sandboxed children with a publication policy) are excluded.
+ *
+ * An auto-triage session that reports into a Plain discussion
+ * (`plainDiscussionId`) also carries `opensession-plain-discussion`, so a
+ * follow-up asked in that discussion can reply to the customer or run a
+ * Stripe action through its Approve/Deny card; the discussion deny-set
+ * (session-run-inputs.ts) keeps the direct writes closed. A turn relayed from
+ * the discussion is sent by `PLAIN_ACTOR`, a machine actor, so it unlocks no
+ * spawn suite.
  */
 export async function automationSessionMcp(
   session: {
     automation?: string;
     worktreeDir?: string | null;
     automationDescendantPolicy?: unknown;
+    plainDiscussionId?: string | null;
   },
   sessionId: string,
   opts: { humanPrompter?: string } = {},
@@ -519,6 +528,12 @@ export async function automationSessionMcp(
       humanResume: true,
       currentSessionId: sessionId,
     });
+  }
+  if (session.plainDiscussionId && !session.automationDescendantPolicy) {
+    Object.assign(
+      servers,
+      plainDiscussionSessionMcp(sessionId, session.plainDiscussionId),
+    );
   }
   return servers;
 }

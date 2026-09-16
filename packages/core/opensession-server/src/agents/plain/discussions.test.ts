@@ -5,8 +5,11 @@ import {
   beginDiscussionAction,
   cancelApprovalsFor,
   discussionOpeningPrompt,
+  openTriageDiscussion,
   resolveApproval,
   shouldAnswer,
+  TRIAGE_DISCUSSION_SEED,
+  triageDiscussionThread,
   type DiscussionMessageCreatedPayload,
 } from "./discussions";
 import {
@@ -129,6 +132,91 @@ describe("approval registry", () => {
     // A finished action is out of reach; a Stop then has nothing to abort.
     expect(abortDiscussionActions("disc_other")).toBe(0);
     expect(other.signal.aborted).toBe(false);
+  });
+});
+
+describe("auto-triage discussions", () => {
+  it("only opens discussions for trusted Plain event runs, never public payload ids", () => {
+    const input = {
+      trigger: "event",
+      eventKey: "plain:thread_created",
+      eventContext: JSON.stringify({
+        threadId: "th_1",
+        discussionId: "attacker",
+      }),
+    };
+    expect(triageDiscussionThread(input)).toBe("th_1");
+    for (const trigger of ["webhook", "manual", "cron"])
+      expect(triageDiscussionThread({ ...input, trigger })).toBeUndefined();
+    expect(
+      triageDiscussionThread({ ...input, eventKey: "other" }),
+    ).toBeUndefined();
+    for (const eventContext of [
+      "{",
+      "null",
+      '{"discussionId":"attacker"}',
+      '{"threadId":""}',
+    ])
+      expect(
+        triageDiscussionThread({ ...input, eventContext }),
+      ).toBeUndefined();
+  });
+
+  it("reuses the discussion a crashed attempt already opened, and records a new one before marking it in progress", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEnv = {
+      PLAIN_AGENT_API_KEY: process.env.PLAIN_AGENT_API_KEY,
+      PLAIN_AGENT_MACHINE_USER_ID: process.env.PLAIN_AGENT_MACHINE_USER_ID,
+    };
+    process.env.PLAIN_AGENT_API_KEY = "test-agent-key";
+    process.env.PLAIN_AGENT_MACHINE_USER_ID = ME;
+    const mutations: string[] = [];
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      const { query } = JSON.parse(String(init?.body)) as { query: string };
+      const name = /\n\s*(\w+)\(input/.exec(query)?.[1] ?? query;
+      mutations.push(name);
+      const data =
+        name === "createDiscussion"
+          ? { createDiscussion: { discussion: { id: "thd_new" }, error: null } }
+          : { [name]: { error: null } };
+      return Response.json({ data });
+    }) as typeof fetch;
+    const record = (id: string) => mutations.push(`record:${id}`);
+    try {
+      expect(await openTriageDiscussion("th_1", "thd_recovered", record)).toBe(
+        "thd_recovered",
+      );
+      expect(mutations).toEqual(["updateDiscussionAgentStatus"]);
+      mutations.length = 0;
+      // The id is recorded as soon as Plain returns it, so an exit during
+      // the status update cannot lose the discussion to a replay.
+      expect(await openTriageDiscussion("th_1", undefined, record)).toBe(
+        "thd_new",
+      );
+      expect(mutations).toEqual([
+        "createDiscussion",
+        "record:thd_new",
+        "updateDiscussionAgentStatus",
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(originalEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  it("seeds the discussion with the agent's own message, which comes back INBOUND and is never answered", () => {
+    expect(TRIAGE_DISCUSSION_SEED).toContain("Auto-triage started");
+    expect(
+      shouldAnswer(
+        messageCreated({
+          message: { type: "INBOUND", markdown: TRIAGE_DISCUSSION_SEED },
+        }),
+        ME,
+      ),
+    ).toBe(false);
   });
 });
 

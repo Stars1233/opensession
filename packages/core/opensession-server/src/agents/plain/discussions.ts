@@ -11,8 +11,10 @@
  */
 import { wrapContext } from "../../server/prompt-context";
 import { productName } from "../../server/config";
+import { PLAIN_ACTOR } from "../../server/session-actors";
 import {
   agentMachineUserId,
+  createDiscussion,
   discussionAgentConfigured,
   keyedOrder,
   sendDiscussionMessage,
@@ -244,9 +246,83 @@ async function createDiscussionSession(
     mode: "ask",
     workspaceId,
     plainDiscussionId: discussion.id,
-    user: "Plain",
+    user: PLAIN_ACTOR,
   });
   return id;
+}
+
+// --- Auto-triage discussions ----------------------------------------------
+
+/** The agent's own opening message on an auto-triage discussion; it comes
+ *  back INBOUND, so shouldAnswer never treats it as a person's turn. */
+export const TRIAGE_DISCUSSION_SEED =
+  "Auto-triage started. The run's tool calls and its summary land here; the " +
+  "diagnosis is posted as an internal note as before. Ask a follow-up in this " +
+  "discussion to keep investigating with the same context.";
+
+/** Only the internal Plain event dispatch may open a triage discussion.
+ * Public webhook JSON is data, never authority to select a discussion. */
+export function triageDiscussionThread(input: {
+  trigger: string;
+  eventKey?: string;
+  eventContext?: string;
+}): string | undefined {
+  if (input.trigger !== "event" || input.eventKey !== "plain:thread_created")
+    return undefined;
+  try {
+    const payload = JSON.parse(input.eventContext || "null");
+    return typeof payload?.threadId === "string" && payload.threadId.trim()
+      ? payload.threadId
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Open the discussion an auto-triage run reports into, on the ticket it
+ * triages. The run mirrors its tool calls and final message here exactly as
+ * an Ask Sidekick session does, and a later message in the discussion is
+ * delivered into that same session. Best effort: triage never waits on it,
+ * so a failure (no agent key, Plain down) means a run with no discussion.
+ *
+ * `existingId` is the discussion a previous attempt at this same run already
+ * opened (recorded in its durable intent): a replay after a crash reports
+ * into it again instead of leaving it in progress and opening a second one.
+ * `onCreated` is how the caller records a new id durably; it runs as soon as
+ * Plain returns the id, before the status update is awaited, so a process
+ * exit during that second call cannot lose the discussion to a replay.
+ */
+export async function openTriageDiscussion(
+  threadId: string,
+  existingId?: string,
+  onCreated?: (id: string) => void,
+): Promise<string | undefined> {
+  if (!discussionAgentConfigured()) return undefined;
+  try {
+    const id =
+      existingId ||
+      (await createDiscussion({
+        threadId,
+        markdownContent: TRIAGE_DISCUSSION_SEED,
+      }));
+    if (id !== existingId) {
+      try {
+        onCreated?.(id);
+      } catch (e) {
+        // The run still reports into the discussion; only a replay after a
+        // crash could open a second one.
+        console.warn(`[plain] Could not record discussion ${id}:`, e);
+      }
+    }
+    await withDiscussionOrder(id, () =>
+      updateDiscussionAgentStatus(id, "IN_PROGRESS"),
+    ).catch(() => {});
+    return id;
+  } catch (e) {
+    console.warn(`[plain] Could not open a discussion on ${threadId}:`, e);
+    return undefined;
+  }
 }
 
 /** One lifecycle event at a time per discussion. `createSession` resolves
@@ -295,7 +371,7 @@ async function onMessageCreated(
         const result = await getSessionControl().deliverToSession(
           existing.id,
           text,
-          "Plain",
+          PLAIN_ACTOR,
           { deliveryId: `plain-discussion:${message.id}` },
         );
         if (result.status === "error")
