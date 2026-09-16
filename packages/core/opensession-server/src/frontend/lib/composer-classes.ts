@@ -151,9 +151,12 @@ export const composerToolbarSelect =
   "inline-flex min-w-0 shrink phone:order-[-1]";
 /** The pill's toolbar-only metrics: it may shrink to a 34px stub here (the
  *  new-session footer lets it go to 0 instead), and phones tighten its
- *  padding and cap it so the whole row fits without clipping the send. */
+ *  padding. No width cap: the toolbar pins every other child at
+ *  flex-shrink 0, so the pill already gives way exactly when the row would
+ *  otherwise clip the send. A fixed cap on top of that truncated the model
+ *  name while the row still had room to spare. */
 export const composerToolbarPill =
-  "shrink min-w-[34px] phone:max-w-[136px] phone:px-[9px]";
+  "shrink min-w-[34px] max-w-none phone:px-[9px]";
 
 /* ── Toolbar popover menus ─────────────────────────────────────────
    The popup surface for the "+" add menu and the send-later menu, and the
