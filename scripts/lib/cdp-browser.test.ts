@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { boundedCdpSystemdArgs, systemdUserEnv } from "./cdp-browser";
+import {
+  boundedCdpSystemdArgs,
+  cdpChromeEnv,
+  systemdUserEnv,
+} from "./cdp-browser";
 
 describe("systemd user environment", () => {
   const saved = process.env.XDG_RUNTIME_DIR;
@@ -28,6 +32,39 @@ describe("systemd user environment", () => {
     // systemd-run needs PATH to resolve `bun`, so this must extend the
     // environment rather than replace it.
     expect(systemdUserEnv().PATH).toBe(process.env.PATH);
+  });
+});
+
+describe("Chrome temporary directory", () => {
+  const saved = process.env.TMPDIR;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = saved;
+  });
+
+  test("replaces long session scratch only in Chrome's environment", () => {
+    const scratch = `/home/ubuntu/.opensession/session-scratch/os-${"a".repeat(36)}`;
+    process.env.TMPDIR = scratch;
+    const profile = "/tmp/opensession-cdp-profile-12345678";
+    const env = cdpChromeEnv(profile, 123);
+    const socketSuffix = "/com.google.Chrome.XXXXXX/SingletonSocket";
+
+    expect(Buffer.byteLength(scratch + socketSuffix)).toBeGreaterThanOrEqual(
+      108,
+    );
+    expect(env.TMPDIR).toBe(profile);
+    expect(Buffer.byteLength(env.TMPDIR + socketSuffix)).toBeLessThan(108);
+    expect(env.DISPLAY).toBe(":123");
+    expect(env.PATH).toBe(process.env.PATH);
+    expect(process.env.TMPDIR).toBe(scratch);
+  });
+
+  test("uses the owned profile even without an inherited TMPDIR", () => {
+    delete process.env.TMPDIR;
+    expect(
+      cdpChromeEnv("/tmp/opensession-cdp-profile-87654321", 124).TMPDIR,
+    ).toBe("/tmp/opensession-cdp-profile-87654321");
+    expect(process.env.TMPDIR).toBeUndefined();
   });
 });
 

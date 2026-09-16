@@ -26,6 +26,22 @@ export function systemdUserEnv(): Record<string, string | undefined> {
   };
 }
 
+/** Chrome's SingletonSocket must fit Linux's 108-byte sockaddr_un.sun_path.
+ * Session TMPDIRs can exceed that after Chrome appends its socket directory.
+ * The launcher owns a short, private profile and cleans it after Chrome exits.
+ * Keep the override browser-local so other tools retain session scratch.
+ */
+export function cdpChromeEnv(
+  profile: string,
+  display: number,
+): Record<string, string | undefined> {
+  return {
+    ...process.env,
+    DISPLAY: `:${display}`,
+    TMPDIR: profile,
+  };
+}
+
 export function boundedCdpSystemdArgs(): string[] {
   return [
     "--property=MemoryHigh=2G",

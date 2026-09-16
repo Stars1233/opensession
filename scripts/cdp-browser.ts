@@ -5,6 +5,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   boundedCdpSystemdArgs,
+  cdpChromeEnv,
   systemdUserEnv,
   waitForFile,
 } from "./lib/cdp-browser";
@@ -104,7 +105,7 @@ if (command === "worker") {
   const socket = `/tmp/.X11-unix/X${display}`;
   if (await Bun.file(socket).exists())
     throw new Error(`X display :${display} is already in use`);
-  mkdirSync(profile, { recursive: true });
+  mkdirSync(profile, { recursive: true, mode: 0o700 });
   const xvfb = Bun.spawn(
     ["/usr/bin/Xvfb", `:${display}`, "-screen", "0", "1600x1100x24"],
     {
@@ -125,10 +126,11 @@ if (command === "worker") {
       "about:blank",
     ],
     {
-      env: { ...process.env, DISPLAY: `:${display}` },
+      env: cdpChromeEnv(profile, display),
       stdin: "ignore",
       stdout: "ignore",
-      stderr: "ignore",
+      // Keep startup failures in the browser unit's journal, not a silent timeout.
+      stderr: "inherit",
     },
   );
   let ready = false;
@@ -144,7 +146,9 @@ if (command === "worker") {
     chrome.kill();
     xvfb.kill();
     rmSync(profile, { recursive: true, force: true });
-    throw new Error("Chrome did not expose CDP within 10 seconds");
+    throw new Error(
+      `Chrome did not expose CDP within 10 seconds (exit=${chrome.exitCode}, signal=${chrome.signalCode}); see this unit's journal for browser stderr`,
+    );
   }
   writeFileSync(state, JSON.stringify({ port, display, profile }));
   let idleSince = Date.now();

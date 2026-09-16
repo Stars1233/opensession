@@ -11,7 +11,9 @@ if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 find_tests() {
-  find packages/core/opensession-server/src scripts -type f \
+  # Bun treats bare paths as substring filters, which also match test copies
+  # under artifacts/. A ./ prefix selects exactly the file we discovered.
+  find ./packages/core/opensession-server/src ./scripts -type f \
     \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.test.js' -o -name '*.test.jsx' \
        -o -name '*.spec.ts' -o -name '*.spec.tsx' -o -name '*.spec.js' -o -name '*.spec.jsx' \) \
     -print0

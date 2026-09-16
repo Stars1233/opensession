@@ -155,9 +155,45 @@ agent-react-devtools profile slow --limit 5
 # Compare render counts and durations to the previous run
 ```
 
+## Linux browser startup preflight
+
+For Open Session, use the `verify-opensession` skill's isolated demo launcher.
+Its bounded CDP browser runs headed Chrome under Xvfb with a short, private
+`TMPDIR`; connect your interaction harness to that browser rather than starting
+another one. Preserve the browser lease until profiling finishes, then clean up.
+
+For a direct Playwright or agent-browser harness, give the entire harness a
+short private temporary directory and close its browser before it exits:
+
+```bash
+(
+  browser_tmp="$(mktemp -d /tmp/os-chrome-XXXXXX)"
+  trap 'rm -rf -- "$browser_tmp"' EXIT
+  TMPDIR="$browser_tmp" xvfb-run -a bun /path/to/profiling-harness.ts
+)
+```
+
+Do not inherit a long session scratch path as Chrome's `TMPDIR`. Chrome adds
+`/com.google.Chrome.XXXXXX/SingletonSocket`; Linux socket paths must be shorter
+than 108 bytes. An oversized path aborts startup with `SIGTRAP`, even with a
+short `--user-data-dir`. This affects both headed and full headless Chrome.
+It is not evidence that a VPS cannot run Chrome, and changing browser versions,
+disabling the GPU, or moving to a Mac is not the first fix.
+
+Before investing in a candidate, verify browser/CDP startup, app mount, a real
+interaction, and `agent-react-devtools wait --connected --timeout 15`. Confirm
+that a short profiling recording contains commits. A failure should retain
+browser stderr and identify the failed stage. Check the browser's temporary
+path before declaring the run blocked by SIGTRAP; do not cycle through binaries
+with the same broken environment. Do not claim a performance improvement
+without valid before/after measurements.
+
 ## Using with agent-browser
 
-When using `agent-browser` to drive the app while profiling or debugging, you **must use headed mode** (`--headed`). Headless Chromium does not execute ES module scripts the same way as a real browser, which prevents the devtools connect script from running properly.
+When using `agent-browser` to drive the app while profiling or debugging, use
+headed mode (`--headed`) for the reproducible profiling setup. A missing DevTools
+connection is not, by itself, evidence that headless browsers cannot execute ES
+modules; check app mount, instrumentation, and browser startup separately.
 
 ```bash
 agent-browser --session devtools --headed open http://localhost:5173/
@@ -168,7 +204,7 @@ agent-react-devtools status  # Should show 1 connected app
 
 - **Labels reset** when the app reloads or components unmount/remount. After a reload, use `wait --connected` then re-check with `get tree` or `find`.
 - **`status` first** — if status shows 0 connected apps, the React app is not connected. The user may need to run `npx agent-react-devtools init` in their project first.
-- **Headed browser required** — if using `agent-browser`, always use `--headed` mode. Headless Chromium does not properly load the devtools connect script.
+- **Headed profiling baseline** — if using `agent-browser`, use `--headed` mode and the Linux startup preflight above. Verify the DevTools connection rather than inferring it from browser mode.
 - **Profile while interacting** — profiling only captures renders that happen between `profile start` and `profile stop`. Make sure the relevant interaction happens during that window.
 - **Use `--depth`** on large trees — a deep tree can produce a lot of output. Start with `--depth 3` or `--depth 4` and go deeper only on the subtree you care about.
 

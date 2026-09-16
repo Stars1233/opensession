@@ -105,11 +105,11 @@ If `Apps: 0 connected`:
 1. Check the app is running in dev mode
 2. Check the console for WebSocket connection errors
 3. Ensure no other DevTools instance is using port 8097
-4. If using `agent-browser`, make sure you're using **headed mode** (`--headed`) — headless Chromium does not properly execute the devtools connect script
+4. Follow the Linux startup preflight in `../SKILL.md`: use a short, private browser `TMPDIR`, confirm the app mounts, and use headed mode (`--headed`) for the profiling baseline.
 
 ## Using with agent-browser
 
-When automating the browser with `agent-browser`, you must use headed mode. Headless Chromium handles ES module script execution differently, which prevents the connect script from installing the devtools hook before React loads.
+Use headed mode for the reproducible profiling baseline. On Linux, use Xvfb and a short, private browser `TMPDIR` as described in `../SKILL.md`. A startup `SIGTRAP` can be Chrome's Unix socket path-length check, not a display or ES-module limitation. Install the connect script before React loads and verify the connection explicitly.
 
 ```bash
 # Headed mode is required for devtools to connect
