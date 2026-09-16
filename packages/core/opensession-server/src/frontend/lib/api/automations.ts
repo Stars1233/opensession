@@ -355,7 +355,11 @@ export interface SandboxStatusInfo {
   defaults?: {
     workspace: string;
     personal: string;
+    /** What a new session starts in, for the `repo` query when given. */
     effective: string;
+    /** Per-repo overrides (repo id → provider id or "none"); absent on a
+     *  pre-upgrade server. */
+    repos?: Record<string, string>;
   };
   connections?: SandboxConnectionInfo[];
   operations?: SandboxOperationInfo[];
@@ -423,17 +427,23 @@ export interface SandboxIngressInfo {
 
 export async function fetchSandboxStatus(
   user?: string,
+  repo?: string,
 ): Promise<SandboxStatusInfo> {
-  const query = user ? `?user=${encodeURIComponent(user)}` : "";
+  const params = new URLSearchParams();
+  if (user) params.set("user", user);
+  if (repo) params.set("repo", repo);
+  const query = params.size ? `?${params}` : "";
   const res = await fetch(`${BASE}/sandbox/status${query}`);
   if (!res.ok) throw new Error(`Failed to fetch sandbox status: ${res.status}`);
   return res.json();
 }
 
 export async function saveSandboxDefault(input: {
-  scope: "workspace" | "personal";
+  scope: "workspace" | "personal" | "repo";
   value: string;
   user: string;
+  /** Required for scope "repo". */
+  repo?: string;
 }): Promise<{ defaults: NonNullable<SandboxStatusInfo["defaults"]> }> {
   return request("/sandbox/defaults", { method: "PUT", body: input });
 }

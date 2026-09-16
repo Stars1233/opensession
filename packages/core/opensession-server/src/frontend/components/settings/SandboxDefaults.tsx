@@ -4,6 +4,7 @@ import {
   saveSandboxDefault,
   type SandboxStatusInfo,
 } from "../../lib/api";
+import { fetchRepos, type RepoInfo } from "../../lib/api/repos";
 import { errorMessage } from "../../lib/error-message";
 import {
   SettingCard,
@@ -146,6 +147,116 @@ export function PersonalSandboxDefaultRow() {
   return <SandboxDefaultRow scope="personal" />;
 }
 
+/**
+ * Per-project overrides. A project set here always starts its new sessions
+ * there, whatever the workspace or a person chose; only the per-session
+ * choice in the new session menu beats it.
+ */
+function ProjectSandboxDefaults({ canManage }: { canManage: boolean }) {
+  const user = getCurrentUser();
+  const [status, setStatus] = useState<SandboxStatusInfo | null>(null);
+  const [repos, setRepos] = useState<RepoInfo[]>([]);
+  const [saving, setSaving] = useState<string | null>(null);
+  useEffect(() => {
+    fetchSandboxStatus(user)
+      .then(setStatus)
+      .catch(() => {});
+    fetchRepos()
+      .then(setRepos)
+      .catch(() => {});
+  }, [user]);
+  if (!status?.defaults || !repos.length) return null;
+  const defaults = status.defaults;
+  const providers: string[] = status.connections?.length
+    ? status.connections
+        .filter((connection) => connection.state === "ready")
+        .map((connection) => connection.provider)
+    : status.providers
+        .filter((provider) => provider.configured && provider.certified)
+        .map((provider) => provider.id);
+  if (!providers.length) return null;
+
+  async function save(repo: string, next: string) {
+    setSaving(repo);
+    await saveSandboxDefault({ scope: "repo", value: next, user, repo })
+      .then((response) =>
+        setStatus((current) =>
+          current ? { ...current, defaults: response.defaults } : current,
+        ),
+      )
+      .catch((error) =>
+        toast(errorMessage(error, "Failed to save the project default"), {
+          variant: "error",
+        }),
+      )
+      .finally(() => setSaving(null));
+  }
+
+  return (
+    <>
+      <SettingsGroupLabel>Projects</SettingsGroupLabel>
+      <SettingCard>
+        {repos.map((repo) => {
+          const value = defaults.repos?.[repo.id] ?? "workspace";
+          const unavailable =
+            value !== "workspace" &&
+            value !== "none" &&
+            !providers.includes(value);
+          return (
+            <SettingRow
+              key={repo.id}
+              title={repo.label || repo.id}
+              desc={
+                value === "workspace"
+                  ? `Follows the workspace default (${providerLabel(defaults.workspace || "none")}).`
+                  : "Every new session on this project starts here."
+              }
+              control={
+                <div
+                  className={
+                    saving === repo.id
+                      ? "pointer-events-none opacity-60"
+                      : undefined
+                  }
+                >
+                  <Select
+                    label={`${repo.label || repo.id} default environment`}
+                    value={value}
+                    options={[
+                      { value: "workspace", label: "Workspace default" },
+                      { value: "none", label: "This machine" },
+                      ...(unavailable
+                        ? [
+                            {
+                              value,
+                              label: `${providerLabel(value)} · unavailable`,
+                              disabled: true,
+                            },
+                          ]
+                        : []),
+                      ...providers.map((id) => ({
+                        value: id,
+                        label: providerLabel(id),
+                      })),
+                    ]}
+                    onChange={(next) => void save(repo.id, next)}
+                    disabled={!canManage}
+                  />
+                </div>
+              }
+            />
+          );
+        })}
+      </SettingCard>
+      <SettingsHint>
+        A project set to a Sandbox always starts there, so its app runs in a
+        Sandbox Portal instead of on this server. The per-session choice in the
+        new session menu still wins.
+      </SettingsHint>
+    </>
+  );
+}
+
 export function WorkspaceSandboxDefaults({
   canManage = true,
 }: {
@@ -163,6 +274,7 @@ export function WorkspaceSandboxDefaults({
         This machine runs sessions in a worktree on this server. Only tested
         providers appear here.
       </SettingsHint>
+      <ProjectSandboxDefaults canManage={canManage} />
     </>
   );
 }

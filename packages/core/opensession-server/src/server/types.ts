@@ -342,6 +342,10 @@ export interface UnifiedSession {
       | "needs_attention";
     lastLifecycleError?: string;
   };
+  /** The last workspace checkpoint a Sandbox session pushed to origin
+   * (sandbox/checkpoint.ts). Kept beside `sandbox` rather than inside it so
+   * lifecycle writers that replace the whole `sandbox` object cannot drop it. */
+  sandboxCheckpoint?: SandboxCheckpointRecord;
   /** Persistent, explicitly trusted machine selected for this session. Unlike
    * a Sandbox, a Runner is not an isolation boundary. */
   runner?: {
@@ -680,6 +684,8 @@ export interface NativeSessionFile {
       | "needs_attention";
     lastLifecycleError?: string;
   };
+  /** See UnifiedSession.sandboxCheckpoint. */
+  sandboxCheckpoint?: SandboxCheckpointRecord;
   runner?: {
     id: string;
     name: string;
@@ -687,6 +693,18 @@ export interface NativeSessionFile {
     lifecycle?: "preparing" | "awake" | "offline" | "needs_attention";
     lastLifecycleError?: string;
   };
+}
+
+/** A synthetic commit on origin holding the session branch tip (`head`) plus
+ * the working tree as it was (`tree`), reachable from `ref`. Restoring it
+ * anywhere reproduces the branch with the same uncommitted changes. */
+export interface SandboxCheckpointRecord {
+  ref: string;
+  commit: string;
+  head: string;
+  tree: string;
+  branch: string;
+  at: string;
 }
 
 // Moved to the protocol package; re-exported for existing import sites.

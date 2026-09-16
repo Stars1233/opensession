@@ -39,6 +39,8 @@ import {
   sandboxProviderConfigured,
   sandboxProviderUsability,
   sandboxesEnabled,
+  setKeepReadyTarget,
+  setRepoSandboxDefault,
   setWorkspaceSandboxDefault,
 } from "./config";
 import { resolveInteractiveSandbox } from "./defaults";
@@ -121,6 +123,37 @@ describe("sandboxCapabilityStatus (the /api/sandbox/status payload)", () => {
       sessionDefault: "daytona",
     });
     expect(sandboxConfig().sessionDefault).toBe("daytona");
+  });
+
+  test("a repo default persists beside the provider override and is removable", () => {
+    write({ provider: "daytona", perRepo: { tella: { provider: "box" } } });
+    ready("daytona");
+    expect(setRepoSandboxDefault("tella", "daytona")).toBe("daytona");
+    expect(JSON.parse(readFileSync(cfgPath(), "utf-8")).perRepo).toEqual({
+      tella: { provider: "box", sessionDefault: "daytona" },
+    });
+    expect(sandboxConfig().perRepo?.tella?.sessionDefault).toBe("daytona");
+    expect(setRepoSandboxDefault("tella", "workspace")).toBeNull();
+    expect(JSON.parse(readFileSync(cfgPath(), "utf-8")).perRepo).toEqual({
+      tella: { provider: "box" },
+    });
+    expect(() => setRepoSandboxDefault("tella", "box")).toThrow(
+      /not currently available/,
+    );
+  });
+
+  test("keep-ready targets toggle without touching the rest of prewarm", () => {
+    write({ provider: "daytona", prewarm: { ttlMinutes: 7 } });
+    ready("daytona");
+    expect(setKeepReadyTarget("daytona", "tella", true)).toEqual([
+      { provider: "daytona", repoId: "tella" },
+    ]);
+    expect(setKeepReadyTarget("daytona", "tella", true)).toHaveLength(1);
+    expect(JSON.parse(readFileSync(cfgPath(), "utf-8")).prewarm).toEqual({
+      ttlMinutes: 7,
+      keepReady: [{ provider: "daytona", repoId: "tella" }],
+    });
+    expect(setKeepReadyTarget("daytona", "tella", false)).toEqual([]);
   });
 
   test("no config file: disabled, everything unconfigured, default local", () => {
@@ -272,6 +305,39 @@ describe("resolveRequestedSandbox (create-path validation)", () => {
         "local",
         "sandbox-default-test-user",
         undefined,
+        "claude-fable-5-1",
+      ),
+    ).toEqual({ ok: true, provider: null });
+  });
+
+  test("a repo default sends omitted choices to its Sandbox, explicit Host still wins", () => {
+    write({
+      provider: "daytona",
+      sessionDefault: "none",
+      perRepo: { tella: { sessionDefault: "daytona" } },
+    });
+    ready("daytona");
+    expect(
+      resolveInteractiveSandbox(
+        undefined,
+        "sandbox-default-test-user",
+        "tella",
+        "claude-fable-5-1",
+      ),
+    ).toEqual({ ok: true, provider: "daytona" });
+    expect(
+      resolveInteractiveSandbox(
+        undefined,
+        "sandbox-default-test-user",
+        "other",
+        "claude-fable-5-1",
+      ),
+    ).toEqual({ ok: true, provider: null });
+    expect(
+      resolveInteractiveSandbox(
+        "local",
+        "sandbox-default-test-user",
+        "tella",
         "claude-fable-5-1",
       ),
     ).toEqual({ ok: true, provider: null });

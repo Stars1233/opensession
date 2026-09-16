@@ -59,7 +59,8 @@ import {
 import { cacheMissNotice } from "@tellahq/opensession-protocol/notices";
 import { RESTART_QUEUE_NOTICE_MESSAGE } from "@tellahq/opensession-protocol/session";
 import { dropSandboxPreviewRoutes } from "./preview";
-import { restoreSandboxPortals } from "./session-sandbox";
+import { activeSandboxFor, restoreSandboxPortals } from "./session-sandbox";
+import { checkpointSessionWorkspace } from "./sandbox/checkpoint";
 import {
   wrapContext,
   stripContext,
@@ -160,6 +161,7 @@ import {
   applyRunOutcomeProjection,
   touchNativeSession,
   updateSessionFile,
+  findSessionAsync,
   SESSIONS_DIR,
 } from "./session-cache";
 import { markRecapPendingIfUnwatched } from "./recap";
@@ -2023,6 +2025,16 @@ export async function maybeLaunchSandboxedRun(
               attachedDirs: (session.attachedRepos || [])
                 .map((r) => r.dir)
                 .filter(Boolean),
+              // A replacement Sandbox continues from the last checkpoint; an
+              // existing disk ignores this.
+              ...(session.sandboxCheckpoint
+                ? {
+                    restoreCheckpoint: {
+                      ref: session.sandboxCheckpoint.ref,
+                      commit: session.sandboxCheckpoint.commit,
+                    },
+                  }
+                : {}),
             }),
       },
       {
@@ -3732,6 +3744,24 @@ async function runSessionPromptInner(
           );
         });
       }
+      // Push the workspace checkpoint to origin (sandbox/checkpoint.ts) so
+      // the session's work survives a lost or replaced Sandbox and can move
+      // to another machine. Never waking: the Sandbox just ran the turn.
+      void (async () => {
+        const current = (await findSessionAsync(sessionId)) || session;
+        const sandbox = await activeSandboxFor(current);
+        if (!sandbox) return;
+        const outcome = await checkpointSessionWorkspace(current, sandbox);
+        if (outcome.state === "skipped")
+          console.log(
+            `[sandbox] ${sessionId}: checkpoint skipped (${outcome.reason})`,
+          );
+      })().catch((error) => {
+        console.warn(
+          `[sandbox] ${sessionId}: workspace checkpoint failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
     }
     // Publish any commits the turn left unpushed so the status header doesn't
     // linger on "Ahead by N commits" (see autoPushSessionBranches). Only on a

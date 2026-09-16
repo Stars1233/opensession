@@ -10,8 +10,10 @@ import { sandboxIngressStatus } from "../sandbox/caddy-ingress";
 import {
   sandboxDefaultsStatus,
   savePersonalSandboxDefault,
+  saveRepoSandboxDefault,
   saveWorkspaceSandboxDefault,
 } from "../sandbox/defaults";
+import { REPOS } from "../worktree";
 import {
   connectSandboxProvider,
   disconnectSandboxProvider,
@@ -29,6 +31,7 @@ import { qualifySandboxConnection } from "../sandbox/qualification";
 import {
   listSandboxEnvironments,
   scheduleSandboxEnvironment,
+  setSandboxEnvironmentKeepReady,
 } from "../sandbox/environments";
 import type { SandboxMachineSettings } from "../sandbox/prewarm";
 
@@ -63,10 +66,11 @@ export async function handleSandboxesRoutes(
 
   if (path === "/api/sandbox/status" && req.method === "GET") {
     const user = requestUser(ctx, url.searchParams.get("user")) || "Anonymous";
+    const repo = url.searchParams.get("repo") || undefined;
     return Response.json({
       ...sandboxCapabilityStatus(),
       ...(await connectionPayload(ctx)),
-      defaults: sandboxDefaultsStatus(user),
+      defaults: sandboxDefaultsStatus(user, repo),
     });
   }
 
@@ -76,6 +80,34 @@ export async function handleSandboxesRoutes(
 
   if (path === "/api/sandbox/environments" && req.method === "GET") {
     return Response.json({ environments: await listSandboxEnvironments() });
+  }
+
+  const keepReadyMatch = path.match(
+    /^\/api\/sandbox\/environments\/([^/]+)\/([^/]+)\/keep-ready$/,
+  );
+  if (keepReadyMatch && req.method === "PUT") {
+    const forbidden = requireWorkspaceAdmin(ctx);
+    if (forbidden) return forbidden;
+    const repo = decodeURIComponent(keepReadyMatch[1]!);
+    const provider = decodeURIComponent(keepReadyMatch[2]!);
+    if (!isWorkspaceSandboxProvider(provider)) {
+      return errorResponse(
+        `Unknown workspace sandbox provider "${provider}"`,
+        404,
+      );
+    }
+    if (!(repo in REPOS)) return errorResponse(`Unknown repo "${repo}"`, 404);
+    const body = (await req.json().catch(() => null)) as {
+      enabled?: unknown;
+    } | null;
+    if (!body || typeof body.enabled !== "boolean")
+      return errorResponse("enabled must be a boolean");
+    try {
+      await setSandboxEnvironmentKeepReady(repo, provider, body.enabled);
+      return Response.json({ environments: await listSandboxEnvironments() });
+    } catch (error) {
+      return errorResponse(error);
+    }
   }
 
   const environmentMatch = path.match(
@@ -120,10 +152,21 @@ export async function handleSandboxesRoutes(
         saveWorkspaceSandboxDefault(body.value);
       } else if (body.scope === "personal") {
         savePersonalSandboxDefault(user, body.value);
+      } else if (body.scope === "repo") {
+        const forbidden = requireWorkspaceAdmin(ctx);
+        if (forbidden) return forbidden;
+        if (typeof body.repo !== "string" || !(body.repo in REPOS))
+          return errorResponse("repo must name a registered repository");
+        saveRepoSandboxDefault(body.repo, body.value);
       } else {
-        return errorResponse("scope must be workspace or personal");
+        return errorResponse("scope must be workspace, personal, or repo");
       }
-      return Response.json({ defaults: sandboxDefaultsStatus(user) });
+      return Response.json({
+        defaults: sandboxDefaultsStatus(
+          user,
+          typeof body.repo === "string" ? body.repo : undefined,
+        ),
+      });
     } catch (error) {
       return errorResponse(error);
     }

@@ -17,6 +17,12 @@ import {
   recordedTrustPolicy,
   type SandboxTrustPolicy,
 } from "../sandbox/adapters/bootstrap";
+import {
+  checkpointHostWorkspace,
+  checkpointSessionWorkspace,
+  restoreCheckpointToHostWorktree,
+  type CheckpointOutcome,
+} from "../sandbox/checkpoint";
 import type { SandboxSessionSpec } from "../sandbox/provider";
 import {
   dropSandboxPreviewRoutes,
@@ -28,8 +34,14 @@ import {
   touchNativeSessionStrict,
 } from "../session-cache";
 import { resolveWorktreeTarget } from "../session-repos";
+import { activeSandboxFor } from "../session-sandbox";
 import { sessionTouchedPaths } from "../session-touched";
-import { isSharedCheckoutDir } from "../worktree";
+import type { SandboxCheckpointRecord } from "../types";
+import {
+  createWorktreeForExistingBranch,
+  getRepo,
+  isSharedCheckoutDir,
+} from "../worktree";
 import type { RouteContext } from "./context";
 
 type StoredSession = NonNullable<Awaited<ReturnType<typeof findSessionAsync>>>;
@@ -43,6 +55,7 @@ type RecreateSession = Pick<
   | "worktreeDir"
   | "automation"
   | "automationId"
+  | "sandboxCheckpoint"
 >;
 
 type AttachSession = Pick<
@@ -50,18 +63,44 @@ type AttachSession = Pick<
   "mode" | "repo" | "sandbox" | "runner" | "automation" | "automationId"
 >;
 
-/** Why a host session cannot move into a Sandbox, or null when it can. */
-export function sandboxAttachRefusal(session: AttachSession): string | null {
+/**
+ * Why a session cannot move into a Sandbox on `provider`, or null when it
+ * can. A session already in a Sandbox may move to a different provider: its
+ * work travels through a checkpoint. The same provider is refused because
+ * there is nothing to move to.
+ */
+export function sandboxAttachRefusal(
+  session: AttachSession,
+  provider?: string,
+): string | null {
   // A recorded provider without a Sandbox id is a move that has not
   // materialized (still preparing, or failed); moving again retries it.
-  if (session.sandbox?.sandboxId && session.sandbox.provider !== "local")
-    return "This session already runs in a Sandbox.";
+  if (
+    session.sandbox?.sandboxId &&
+    session.sandbox.provider !== "local" &&
+    (!provider || session.sandbox.provider === provider)
+  )
+    return `This session already runs on ${session.sandbox.provider}.`;
   if (session.runner?.id)
     return "This session runs on a Runner. Start a new session to use a Sandbox.";
   if (session.automationId || session.automation)
     return "An automation's sessions take their Sandbox from the automation.";
   if (session.mode !== "code" || !session.repo)
     return "Only code sessions with a repository can move to a Sandbox.";
+  return null;
+}
+
+/** Why a Sandbox session cannot move back to this machine, or null. */
+export function sandboxDetachRefusal(session: AttachSession): string | null {
+  if (
+    !session.sandbox?.provider ||
+    !isRemoteSandboxProvider(session.sandbox.provider)
+  )
+    return "This session already runs on this machine.";
+  if (session.automationId || session.automation)
+    return "An automation's sessions stay in the automation's Sandbox.";
+  if (session.mode !== "code" || !session.repo)
+    return "Only code sessions with a repository can move to this machine.";
   return null;
 }
 
@@ -94,6 +133,14 @@ export function unpublishedWorkSummary(
   return `This machine has ${parts.join(" and ")}. The Sandbox clones the branch from origin, so push first, or move anyway and leave them here.`;
 }
 
+function restoreSpec(
+  checkpoint: SandboxCheckpointRecord | undefined,
+): Pick<SandboxSessionSpec, "restoreCheckpoint"> {
+  return checkpoint
+    ? { restoreCheckpoint: { ref: checkpoint.ref, commit: checkpoint.commit } }
+    : {};
+}
+
 /**
  * Provision the Sandbox a session just moved into, off the request. The next
  * turn's own ensure() queues behind this one on the provider's per-session
@@ -124,6 +171,7 @@ async function provisionAttachedSandbox(
         attachedDirs: (session.attachedRepos || [])
           .map((r) => r.dir)
           .filter(Boolean),
+        ...restoreSpec(session.sandboxCheckpoint),
       },
     );
     const current = await recorded();
@@ -157,10 +205,47 @@ async function provisionAttachedSandbox(
 }
 
 /**
- * Move a host session into a Sandbox. The record says "preparing" and the
- * Sandbox is provisioned in the background; the next turn takes the same path
- * as a Sandbox session's first turn, seeding a fresh engine from the stored
- * transcript, and adopts the Sandbox whether it is ready or still booting.
+ * Checkpoint a Sandbox session's workspace, waking the Sandbox if it sleeps.
+ * Returns the outcome, or null when the Sandbox cannot be reached at all.
+ */
+async function checkpointFromSandbox(
+  session: StoredSession,
+): Promise<CheckpointOutcome | null> {
+  const sandbox = await activeSandboxFor(session, { wake: true });
+  if (!sandbox) return null;
+  return checkpointSessionWorkspace(session, sandbox);
+}
+
+/**
+ * Release a session's current Sandbox because the session is leaving it:
+ * Portal routes are dropped and the machine is destroyed. The caller has
+ * already checkpointed what it needs.
+ */
+async function releaseSandbox(session: StoredSession, why: string) {
+  const recorded = session.sandbox;
+  if (!recorded?.sandboxId || !isRemoteSandboxProvider(recorded.provider))
+    return;
+  await dropSandboxPreviewRoutes(recorded.sandboxId).catch(() => {});
+  try {
+    await getSandboxProvider(recorded.provider).destroy(recorded.sandboxId);
+    console.log(
+      `[sandbox] ${session.id}: released ${recorded.sandboxId} (${why})`,
+    );
+  } catch (error) {
+    console.warn(
+      `[sandbox] ${session.id}: could not release ${recorded.sandboxId} (${why}):`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+/**
+ * Move a session into a Sandbox. From this machine, the worktree's state is
+ * checkpointed first so uncommitted work travels along; only when no
+ * checkpoint is possible does the old "push first, or move anyway" question
+ * apply. From another Sandbox, that Sandbox is checkpointed and released.
+ * The record says "preparing" and the new Sandbox is provisioned in the
+ * background; the next turn adopts it whether it is ready or still booting.
  */
 async function attachSandbox(
   ctx: RouteContext,
@@ -170,8 +255,6 @@ async function attachSandbox(
     provider?: unknown;
     confirm?: unknown;
   };
-  const refusal = sandboxAttachRefusal(session);
-  if (refusal) return Response.json({ error: refusal }, { status: 409 });
   if (hostRunBusy(session.id) || hasActiveRunFor(session.id))
     return Response.json(
       { error: "Wait for the agent to finish before moving this session." },
@@ -190,26 +273,85 @@ async function attachSandbox(
       { error: "Name the Sandbox provider to move to: daytona or box." },
       { status: 400 },
     );
-  const target = resolveWorktreeTarget(session);
-  if (target && existsSync(target.dir)) {
-    // A shared checkout holds every session's edits; count only this one's.
-    const ownPaths = isSharedCheckoutDir(target.dir)
-      ? await sessionTouchedPaths(session, target.dir)
-      : undefined;
-    const unpublished = unpublishedWorkSummary(
-      await getGitStatus(target.dir, target.defaultBranch, undefined, ownPaths),
-    );
-    if (unpublished && body.confirm !== true)
+  const refusal = sandboxAttachRefusal(session, provider);
+  if (refusal) return Response.json({ error: refusal }, { status: 409 });
+
+  const fromSandbox =
+    !!session.sandbox?.sandboxId &&
+    isRemoteSandboxProvider(session.sandbox.provider);
+  if (fromSandbox) {
+    // Sandbox to Sandbox: the work exists only on the old machine, so the
+    // move is refused outright when it cannot be checkpointed.
+    let outcome: CheckpointOutcome | null;
+    try {
+      outcome = await checkpointFromSandbox(session);
+    } catch (error) {
       return Response.json(
-        { error: unpublished, confirmRequired: true },
-        { status: 428 },
+        {
+          error: `Could not checkpoint the current Sandbox: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        { status: 502 },
       );
-    // The Portals on this machine belong to the worktree the agent leaves;
-    // the Sandbox starts its own from the repository's declarations.
-    await stopAllPortalServices({
-      sessionId: session.id,
-      worktreeDir: target.dir,
-    });
+    }
+    if (!outcome && !session.sandboxCheckpoint)
+      return Response.json(
+        {
+          error:
+            "The current Sandbox cannot be reached and no checkpoint exists, so its work cannot move. Wake it first.",
+        },
+        { status: 409 },
+      );
+    if (outcome?.state === "skipped" && !session.sandboxCheckpoint)
+      return Response.json(
+        {
+          error: `This session's work cannot be checkpointed (${outcome.reason}).`,
+        },
+        { status: 409 },
+      );
+    await releaseSandbox(session, `moving to ${provider}`);
+  } else {
+    const target = resolveWorktreeTarget(session);
+    if (target && existsSync(target.dir)) {
+      let outcome: CheckpointOutcome = { state: "skipped", reason: "unknown" };
+      try {
+        outcome = await checkpointHostWorkspace(session, target.dir);
+      } catch (error) {
+        console.warn(
+          `[sandbox] ${session.id}: host checkpoint before move failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      if (outcome.state === "skipped") {
+        // A shared checkout holds every session's edits; count only this one's.
+        const ownPaths = isSharedCheckoutDir(target.dir)
+          ? await sessionTouchedPaths(session, target.dir)
+          : undefined;
+        const unpublished = unpublishedWorkSummary(
+          await getGitStatus(
+            target.dir,
+            target.defaultBranch,
+            undefined,
+            ownPaths,
+          ),
+        );
+        if (unpublished && body.confirm !== true)
+          return Response.json(
+            { error: unpublished, confirmRequired: true },
+            { status: 428 },
+          );
+        // Moving without a checkpoint must not restore a stale one.
+        if (session.sandboxCheckpoint)
+          await touchNativeSessionStrict(session.id, {
+            sandboxCheckpoint: undefined,
+          });
+      }
+      // The Portals on this machine belong to the worktree the agent leaves;
+      // the Sandbox starts its own from the repository's declarations.
+      await stopAllPortalServices({
+        sessionId: session.id,
+        worktreeDir: target.dir,
+      });
+    }
   }
   await touchNativeSessionStrict(session.id, {
     sandbox: {
@@ -222,10 +364,103 @@ async function attachSandbox(
         : {}),
     },
   });
-  audit({ msg: "sandbox_attach", session_id: session.id, provider });
+  audit({
+    msg: "sandbox_attach",
+    session_id: session.id,
+    provider,
+    from: fromSandbox ? session.sandbox?.provider : "local",
+  });
   const moved = (await findSessionAsync(session.id)) || session;
   void provisionAttachedSandbox(moved, provider);
   return Response.json(await sandboxView(moved));
+}
+
+/**
+ * Move a Sandbox session back to this machine: checkpoint the Sandbox, restore
+ * the checkpoint into a worktree here, and release the Sandbox. Without a
+ * reachable Sandbox the last checkpoint is used; without any checkpoint the
+ * move needs `confirm` and starts from the branch as origin has it.
+ */
+async function detachSandbox(
+  ctx: RouteContext,
+  session: StoredSession,
+): Promise<Response> {
+  const body = (await ctx.req.json().catch(() => ({}))) as {
+    confirm?: unknown;
+  };
+  const refusal = sandboxDetachRefusal(session);
+  if (refusal) return Response.json({ error: refusal }, { status: 409 });
+  if (hostRunBusy(session.id) || hasActiveRunFor(session.id))
+    return Response.json(
+      { error: "Wait for the agent to finish before moving this session." },
+      { status: 409 },
+    );
+  if (!session.branch)
+    return Response.json(
+      { error: "This session has no branch to move." },
+      { status: 409 },
+    );
+  const repo = getRepo(session.repo);
+  let checkpoint = session.sandboxCheckpoint;
+  let reachable = false;
+  if (session.sandbox?.sandboxId) {
+    try {
+      const outcome = await checkpointFromSandbox(session);
+      reachable = outcome !== null;
+      if (outcome && outcome.state !== "skipped")
+        checkpoint = outcome.checkpoint;
+    } catch (error) {
+      return Response.json(
+        {
+          error: `Could not checkpoint the Sandbox: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        { status: 502 },
+      );
+    }
+  }
+  if (!checkpoint && body.confirm !== true)
+    return Response.json(
+      {
+        error: reachable
+          ? "This session's work cannot be checkpointed, so the move starts from the branch as origin has it. Push from the Sandbox first, or move anyway."
+          : "The Sandbox cannot be reached and no checkpoint exists. Move anyway to continue from the branch as origin has it.",
+        confirmRequired: true,
+      },
+      { status: 428 },
+    );
+  let dir: string;
+  try {
+    dir = checkpoint
+      ? await restoreCheckpointToHostWorktree(repo, session.branch, checkpoint)
+      : await createWorktreeForExistingBranch(session.branch, repo.id);
+  } catch (error) {
+    return Response.json(
+      {
+        error: `Could not prepare a worktree on this machine: ${error instanceof Error ? error.message : String(error)}`,
+      },
+      { status: 500 },
+    );
+  }
+  await releaseSandbox(session, "moving to this machine");
+  await touchNativeSessionStrict(session.id, {
+    sandbox: { provider: "local" },
+    worktreeDir: dir,
+    // The engine's state lived in the Sandbox; the next turn seeds a fresh
+    // engine from the stored transcript, as a move into a Sandbox does.
+    claudeSessionId: undefined,
+    codexThreadId: undefined,
+  });
+  audit({
+    msg: "sandbox_detach",
+    session_id: session.id,
+    provider: session.sandbox?.provider,
+    sandbox_id: session.sandbox?.sandboxId,
+    checkpoint: checkpoint?.commit,
+  });
+  console.log(`[sandbox] ${session.id}: moved to this machine at ${dir}`);
+  return Response.json(
+    await sandboxView((await findSessionAsync(session.id)) || session),
+  );
 }
 
 /**
@@ -235,6 +470,8 @@ async function attachSandbox(
  * "interactive": no egress firewall, no credential-minimal projection, under a
  * contract documented as fail-closed (provider.ts). Providers that keep no
  * such record still fail closed on the profile for an automation-owned session.
+ * The session's last checkpoint rides along so the rebuilt Sandbox continues
+ * from it instead of from origin's branch tip.
  */
 export function recreateSandboxSpec(
   session: RecreateSession,
@@ -251,7 +488,21 @@ export function recreateSandboxSpec(
     cwd: session.worktreeDir || undefined,
     ...(trustProfile ? { trustProfile } : {}),
     ...(trust ? { egressAllowlist: trust.egressAllowlist } : {}),
+    ...restoreSpec(session.sandboxCheckpoint),
   };
+}
+
+function checkpointView(session: Pick<StoredSession, "sandboxCheckpoint">) {
+  const checkpoint = session.sandboxCheckpoint;
+  return checkpoint
+    ? {
+        checkpoint: {
+          at: checkpoint.at,
+          commit: checkpoint.commit,
+          branch: checkpoint.branch,
+        },
+      }
+    : {};
 }
 
 async function sandboxView(
@@ -270,8 +521,15 @@ async function sandboxView(
       materialized: false,
       canPause: false,
       canResume: false,
+      ...checkpointView(session),
     };
   }
+  if (recorded.provider === "local")
+    return {
+      enabled: false,
+      status: "none" as const,
+      ...checkpointView(session),
+    };
   if (!recorded.sandboxId) {
     // Nothing exists yet: a fresh or just-moved session provisions on its
     // next turn. Without the recorded lifecycle the client reads "gone" as
@@ -284,6 +542,7 @@ async function sandboxView(
       lifecycle: recorded.lifecycle ?? ("preparing" as const),
       lastLifecycleError: recorded.lastLifecycleError,
       materialized: false,
+      ...checkpointView(session),
     };
   }
   const provider = getSandboxProvider(recorded.provider);
@@ -323,6 +582,7 @@ async function sandboxView(
     canResume: Boolean(provider.resume),
     canDesktop: Boolean(provider.desktop),
     logs,
+    ...checkpointView(session),
   };
 }
 
@@ -330,7 +590,7 @@ export async function handleSandboxRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
   const match = ctx.path.match(
-    /^\/api\/sessions\/([^/]+)\/sandbox(?:\/(pause|resume|recreate|desktop|attach))?$/,
+    /^\/api\/sessions\/([^/]+)\/sandbox(?:\/(pause|resume|recreate|desktop|attach|detach|checkpoint))?$/,
   );
   if (!match) return undefined;
   const session = await findSessionAsync(decodeURIComponent(match[1]!));
@@ -348,9 +608,11 @@ export async function handleSandboxRoutes(
     }
   }
   if (!action || ctx.req.method !== "POST") return undefined;
-  if (action === "attach") {
+  if (action === "attach" || action === "detach") {
     try {
-      return await attachSandbox(ctx, session);
+      return action === "attach"
+        ? await attachSandbox(ctx, session)
+        : await detachSandbox(ctx, session);
     } catch (error) {
       return Response.json(
         { error: error instanceof Error ? error.message : String(error) },
@@ -405,12 +667,32 @@ export async function handleSandboxRoutes(
     );
   const provider = getSandboxProvider(recorded.provider);
   try {
-    if (action === "pause") {
+    if (action === "checkpoint") {
+      const outcome = await checkpointFromSandbox(session);
+      if (!outcome)
+        return Response.json(
+          { error: "The Sandbox cannot be reached right now." },
+          { status: 409 },
+        );
+      if (outcome.state === "skipped")
+        return Response.json(
+          { error: `Nothing to checkpoint: ${outcome.reason}.` },
+          { status: 409 },
+        );
+    } else if (action === "pause") {
       if (!provider.pause)
         return Response.json(
           { error: `${recorded.provider} does not expose manual pause` },
           { status: 400 },
         );
+      // Save what the Sandbox holds before it stops; a stop that later turns
+      // into a lost disk then costs nothing.
+      await checkpointFromSandbox(session).catch((error) =>
+        console.warn(
+          `[sandbox] ${session.id}: checkpoint before sleep failed:`,
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
       // The Portal URLs stay up through sleep; opening one wakes the Sandbox.
       suspendSandboxPreviewRoutes(recorded.sandboxId);
       touchNativeSession(session.id, {
@@ -443,14 +725,27 @@ export async function handleSandboxRoutes(
         return Response.json(
           {
             error:
-              "Recreate deletes unpushed sandbox workspace data; confirm is required",
+              "Rebuilding replaces the Sandbox machine; confirm is required",
           },
           { status: 400 },
         );
+      // Take the Sandbox's current state along when it can still be read.
+      // A Sandbox that is already lost rebuilds from its last checkpoint.
+      let current = session;
+      try {
+        const outcome = await checkpointFromSandbox(session);
+        if (outcome && outcome.state !== "skipped")
+          current = (await findSessionAsync(session.id)) || session;
+      } catch (error) {
+        console.warn(
+          `[sandbox] ${session.id}: checkpoint before rebuild failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
       // destroy() deletes the provider's state file, so the sandbox's
       // recorded trust policy has to be read before it.
       const spec = recreateSandboxSpec(
-        session,
+        current,
         recordedTrustPolicy(recorded.provider, session.id),
       );
       touchNativeSession(session.id, {
@@ -471,6 +766,9 @@ export async function handleSandboxRoutes(
           lifecycle: "awake",
           lastLifecycleError: undefined,
         },
+        // The engine's database lived in the machine that is gone.
+        claudeSessionId: undefined,
+        codexThreadId: undefined,
       });
     }
     if (action === "resume")
@@ -492,13 +790,14 @@ export async function handleSandboxRoutes(
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    touchNativeSession(session.id, {
-      sandbox: {
-        ...recorded,
-        lifecycle: "needs_attention",
-        lastLifecycleError: message.slice(0, 240),
-      },
-    });
+    if (action !== "checkpoint")
+      touchNativeSession(session.id, {
+        sandbox: {
+          ...recorded,
+          lifecycle: "needs_attention",
+          lastLifecycleError: message.slice(0, 240),
+        },
+      });
     return Response.json({ error: message }, { status: 500 });
   }
 }

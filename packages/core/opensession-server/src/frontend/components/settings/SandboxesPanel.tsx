@@ -14,6 +14,7 @@ import {
   fetchSandboxEnvironments,
   fetchSandboxConnections,
   rebuildSandboxEnvironment,
+  setSandboxKeepReady,
   testSandboxConnection,
   updateSandboxConnection,
 } from "../../lib/api/sandboxes";
@@ -779,6 +780,23 @@ export function SandboxesPanel() {
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
   const [environmentTarget, setEnvironmentTarget] =
     useState<SandboxEnvironmentInfo>();
+  const [keepReadySaving, setKeepReadySaving] = useState<string | null>(null);
+
+  async function toggleKeepReady(
+    environment: SandboxEnvironmentInfo,
+    enabled: boolean,
+  ) {
+    const key = `${environment.repo}:${environment.provider}`;
+    setKeepReadySaving(key);
+    await setSandboxKeepReady(environment.repo, environment.provider, enabled)
+      .then((response) => setEnvironments(response.environments))
+      .catch((error) =>
+        toast(errorMessage(error, "Failed to update the ready Sandbox"), {
+          variant: "error",
+        }),
+      )
+      .finally(() => setKeepReadySaving(null));
+  }
 
   function apply(response: SandboxConnectionsResponse) {
     setConnections(response.connections);
@@ -981,6 +999,37 @@ export function SandboxesPanel() {
                         <div className="mt-1 text-meta text-faint">
                           {machineSummary(environment)}
                         </div>
+                        {environment.state === "ready" && !running && (
+                          <label className="mt-2 flex w-fit cursor-pointer items-center gap-2 text-meta text-dim">
+                            <Switch
+                              size="sm"
+                              checked={Boolean(environment.keepReady)}
+                              disabled={
+                                !canManage ||
+                                keepReadySaving ===
+                                  `${environment.repo}:${environment.provider}`
+                              }
+                              onCheckedChange={(checked) =>
+                                void toggleKeepReady(environment, checked)
+                              }
+                              aria-label={`Keep one ${provider.label} Sandbox ready for ${environment.repo}`}
+                            />
+                            <span>
+                              Keep one ready
+                              {environment.keepReady &&
+                                environment.readyState && (
+                                  <span className="text-faint">
+                                    {" · "}
+                                    {environment.readyState === "ready"
+                                      ? "waiting"
+                                      : environment.readyState === "failed"
+                                        ? "failed, retrying"
+                                        : "preparing"}
+                                  </span>
+                                )}
+                            </span>
+                          </label>
+                        )}
                         {running && (
                           <div className="mt-2 max-w-[24rem]">
                             <div className="h-1 overflow-hidden rounded-full bg-hover">
@@ -1048,7 +1097,9 @@ export function SandboxesPanel() {
           <SettingsHint>
             Project snapshots expire after 24 hours and refresh only for
             projects you have chosen here. A snapshot never contains session or
-            model credentials.
+            model credentials. Keep one ready holds a prepared Sandbox for the
+            project between sessions so the next one starts at once; it counts
+            against the live prewarm limit and is refilled after each start.
           </SettingsHint>
         </>
       )}

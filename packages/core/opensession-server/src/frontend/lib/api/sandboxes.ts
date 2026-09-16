@@ -20,6 +20,15 @@ export interface SessionSandboxStatus {
   canResume?: boolean;
   canDesktop?: boolean;
   logs?: { setup?: string; resume?: string };
+  /** The last workspace checkpoint pushed to origin; absent until the first
+   *  clean turn finishes or when the repository cannot hold one. */
+  checkpoint?: SandboxCheckpointInfo;
+}
+
+export interface SandboxCheckpointInfo {
+  at: string;
+  commit: string;
+  branch: string;
 }
 
 export interface SandboxDesktopLink {
@@ -71,13 +80,28 @@ export function attachSandbox(
 
 export function sandboxAction(
   sessionId: string,
-  action: "pause" | "resume" | "recreate",
+  action: "pause" | "resume" | "recreate" | "checkpoint",
 ): Promise<SessionSandboxStatus> {
   const path = `/sessions/${encodeURIComponent(sessionId)}/sandbox/${action}`;
   const label = `Failed to ${action} sandbox`;
   return action === "recreate"
     ? request(path, { method: "POST", body: { confirm: true }, label })
     : request(path, { method: "POST", label });
+}
+
+/** Moves a Sandbox session back to this machine: the Sandbox's work is
+ * checkpointed, restored into a worktree here, and the Sandbox is released.
+ * A 428 means the Sandbox cannot be reached and no checkpoint exists; repeat
+ * with `confirm` to move with the branch as origin has it. */
+export function detachSandbox(
+  sessionId: string,
+  opts: { confirm?: boolean } = {},
+): Promise<SessionSandboxStatus> {
+  return request(`/sessions/${encodeURIComponent(sessionId)}/sandbox/detach`, {
+    method: "POST",
+    body: opts.confirm ? { confirm: true } : {},
+    label: "Failed to move the session to this machine",
+  });
 }
 
 export interface SandboxConnectionsResponse {
@@ -99,6 +123,9 @@ export interface SandboxEnvironmentInfo {
   failureSummary?: string;
   mode?: "template" | "per_session";
   settings?: SandboxMachineSettings;
+  /** One prepared Sandbox is kept waiting for this project. */
+  keepReady?: boolean;
+  readyState?: "ready" | "preparing" | "failed";
 }
 
 export interface SandboxMachineSettings {
@@ -170,6 +197,21 @@ export function fetchSandboxEnvironments(): Promise<{
   return request("/sandbox/environments", {
     label: "Failed to load sandbox environments",
   });
+}
+
+export function setSandboxKeepReady(
+  repo: string,
+  provider: SandboxConnectionInfo["provider"],
+  enabled: boolean,
+): Promise<{ environments: SandboxEnvironmentInfo[] }> {
+  return request(
+    `/sandbox/environments/${encodeURIComponent(repo)}/${provider}/keep-ready`,
+    {
+      method: "PUT",
+      body: { enabled },
+      label: `Failed to update the ready Sandbox for ${repo}`,
+    },
+  );
 }
 
 export function rebuildSandboxEnvironment(

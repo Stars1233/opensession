@@ -40,6 +40,10 @@ const DISABLE_FILE = `${OPENSESSION_SESSIONS_DIR}/disable-sandboxes`;
 
 export interface SandboxRepoOverride {
   provider?: SandboxProviderId;
+  /** Where NEW interactive sessions on this repo run when nobody chose.
+   *  Beats the workspace and personal defaults; an explicit per-session
+   *  choice still wins. */
+  sessionDefault?: RunnableSandboxProviderId | "none";
 }
 
 /** How remote providers authenticate `git clone` inside the sandbox (they
@@ -177,7 +181,17 @@ export function sandboxConfig(): SandboxConfig {
       if (raw?.perRepo && typeof raw.perRepo === "object") {
         for (const [repoId, o] of Object.entries<any>(raw.perRepo)) {
           const provider = asProviderId(o?.provider);
-          if (provider) perRepo[repoId] = { provider };
+          const sessionDefault =
+            o?.sessionDefault === "none"
+              ? ("none" as const)
+              : isRunnableSandboxProvider(o?.sessionDefault)
+                ? o.sessionDefault
+                : undefined;
+          if (provider || sessionDefault)
+            perRepo[repoId] = {
+              ...(provider ? { provider } : {}),
+              ...(sessionDefault ? { sessionDefault } : {}),
+            };
         }
       }
       const str = (v: unknown): string | undefined =>
@@ -436,20 +450,127 @@ export function setWorkspaceSandboxDefault(
       `Sandbox provider "${normalized}" is not currently available`,
     );
   }
-  const path = configPath();
   // Absence already means None; do not create a config file merely to record
   // the default, because config-file presence is the sandbox feature gate.
-  if (normalized === "none" && !existsSync(path)) return "none";
+  if (normalized === "none" && !existsSync(configPath())) return "none";
+  updateSandboxConfigFile((raw) => {
+    raw.sessionDefault = normalized;
+  });
+  return normalized as RunnableSandboxProviderId | "none";
+}
+
+/** Rewrite one key of the config file in place, keeping every other key
+ * (provider secrets, connections, operator settings) byte-for-byte. */
+function updateSandboxConfigFile(
+  mutate: (raw: Record<string, unknown>) => void,
+): void {
+  const path = configPath();
   let raw: Record<string, unknown> = {};
   try {
     const parsed = JSON.parse(readFileSync(path, "utf-8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
       raw = parsed;
   } catch {}
-  raw.sessionDefault = normalized;
+  mutate(raw);
   mkdirSync(dirname(path), { recursive: true });
   writeJsonAtomic(path, raw);
-  return normalized as RunnableSandboxProviderId | "none";
+}
+
+/** Persist where new sessions on one repo run. `null` or "workspace" removes
+ * the override so the workspace and personal defaults apply again. */
+export function setRepoSandboxDefault(
+  repoId: string,
+  value: string | null,
+): RunnableSandboxProviderId | "none" | null {
+  const normalized = value?.trim().toLowerCase() || "workspace";
+  if (
+    normalized !== "workspace" &&
+    normalized !== "none" &&
+    !isRunnableSandboxProvider(normalized)
+  ) {
+    throw new Error(`Unknown sandbox provider "${value}"`);
+  }
+  if (
+    normalized !== "workspace" &&
+    normalized !== "none" &&
+    sandboxProviderUsability(normalized).state !== "usable"
+  ) {
+    throw new Error(
+      `Sandbox provider "${normalized}" is not currently available`,
+    );
+  }
+  if (normalized === "workspace" && !existsSync(configPath())) return null;
+  updateSandboxConfigFile((raw) => {
+    const perRepo =
+      raw.perRepo &&
+      typeof raw.perRepo === "object" &&
+      !Array.isArray(raw.perRepo)
+        ? (raw.perRepo as Record<string, Record<string, unknown>>)
+        : {};
+    const entry =
+      perRepo[repoId] && typeof perRepo[repoId] === "object"
+        ? { ...perRepo[repoId] }
+        : {};
+    if (normalized === "workspace") delete entry.sessionDefault;
+    else entry.sessionDefault = normalized;
+    if (Object.keys(entry).length) perRepo[repoId] = entry;
+    else delete perRepo[repoId];
+    if (Object.keys(perRepo).length) raw.perRepo = perRepo;
+    else delete raw.perRepo;
+  });
+  return normalized === "workspace"
+    ? null
+    : (normalized as RunnableSandboxProviderId | "none");
+}
+
+/** Where new sessions on `repoId` run when nobody chose, or null when the
+ * repo defers to the workspace and personal defaults. */
+export function repoSandboxDefault(
+  repoId: string | undefined,
+): RunnableSandboxProviderId | "none" | null {
+  if (!repoId) return null;
+  return sandboxConfig().perRepo?.[repoId]?.sessionDefault ?? null;
+}
+
+/** Keep one prepared Sandbox waiting for `repoId` on `provider`, or stop
+ * doing so. Persists `prewarm.keepReady`; the prewarm sweep acts on it. */
+export function setKeepReadyTarget(
+  provider: string,
+  repoId: string,
+  enabled: boolean,
+): Array<{ provider: string; repoId: string }> {
+  if (!isRunnableSandboxProvider(provider))
+    throw new Error(`Unknown sandbox provider "${provider}"`);
+  if (enabled && sandboxProviderUsability(provider).state !== "usable")
+    throw new Error(
+      `Sandbox provider "${provider}" is not currently available`,
+    );
+  if (!enabled && !existsSync(configPath())) return [];
+  let next: Array<{ provider: string; repoId: string }> = [];
+  updateSandboxConfigFile((raw) => {
+    const prewarm =
+      raw.prewarm &&
+      typeof raw.prewarm === "object" &&
+      !Array.isArray(raw.prewarm)
+        ? { ...(raw.prewarm as Record<string, unknown>) }
+        : {};
+    const current = Array.isArray(prewarm.keepReady)
+      ? (prewarm.keepReady as Array<{ provider?: unknown; repoId?: unknown }>)
+          .filter(
+            (target): target is { provider: string; repoId: string } =>
+              typeof target?.provider === "string" &&
+              typeof target?.repoId === "string",
+          )
+          .filter(
+            (target) =>
+              !(target.provider === provider && target.repoId === repoId),
+          )
+      : [];
+    next = enabled ? [...current, { provider, repoId }] : current;
+    prewarm.keepReady = next;
+    raw.prewarm = prewarm;
+  });
+  return next;
 }
 
 export function isRunnableSandboxProvider(

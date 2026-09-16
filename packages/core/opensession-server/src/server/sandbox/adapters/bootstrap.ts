@@ -1752,7 +1752,13 @@ export async function setupRemoteWorkspace(
   defaultBranch: string,
   repoId?: string,
   identity?: Omit<WorkloadIdentityContext, "lifecycle">,
-  options: { seedPrivateFiles?: boolean; runLifecycleHooks?: boolean } = {},
+  options: {
+    seedPrivateFiles?: boolean;
+    runLifecycleHooks?: boolean;
+    /** Checkpoint to restore into a FRESHLY materialized workspace (see
+     * sandbox/checkpoint.ts). A workspace already on disk keeps its disk. */
+    restoreCheckpoint?: { ref: string; commit: string };
+  } = {},
 ): Promise<void> {
   const startedAt = Date.now();
   const mark = (stage: string) =>
@@ -1864,6 +1870,25 @@ export async function setupRemoteWorkspace(
     }
   }
   mark("branch ready");
+  // A fresh workspace (cold clone or adopted warm clone) continues from the
+  // session's last checkpoint while origin still carries the clone credential:
+  // the branch lands on the checkpoint head with its uncommitted changes. A
+  // failure here is loud, because silently starting from origin's branch tip
+  // is exactly the data loss the checkpoint exists to prevent.
+  if (options.restoreCheckpoint && workspaceState !== "cwd") {
+    const { ref, commit } = options.restoreCheckpoint;
+    const restored = await driver.exec(checkpointRestoreScript(ref, commit), {
+      cwd,
+      timeoutMs: 300_000,
+    });
+    if (restored.exitCode !== 0) {
+      throw new Error(
+        `could not restore checkpoint ${commit.slice(0, 12)} from ${ref}: ` +
+          `${redactUrl((restored.stderr || restored.stdout).trim().slice(0, 300))}`,
+      );
+    }
+    mark(`checkpoint ${commit.slice(0, 12)} restored`);
+  }
   // Installation tokens expire in about an hour. Keep them only for this
   // bounded clone/fetch, then leave a credential-free GitHub origin. Every run
   // projects a fresh token through the process-local credential helper below,
@@ -1898,6 +1923,20 @@ export async function setupRemoteWorkspace(
     );
     mark("lifecycle ready");
   }
+}
+
+/** Shell that restores a checkpoint into the checkout at the current
+ * directory: fetch the hidden ref, verify it is the recorded commit, land the
+ * branch on the checkpoint's parent, and leave the checkpointed tree as
+ * uncommitted changes (sandbox/checkpoint.ts explains the commit shape). */
+export function checkpointRestoreScript(ref: string, commit: string): string {
+  return [
+    `git fetch --no-tags --quiet origin ${shellQuoteWord(`+${ref}:refs/opensession/checkpoint`)}`,
+    `test "$(git rev-parse --verify 'refs/opensession/checkpoint^{commit}')" = ${shellQuoteWord(commit)}`,
+    "git -c advice.detachedHead=false reset --hard --quiet refs/opensession/checkpoint",
+    "git reset --mixed --quiet 'refs/opensession/checkpoint^'",
+    "git update-ref -d refs/opensession/checkpoint",
+  ].join(" && ");
 }
 
 const REMOTE_LIFECYCLE_DIR = `${REMOTE_HOME}/.opensession/lifecycle`;

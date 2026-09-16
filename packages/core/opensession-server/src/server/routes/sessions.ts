@@ -106,6 +106,7 @@ import { suggestBranchName } from "../suggest-branch";
 import { searchIndex } from "../session-index";
 import { resolvePrTarget } from "../session-repos";
 import { destroySessionSandbox } from "../session-sandbox";
+import { deleteSessionCheckpoint } from "../sandbox/checkpoint";
 import { stopAllPortalServices } from "../portal-supervisor";
 import { dropRunnerPortalRoutes } from "../runner-portals";
 import { cleanupRunnerWorkspace } from "../runner-ws";
@@ -2108,6 +2109,9 @@ export async function handleSessionsRoutes(
       // loss is the mode's documented contract). Best-effort and detached:
       // a docker hiccup must never block the delete.
       destroySessionSandbox(session, "delete");
+      // The hidden checkpoint ref on origin goes with the session; an
+      // archived session keeps it because it may be the only copy of its work.
+      void deleteSessionCheckpoint(session).catch(() => {});
       // If that was the workspace's last session, delete the workspace too.
       // Otherwise auto-wrapped 1:1 workspaces linger as undeletable empty
       // sidebar rows. PR-backed workspaces (`key`) stay because they regroup new

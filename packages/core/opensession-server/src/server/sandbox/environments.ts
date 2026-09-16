@@ -8,6 +8,7 @@ import {
   sandboxConnectionReady,
   type WorkspaceSandboxProvider,
 } from "./connections";
+import { sandboxPrewarmConfig, setKeepReadyTarget } from "./config";
 import {
   invalidateRemoteRepoTemplate,
   readRemoteRepoTemplate,
@@ -40,6 +41,11 @@ export interface SandboxEnvironment {
   retryAt?: string;
   mode?: "template";
   settings?: SandboxMachineSettings;
+  /** One prepared Sandbox is kept waiting for this project between
+   *  sessions (`prewarm.keepReady`). */
+  keepReady?: boolean;
+  /** Where that waiting Sandbox stands right now. */
+  readyState?: "ready" | "preparing" | "failed";
 }
 
 interface StoredEnvironments {
@@ -216,14 +222,54 @@ async function derivedEnvironment(
   );
 }
 
+function readyPool(
+  repo: string,
+  provider: WorkspaceSandboxProvider,
+): Pick<SandboxEnvironment, "keepReady" | "readyState"> {
+  const keepReady = sandboxPrewarmConfig().keepReady.some(
+    (target) => target.provider === provider && target.repoId === repo,
+  );
+  if (!keepReady) return {};
+  const entry = prewarmStatus(provider, repo);
+  const readyState =
+    entry?.state === "ready"
+      ? ("ready" as const)
+      : entry?.state === "failed"
+        ? ("failed" as const)
+        : ("preparing" as const);
+  return { keepReady, readyState };
+}
+
 export async function listSandboxEnvironments(): Promise<SandboxEnvironment[]> {
   const out: SandboxEnvironment[] = [];
   const providers: WorkspaceSandboxProvider[] = ["daytona", "box"];
   for (const repo of Object.keys(REPOS)) {
     for (const provider of providers)
-      out.push(await derivedEnvironment(repo, provider));
+      out.push({
+        ...(await derivedEnvironment(repo, provider)),
+        ...readyPool(repo, provider),
+      });
   }
   return out;
+}
+
+/** Keep one prepared Sandbox waiting for a project, or stop. Enabling asks
+ * for the prewarm right away; the sweep refills it after every adoption.
+ * Disabling leaves a prepared Sandbox to expire on its ordinary TTL. */
+export async function setSandboxEnvironmentKeepReady(
+  repo: string,
+  provider: WorkspaceSandboxProvider,
+  enabled: boolean,
+): Promise<void> {
+  if (!(repo in REPOS)) throw new Error(`Unknown repo "${repo}"`);
+  setKeepReadyTarget(provider, repo, enabled);
+  if (!enabled) return;
+  void requestPrewarm(provider, repo, "workspace-admin").catch((error) => {
+    console.warn(
+      `[sandbox-environments] keep-ready prewarm ${provider}:${repo}:`,
+      error,
+    );
+  });
 }
 
 function delay(ms: number): Promise<void> {
