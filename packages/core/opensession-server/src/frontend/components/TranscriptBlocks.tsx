@@ -16,6 +16,7 @@ import {
   turnScrollAnchor,
 } from "../lib/transcript-block-identity";
 import { MessageBubble } from "./MessageBubble";
+import { outgoingAgentMessage } from "../lib/agent-message";
 import { NoteBubble } from "./NoteBubble";
 import { ToolSection, TurnBlock } from "./TurnBlock";
 import {
@@ -487,6 +488,9 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   for (const entry of renderedEntries) {
     if (entry.type === "tool_result") {
       continue; // rendered inside turn blocks via toolResults
+    } else if (outgoingAgentMessage(entry)) {
+      flushTurn();
+      blocks.push({ kind: "entry", entry });
     } else if (entry.type === "assistant" || entry.type === "tool_use") {
       turn.push(entry);
     } else {
@@ -615,6 +619,11 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
                       reviewBlockRole(inner).kind !== "handoff" ? (
                       <MessageBubble
                         entry={inner.entry}
+                        toolResult={
+                          inner.entry.toolUseId
+                            ? toolResults.get(inner.entry.toolUseId)
+                            : undefined
+                        }
                         enter={
                           optimisticEntryIds.has(inner.entry.id) ||
                           Boolean(
@@ -676,6 +685,11 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
         ) : (
           <MessageBubble
             entry={block.entry}
+            toolResult={
+              block.entry.toolUseId
+                ? toolResults.get(block.entry.toolUseId)
+                : undefined
+            }
             enter={
               optimisticEntryIds.has(block.entry.id) ||
               Boolean(isLiveTail && block.entry.type !== "user")

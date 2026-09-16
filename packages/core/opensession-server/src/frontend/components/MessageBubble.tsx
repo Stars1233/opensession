@@ -22,6 +22,11 @@ import { Collapsible, collapsiblePanelClasses } from "../ui/collapsible";
 import { pastedTextLineLabel } from "@tellahq/opensession-protocol/pasted-text";
 import { personKey } from "../lib/review-queue";
 import { AnsweredAskCard } from "./AnsweredAskCard";
+import { AgentIdentity } from "./AgentIdentity";
+import {
+  agentDeliveryStatus,
+  outgoingAgentMessage,
+} from "../lib/agent-message";
 
 import {
   fileChipCard,
@@ -184,10 +189,9 @@ export function ClampedBody({
 /**
  * The one way a transcript renders something that isn't a message.
  *
- * Every operational line goes through here — a runner notice, a recap, a
- * context compaction, a worker's report, review findings, a heads-up from
- * another session, a restart resume. The server decides which of those an
- * entry is (classifyEntry in the protocol's notices.ts) and hands back a
+ * Operational lines go through here: runner notices, recaps, compactions,
+ * review findings, and restart resumes. Agent correspondence renders as chat.
+ * The server decides which of those an entry is (classifyEntry in the protocol's notices.ts) and hands back a
  * title, a tone, and at most one body and one action; this component is the
  * only place that decides what any of them LOOK like. Adding a tenth kind of
  * notice must not add a tenth rendering.
@@ -443,6 +447,8 @@ function BubbleMeta({ ts, onEdit }: { ts?: string; onEdit?: () => void }) {
 
 interface Props {
   entry: TranscriptEntry;
+  /** Delivery evidence for an outgoing agent message. */
+  toolResult?: TranscriptEntry;
   /** This message was inserted at the live edge in the current build. */
   enter?: boolean;
   /** Provider reasoning summary, including legacy rows inferred by the turn
@@ -714,6 +720,7 @@ function PastedTextCard({
 // markdown/highlighting.
 export const MessageBubble = function MessageBubble({
   entry,
+  toolResult,
   enter = false,
   reasoning = false,
   pendingDelivery = false,
@@ -742,7 +749,73 @@ export const MessageBubble = function MessageBubble({
   if (e.notice?.kind === "ask" && e.notice.ask)
     return <AnsweredAskCard record={e.notice.ask} entryId={e.id} />;
 
-  // Anything else that isn't a message is a notice, whatever produced it.
+  const outgoing = outgoingAgentMessage(e);
+  const deliveryStatus = agentDeliveryStatus(toolResult);
+  const peerMessage =
+    e.notice?.kind === "session-notice" || e.notice?.kind === "worker-report";
+  if (outgoing || peerMessage) {
+    const senderId = outgoing ? sessionId : e.notice?.link?.sessionId;
+    return (
+      <div
+        className={cn(msgRow, enterClass)}
+        data-eid={e.id}
+        data-agent-message={outgoing ? "outgoing" : "incoming"}
+      >
+        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint">
+          <AgentIdentity sessionId={senderId} linked={senderId !== sessionId} />
+          <span>Agent</span>
+          <MsgTime ts={e.timestamp} />
+        </div>
+        {outgoing && (
+          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 text-meta text-faint">
+            <span>To</span>
+            <AgentIdentity sessionId={outgoing.to} linked />
+            <span
+              className={deliveryStatus === "Not sent" ? "text-red" : undefined}
+            >
+              {deliveryStatus}
+            </span>
+          </div>
+        )}
+        {e.notice?.kind === "worker-report" && (
+          <span className="mb-1 text-meta text-faint">Worker report</span>
+        )}
+        <ClampedBody
+          className={cn(
+            msgBody,
+            "markdown rounded-lg bg-panel px-3.5 py-2.5 text-fg",
+          )}
+          content={outgoing?.content ?? displayContent}
+          entry={outgoing ? undefined : e}
+          sessionId={sessionId}
+        />
+        {outgoing && toolResult && (
+          <Collapsible.Root className="mt-1">
+            <Collapsible.Trigger className="rounded-control py-1 text-meta text-faint hover:text-fg phone:min-h-11">
+              Delivery details
+            </Collapsible.Trigger>
+            <Collapsible.Panel className={collapsiblePanelClasses}>
+              <ClampedBody
+                content={toolResult.content}
+                entry={toolResult}
+                sessionId={sessionId}
+                className={cn(msgBody, "markdown text-dim")}
+              />
+            </Collapsible.Panel>
+          </Collapsible.Root>
+        )}
+        <EntryImages
+          images={unplacedMedia(e.images, e.content)}
+          sessionId={sessionId}
+        />
+        <EntryVideos videos={unplacedMedia(e.videos, e.content)} />
+        <EntryFiles files={e.files} />
+        <EntryPastedTexts entry={e} sessionId={sessionId} />
+      </div>
+    );
+  }
+
+  // Operational events remain notices; agent correspondence is conversation.
   if (e.notice)
     return (
       <NoticeRow
@@ -889,11 +962,16 @@ export const MessageBubble = function MessageBubble({
     );
   }
 
-  // assistant — no speaker label: every left-aligned bubble is the agent, so
-  // the name row was pure noise above each answer. The trailing row is for
-  // media the body did not already place (lib/placed-media.ts).
+  // Assistant replies carry the same identity as this session's peer messages.
+  // The trailing row is for media the body did not already place (lib/placed-media.ts).
   return (
     <div className={cn(msgRow, enterClass)} data-eid={e.id}>
+      {sessionId && (
+        <div className="mb-2 flex items-center gap-2">
+          <AgentIdentity sessionId={sessionId} />
+          <span className="text-meta text-faint">Agent</span>
+        </div>
+      )}
       <ClampedBody
         className={cn(msgBody, "markdown text-fg")}
         content={displayContent}
