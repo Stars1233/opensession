@@ -150,7 +150,9 @@ export async function sandboxForPortals(
  * write happen on the lane, where deletion and moves also run, so the
  * machine is either recorded on a session that still wants it (and goes
  * with that session) or torn down here; a session deleted or moved into a
- * Sandbox meanwhile gets no Portal Sandbox.
+ * Sandbox meanwhile gets no Portal Sandbox. Turns that finished while the
+ * machine came up are caught up on that same lane step, so the machine is
+ * handed back on the worktree as it is now, not as it was a minute ago.
  */
 async function provisionPortalSandbox(
   session: UnifiedSession,
@@ -160,9 +162,12 @@ async function provisionPortalSandbox(
   await touchNativeSessionStrict(session.id, {
     portalSandbox: { provider, lifecycle: "preparing" },
   });
-  // Cleared when the session no longer wants a Portal Sandbox (deleted or
-  // moved): its record is not this call's to write any more.
-  let owned = true;
+  // What the failure path may write: the preparing record until the machine
+  // is recorded on the session; nothing once it is recorded (the record then
+  // carries the machine, and a refresh failure is noted on it by the
+  // refresh itself) or once the session stopped wanting a Portal Sandbox.
+  // (Assigned inside the lane callback, which the narrowing does not see.)
+  let phase = "preparing" as "preparing" | "recorded" | "disowned";
   try {
     // The machine mirrors this worktree, and the checkpoint just taken is
     // the only faithful copy of it. A worktree that cannot be checkpointed
@@ -212,11 +217,20 @@ async function provisionPortalSandbox(
             syncedCommit: checkpoint.commit,
           },
         });
+        phase = "recorded";
+        // A turn that finished while the machine came up moved the worktree
+        // past `checkpoint` (its post-turn refresh saw a preparing record and
+        // returned). Capture and land that now, still on the lane, so the
+        // start waiting on this machine never sees the older tree. A failure
+        // here fails the start, with the machine kept and recorded: the next
+        // wake retries the landing.
+        await syncPortalSandbox(owner, sandbox);
       });
     } catch (error) {
+      if (phase === "recorded") throw error;
       // Not recorded on any session (gone, moved, or the write itself was
       // refused): nothing else will ever tear this machine down.
-      owned = false;
+      phase = "disowned";
       await teardownSandbox(provider, sandbox.id).catch((teardownError) =>
         console.warn(
           `[sandbox] ${session.id}: unowned Portal Sandbox ${sandbox.id} not destroyed:`,
@@ -232,8 +246,9 @@ async function provisionPortalSandbox(
     );
     return sandbox;
   } catch (error) {
+    if (phase === "recorded") throw error;
     const message = error instanceof Error ? error.message : String(error);
-    if (owned)
+    if (phase === "preparing")
       touchNativeSession(session.id, {
         portalSandbox: {
           provider,

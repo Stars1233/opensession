@@ -196,7 +196,8 @@ started, by the person from the Portals panel or by the agent through
   shows older code;
 - provisions a **Portal Sandbox** for the session (the provider names it
   `<session id>--portals`) and materializes the branch on that checkpoint,
-  exactly as a rebuild would;
+  exactly as a rebuild would, then checkpoints and lands once more, so a
+  turn that finished while the machine came up is on it too;
 - starts the Portal there and relays it as usual. The Portals panel says so,
   with the machine's state while it prepares, sleeps, or needs attention.
 
