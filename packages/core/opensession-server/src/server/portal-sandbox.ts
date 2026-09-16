@@ -106,9 +106,11 @@ export function portalsInSandbox(session: PortalSession): boolean {
  * project that runs Portals remotely. `wake` is an explicit compute action
  * (starting or restarting a Portal): it may wake a sleeping machine and
  * lands the latest host checkpoint in a Portal Sandbox first, so the app
- * that comes up shows the current tree. A Portal Sandbox the provider has
- * lost is replaced when provisioning is allowed. Throws when provisioning
- * fails; the reason is recorded on the session as well.
+ * that comes up shows the current tree; when that landing fails the wake
+ * fails with it, rather than starting the app on whatever the machine had
+ * before. A Portal Sandbox the provider has lost is replaced when
+ * provisioning is allowed. Throws when provisioning or the landing fails;
+ * the reason is recorded on the session as well.
  */
 export async function sandboxForPortals(
   session: UnifiedSession,
@@ -122,13 +124,7 @@ export async function sandboxForPortals(
       wake: options.wake,
     });
     if (sandbox) {
-      if (options.wake)
-        await syncPortalSandbox(session, sandbox).catch((error) =>
-          console.warn(
-            `[sandbox] ${session.id}: Portal Sandbox not refreshed:`,
-            error instanceof Error ? error.message : String(error),
-          ),
-        );
+      if (options.wake) await syncPortalSandbox(session, sandbox);
       return sandbox;
     }
     if (
@@ -148,11 +144,14 @@ export async function sandboxForPortals(
 
 /**
  * Create the Portal Sandbox: checkpoint the host worktree so uncommitted
- * work travels too, then materialize a workspace on the checkpoint. Not on
- * the lifecycle lane (the checkpoint claims it for itself): a machine can
- * take a minute to come up and turns need not wait for it. A session
- * deleted or moved into a Sandbox meanwhile gets no Portal Sandbox; the one
- * just created is torn down again.
+ * work travels too, then materialize a workspace on the checkpoint. The
+ * provisioning itself is not on the lifecycle lane (the checkpoint claims it
+ * for itself): a machine can take a minute to come up and turns need not
+ * wait for it. Taking ownership is: the final owner check and the record
+ * write happen on the lane, where deletion and moves also run, so the
+ * machine is either recorded on a session that still wants it (and goes
+ * with that session) or torn down here; a session deleted or moved into a
+ * Sandbox meanwhile gets no Portal Sandbox.
  */
 async function provisionPortalSandbox(
   session: UnifiedSession,
@@ -162,6 +161,9 @@ async function provisionPortalSandbox(
   await touchNativeSessionStrict(session.id, {
     portalSandbox: { provider, lifecycle: "preparing" },
   });
+  // Cleared when the session no longer wants a Portal Sandbox (deleted or
+  // moved): its record is not this call's to write any more.
+  let owned = true;
   try {
     const outcome = await checkpointHostWorkspace(session, dir);
     if (outcome.state === "skipped")
@@ -189,28 +191,43 @@ async function provisionPortalSandbox(
           : {}),
       },
     );
-    const owner = await findSessionAsync(session.id);
-    if (
-      !owner ||
-      owner.sandbox?.sandboxId ||
-      owner.portalSandbox?.provider !== provider
-    ) {
-      await teardownSandbox(provider, sandbox.id).catch(() => {});
-      throw new Error(
-        owner
-          ? "the session moved while its Portal Sandbox was being prepared"
-          : "the session was deleted",
+    try {
+      await withSessionLifecycleLane(session.id, async () => {
+        const owner = await findSessionAsync(session.id);
+        if (
+          !owner ||
+          owner.sandbox?.sandboxId ||
+          owner.portalSandbox?.provider !== provider
+        )
+          throw new Error(
+            owner
+              ? "the session moved while its Portal Sandbox was being prepared"
+              : "the session was deleted",
+          );
+        await touchNativeSessionStrict(session.id, {
+          portalSandbox: {
+            provider,
+            sandboxId: sandbox.id,
+            lifecycle: "awake",
+            lastLifecycleError: undefined,
+            syncedCommit: checkpoint?.commit,
+          },
+        });
+      });
+    } catch (error) {
+      // Not recorded on any session (gone, moved, or the write itself was
+      // refused): nothing else will ever tear this machine down.
+      owned = false;
+      await teardownSandbox(provider, sandbox.id).catch((teardownError) =>
+        console.warn(
+          `[sandbox] ${session.id}: unowned Portal Sandbox ${sandbox.id} not destroyed:`,
+          teardownError instanceof Error
+            ? teardownError.message
+            : String(teardownError),
+        ),
       );
+      throw error;
     }
-    await touchNativeSessionStrict(session.id, {
-      portalSandbox: {
-        provider,
-        sandboxId: sandbox.id,
-        lifecycle: "awake",
-        lastLifecycleError: undefined,
-        syncedCommit: checkpoint?.commit,
-      },
-    });
     console.log(
       `[sandbox] ${session.id}: Portal Sandbox ${sandbox.id} ready` +
         (checkpoint ? ` on checkpoint ${checkpoint.commit.slice(0, 12)}` : ""),
@@ -218,13 +235,14 @@ async function provisionPortalSandbox(
     return sandbox;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    touchNativeSession(session.id, {
-      portalSandbox: {
-        provider,
-        lifecycle: "needs_attention",
-        lastLifecycleError: message.slice(0, 240),
-      },
-    });
+    if (owned)
+      touchNativeSession(session.id, {
+        portalSandbox: {
+          provider,
+          lifecycle: "needs_attention",
+          lastLifecycleError: message.slice(0, 240),
+        },
+      });
     throw new Error(`Could not prepare the Portal Sandbox: ${message}`);
   }
 }
@@ -233,7 +251,10 @@ async function provisionPortalSandbox(
  * Bring the Portal Sandbox's checkout up to the host worktree: checkpoint
  * the worktree and land the checkpoint there, on the session's lifecycle
  * lane so the capture and the landing see one consistent record. `current`
- * when the Sandbox already sits on the latest checkpoint.
+ * when the Sandbox already sits on the latest checkpoint. A failed capture
+ * or landing throws, with the reason recorded on the session for the
+ * Portals panel: the machine then holds an older tree, and a wake that
+ * went on regardless would report the app ready on stale code.
  */
 export function syncPortalSandbox(
   session: UnifiedSession,
@@ -244,17 +265,32 @@ export function syncPortalSandbox(
     const record = current?.portalSandbox;
     if (!current?.worktreeDir || record?.sandboxId !== sandbox.id)
       return "skipped";
-    const outcome = await checkpointHostWorkspace(current, current.worktreeDir);
-    if (outcome.state === "skipped") return "skipped";
-    if (outcome.checkpoint.commit === record.syncedCommit) return "current";
-    await landCheckpointInSandbox(current.repo, sandbox, outcome.checkpoint);
-    await touchNativeSessionStrict(current.id, {
-      portalSandbox: { ...record, syncedCommit: outcome.checkpoint.commit },
-    });
-    console.log(
-      `[sandbox] ${current.id}: Portal Sandbox on checkpoint ${outcome.checkpoint.commit.slice(0, 12)}`,
-    );
-    return "landed";
+    try {
+      const outcome = await checkpointHostWorkspace(
+        current,
+        current.worktreeDir,
+      );
+      if (outcome.state === "skipped") return "skipped";
+      if (outcome.checkpoint.commit === record.syncedCommit) return "current";
+      await landCheckpointInSandbox(current.repo, sandbox, outcome.checkpoint);
+      await touchNativeSessionStrict(current.id, {
+        portalSandbox: {
+          ...record,
+          lastLifecycleError: undefined,
+          syncedCommit: outcome.checkpoint.commit,
+        },
+      });
+      console.log(
+        `[sandbox] ${current.id}: Portal Sandbox on checkpoint ${outcome.checkpoint.commit.slice(0, 12)}`,
+      );
+      return "landed";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      touchNativeSession(current.id, {
+        portalSandbox: { ...record, lastLifecycleError: message.slice(0, 240) },
+      });
+      throw new Error(`Could not refresh the Portal Sandbox: ${message}`);
+    }
   });
 }
 

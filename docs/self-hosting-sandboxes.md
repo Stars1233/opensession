@@ -200,7 +200,9 @@ After every clean turn the worktree is checkpointed again and the Portal
 Sandbox's checkout is landed on it (whatever branch it was on), so the app
 shows what the agent just did at turn granularity; the dev server's own file
 watcher does the rest. A sleeping Portal Sandbox catches up when a Portal
-wakes it, and a start or restart lands the latest checkpoint first. The
+wakes it, and a start or restart lands the latest checkpoint first; when
+that landing fails, the start fails with it and says why, rather than
+bringing the app up on the older tree the machine still holds. The
 checkout there is nobody's work: nothing in it is ever pushed or restored
 back, and its origin stays credential-free.
 
