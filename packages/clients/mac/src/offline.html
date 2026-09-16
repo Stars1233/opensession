@@ -16,7 +16,7 @@
       <div class="actions">
         <button class="button" id="retry">Try again</button>
         <button class="button ghost" id="tailnet">Choose tailnet…</button>
-        <button class="button ghost" id="change">Change server</button>
+        <button class="button ghost" id="change">Switch server</button>
       </div>
       <p id="status" role="status" aria-live="polite"></p>
     </main>
@@ -43,8 +43,8 @@
       document.getElementById("retry").addEventListener("click", () => {
         location.href = APP_URL;
       });
-      // An address that is wrong and a server that is down look the same from
-      // here, and only one of them is fixed by waiting.
+      // Switching to a saved organization, or adding a new one, must work
+      // even when this server cannot supply the web organization menu.
       document.getElementById("change").addEventListener("click", () => {
         if (window.os1 && window.os1.server) window.os1.server.open();
       });

@@ -717,6 +717,7 @@ registerSessionControl({
       sandbox,
       forkFrom,
       accountId: accountIdInput,
+      plainDiscussionId,
     } = ownedInput;
     const bksId = requestedId;
     const createIdentity = new Bun.CryptoHasher("sha256")
@@ -1192,16 +1193,17 @@ registerSessionControl({
       });
     // Pasted blocks follow the message; the uploads note follows them, so the
     // parser's end-anchored note regex still finds it.
+    const openingAttachments = attachmentSources.map((attachment) => ({
+      name: attachment.name,
+      path: creationAttachmentPath(
+        bksId,
+        attachment.attachmentId,
+        attachment.name,
+      ),
+    }));
     let openingPrompt = withUploadsNote(
       withPastedTexts(prompt, pastedTexts),
-      attachmentSources.map((attachment) => ({
-        name: attachment.name,
-        path: creationAttachmentPath(
-          bksId,
-          attachment.attachmentId,
-          attachment.name,
-        ),
-      })),
+      openingAttachments,
     );
     if (createMentionsNote)
       openingPrompt += `
@@ -1294,12 +1296,14 @@ ${createMentionsNote}`;
       pstackMode: createPstackMode || undefined,
       accountId: createAccountId,
       images,
+      attachments: openingAttachments,
       // Feed-item linkage follows the session's workspace (Video tab +
       // sidebar feed-row join — the feeds design).
       externalRefs: contextWorkspace?.externalRefs,
       // A session in a support-ticket workspace is on that ticket too —
       // same rule as the web tab strip's "+".
       plainThreadId: joinedWorkspace?.plainThreadId,
+      plainDiscussionId,
       // Persist the MCP scoping so follow-up prompts keep it.
       persistMcpServers: effectiveMcpServers,
       // Unscoped creates leave this undefined (read as "all" downstream,
@@ -1377,6 +1381,7 @@ ${createMentionsNote}`;
           ...computedSpec,
           ...restoredSpec,
           images: computedSpec.images,
+          attachments: computedSpec.attachments,
           gitEnv: restoredGitEnv,
           materializeWorktree: restoredMaterializer,
           needsWorktree: !!restoredMaterializer,

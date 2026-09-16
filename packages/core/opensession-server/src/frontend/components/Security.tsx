@@ -1,4 +1,4 @@
-import { agentIdentity } from "../lib/agent-identity";
+import { AgentName } from "./AgentIdentity";
 import { repoLabel } from "../lib/repo-label";
 import { BASE_PATH } from "../lib/base";
 import React, { useCallback, useEffect, useState } from "react";
@@ -374,7 +374,7 @@ export function Security({ onOpenSession }: Props) {
                                   onOpenSession(ref.sessionId);
                                 }}
                               >
-                                {agentIdentity(ref.sessionId).name}
+                                <AgentName sessionId={ref.sessionId} />
                               </a>
                             )}
                           </div>

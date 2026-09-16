@@ -23,8 +23,9 @@ import { OverflowFadeText } from "../../ui/overflow-fade-text";
 import { Tooltip } from "../../ui/tooltip";
 import { TopBar, TopBarActions, TopBarLeading } from "../../ui/top-bar";
 import { BrandMark } from "../BrandMark";
+import { AgentTooltipLabel } from "../AgentIdentity";
 import { AgentAvatar } from "../../ui/agent-avatar";
-import { agentIdentity } from "../../lib/agent-identity";
+import { useAgentName } from "../../hooks/useAgentName";
 import {
   IconArchive,
   IconChevronDown,
@@ -94,6 +95,7 @@ export function SessionHeader({
   topbarEl,
   headerActionsEl,
 }: SessionHeaderProps) {
+  const agentName = useAgentName(session.id);
   const header = (
     <TopBar className={VIEWER_HEADER} ref={headerRef}>
       <TopBarLeading className={VIEWER_TITLE}>
@@ -217,13 +219,19 @@ export function SessionHeader({
           </OverflowFadeText>
         )}
         <Tooltip
-          label={`Current agent: ${agentIdentity(session.id).name}`}
+          label={
+            <AgentTooltipLabel
+              name={`Current agent: ${agentName}`}
+              sessionTitle={session.title}
+            />
+          }
+          multiline
           side="bottom"
         >
           <span
             role="img"
             tabIndex={0}
-            aria-label={`Current agent: ${agentIdentity(session.id).name}`}
+            aria-label={`Current agent: ${agentName}`}
             className="inline-flex size-8 shrink-0 items-center justify-center rounded-control focus-visible:outline-2 focus-visible:outline-focus-ring"
           >
             <AgentAvatar sessionId={session.id} />

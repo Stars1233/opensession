@@ -28,14 +28,18 @@ function hash(seed: string): number {
   return value >>> 0;
 }
 
-export function agentIdentity(sessionId: string) {
+export function agentIdentity(sessionId: string, familyId = sessionId) {
   let nameBits = hash(`agent-name-v1:${sessionId}`);
   const take = (words: string[]) => {
     const word = words[nameBits % words.length]!;
     nameBits = Math.floor(nameBits / words.length);
     return word;
   };
-  const name = `${take(starts)}${take(middles)}${take(endings)} ${take(roots)}${take(tails)}`;
+  const given = `${take(starts)}${take(middles)}${take(endings)}`;
+  // Keep the original surname bit positions, so independent agents never
+  // change names. Only workers borrow their root agent's surname seed.
+  nameBits = Math.floor(hash(`agent-name-v1:${familyId}`) / (32 * 16 * 16));
+  const name = `${given} ${take(roots)}${take(tails)}`;
   const art = hash(`agent-avatar-v1:${sessionId}`);
   return { name, seed: art };
 }

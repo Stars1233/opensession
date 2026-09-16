@@ -86,6 +86,12 @@ available from the keyboard. Other visible windows keep their own organizations
 and routes. Organizations without a visible window stay loaded in hidden
 sandboxed windows so WebSockets and notifications remain live.
 
+When a server is unreachable, **Switch server** opens a local dropdown of saved
+organizations. **Add organization…** reveals a URL field and adds a separate
+organization rather than replacing the current server. **Add anyway** saves an
+unreachable address so its tailnet can be configured from the offline screen.
+Selecting an existing organization also honors its local Tailscale profile.
+
 `OS1_URL` overrides the stored answer for one run. Distributions set the address
 the first-run screen offers with `opensession.defaultServer` in `package.json`
 (or `OS1_CLOUD_URL`); a profile that already worked keeps using it and is never
@@ -94,10 +100,13 @@ asked.
 ## Local Tailscale profiles
 
 **OS → Organizations → Tailscale profiles…** binds an organization to a saved
-Tailscale profile on this Mac. Choose **Save only** to configure it without
-changing networks, or **Save and connect** to connect now. Profiles must already
-be signed in through Tailscale. **Don't change Tailscale** is the default and
-removes an existing binding.
+Tailscale profile on this Mac. **Save** configures it without changing networks.
+To connect immediately, check **Connect now** and choose **Save and connect**.
+The refresh icon reloads profiles; **Open Tailscale** opens the Tailscale app.
+Close with **×**, **Escape**, or a click outside the card to discard unsaved
+changes. The local overlay follows its parent window and works offline.
+Profiles must already be signed in through Tailscale. **Don't change Tailscale**
+is the default and removes an existing binding.
 
 The top-left organization picker and the native organization menu switch to the
 bound profile before opening the organization's saved page. This changes
@@ -116,7 +125,10 @@ explicit and will not override a profile changed outside Open Session.
 Only the profile ID is stored alongside the organization in the local
 `server.json`; nothing is sent to the server and no Tailscale credentials are
 stored. The shell uses the installed Tailscale app's CLI, or the Homebrew CLI
-when the app binary is absent. It uses `tailscale switch --list --json` where
+when the app binary is absent. Subprocesses set `TS_BE_CLI=1` and `TERM=dumb`:
+the Mac app launcher needs `TERM` to enter CLI mode even when Open Session is
+started from Finder or the Dock without a terminal. It uses
+`tailscale switch --list --json` where
 supported and falls back to the older `tailscale switch --list` format when the
 CLI reports that `--json` is unsupported. CLI calls and server probes have
 deadlines, never invoke a shell or

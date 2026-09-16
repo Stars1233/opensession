@@ -185,3 +185,50 @@ test("steers and accepts only the captured immutable run token", async () => {
   ).toBe("steered");
   expect(steered).toEqual(["run-exact"]);
 });
+
+// The host echoes a bounced steer's text verbatim and the server matches that
+// echo against the receipt's bare content (takeSteerReceiptForText). Anything
+// the server appended for the engine would break that match, so a steer with
+// images travels as the person's text alone: the engine process adds the
+// on-disk image note itself (prompt-attachments.ts).
+test("hands the host the bare text even when images ride the steer", async () => {
+  const target = { token: "run-1", runId: "run-1", generation: 1 };
+  const steered: { text: string; images: number }[] = [];
+  const deps: QueuedSteerDeps = {
+    target: () => target,
+    prepare: async () => ({ id: "item-1", content: "Use this icon" }),
+    steer: (_token, text, images) => {
+      steered.push({ text, images: images?.length ?? 0 });
+      return true;
+    },
+    accept: async () => true,
+    reject: async () => true,
+  };
+  const images = [{ mediaType: "image/png", data: "aGk=" }];
+  expect(
+    await prepareAndSteerQueuedPrompt(
+      {
+        sessionId: "session-1",
+        itemId: "item-1",
+        text: "Use this icon",
+        images,
+      },
+      deps,
+    ),
+  ).toBe("steered");
+  expect(
+    await prepareAndInterruptQueuedPrompt(
+      {
+        sessionId: "session-1",
+        itemId: "item-1",
+        text: "Use this icon",
+        images,
+      },
+      deps,
+    ),
+  ).toBe("interrupted");
+  expect(steered).toEqual([
+    { text: "Use this icon", images: 1 },
+    { text: "Use this icon", images: 1 },
+  ]);
+});

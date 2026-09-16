@@ -71,6 +71,16 @@ export interface SessionsToolContext {
    * blast radius stays PR-gated: children open PRs, humans merge.
    */
   automationSelf?: boolean;
+  /**
+   * A person is prompting an automation-owned session (an interactive resume
+   * with a human sender). Grants the same spawn suite as automationSelf,
+   * WITHOUT isAdmin, so the session can start the work the person just asked
+   * for: spawn_task/task_status/cancel_task only, never answer/send/cancel/
+   * create on other sessions. Children are created for that person
+   * (`createdBy`), so they are ordinary interactive sessions in the person's
+   * workspaces, not automation-owned ones.
+   */
+  humanResume?: boolean;
 }
 
 function text(s: string) {
@@ -503,7 +513,12 @@ export async function spawnTaskImpl(
   // Exception: a self-improving automation (automation.selfImprove, human-set)
   // gets a server instance built with `automationSelf` — spawning is the point
   // there, and the depth guard below still applies.
-  if (caller && !ctx.automationSelf && isAutomationOwned(caller, deps)) {
+  if (
+    caller &&
+    !ctx.automationSelf &&
+    !ctx.humanResume &&
+    isAutomationOwned(caller, deps)
+  ) {
     return {
       ok: false,
       error: "spawn_task is not available from automation sessions.",
@@ -520,8 +535,11 @@ export async function spawnTaskImpl(
   }
   // Code mode needs somewhere to work: an explicit branch, or a parent code
   // session whose worktree the child will share (createSession's same-
-  // workspace = same-worktree rule; only when the repo matches).
-  if (mode === "code" && !args.branch?.trim() && !args.isolatedWorktree) {
+  // workspace = same-worktree rule; only when the repo matches). An ask or
+  // scratch parent has nothing to share, so its code children get their own
+  // generated branch and worktree instead of a refusal.
+  let isolatedWorktree = args.isolatedWorktree;
+  if (mode === "code" && !args.branch?.trim() && !isolatedWorktree) {
     let sharable = false;
     if (caller) {
       try {
@@ -533,13 +551,7 @@ export async function spawnTaskImpl(
         );
       } catch {}
     }
-    if (!sharable) {
-      return {
-        ok: false,
-        error:
-          "Code-mode task needs a `branch` (no parent code worktree to share).",
-      };
-    }
+    if (!sharable) isolatedWorktree = true;
   }
   const prompt = buildChildSessionPrompt({
     prompt: args.prompt,
@@ -555,7 +567,7 @@ export async function spawnTaskImpl(
     mode,
     branch: args.branch,
     model: args.model,
-    isolatedWorktree: args.isolatedWorktree,
+    isolatedWorktree,
     parentSessionId: caller,
     reportBack: Boolean(caller),
     user: ctx.createdBy,
@@ -633,11 +645,34 @@ export async function taskStatusImpl(
   return parts.join("\n");
 }
 
+/** Whether `taskId` is a child spawned by `caller` (its persisted
+ *  parentSessionId), read from the live summary or the session file. */
+async function spawnedByCaller(
+  taskId: string,
+  caller: string | undefined,
+  deps: SpawnTaskDeps,
+): Promise<boolean> {
+  if (!caller) return false;
+  const parent =
+    (await deps.control.getSession(taskId))?.parentSessionId ??
+    deps.readSessionFile(taskId)?.parentSessionId;
+  return parent === caller;
+}
+
 export async function cancelTaskImpl(
   args: { taskId: string },
+  ctx: Pick<SessionsToolContext, "isAdmin" | "currentSessionId">,
   deps: SpawnTaskDeps = defaultSpawnDeps(),
   requestId?: string,
 ): Promise<string> {
+  // Without isAdmin (automationSelf, humanResume) this is not cancel_session
+  // in disguise: only the caller's own spawned children may be cancelled,
+  // however many other sessions list_sessions shows.
+  if (
+    !ctx.isAdmin &&
+    !(await spawnedByCaller(args.taskId, ctx.currentSessionId, deps))
+  )
+    return `\`${args.taskId}\` was not spawned by this session; cancel_task only cancels tasks this session started with spawn_task.`;
   const ok = await deps.control.cancelSession(args.taskId, { requestId });
   return ok
     ? `Cancelled task \`${args.taskId}\`.`
@@ -1403,14 +1438,16 @@ export function createSessionsMcpServer(
   // to the trusted user, and to self-improving automations (automationSelf):
   // there the spawn suite is the ONLY control surface — no answer/send/cancel/
   // create on arbitrary sessions — and children stay PR-gated + depth-guarded.
-  if (ctx.isAdmin || ctx.automationSelf) {
+  if (ctx.isAdmin || ctx.automationSelf || ctx.humanResume) {
     tools.push(
       tool(
         "spawn_task",
         "Delegate a self-contained task to a child session and return IMMEDIATELY with {taskId, url} — the lightweight alternative to create_session + send_to_session choreography when you just want work done and a handle to poll. The child is created through the same code path as create_session (it shares this session's worktree in code mode when repos match, inherits your user, is linked as a child, and is told to report back here); poll it with task_status and stop it with cancel_task. Mode defaults to 'code' (pass a branch, or isolatedWorktree true for a generated one, unless the child can share this session's code worktree); use 'ask' for read-only investigation. Loop guard: spawned children may delegate one further level, then spawn_task refuses (depth ≥ 2)." +
           (ctx.automationSelf
             ? " Children may edit code and open PRs but NEVER merge — a human reviews every PR."
-            : " Not available from automation sessions."),
+            : ctx.humanResume
+              ? ` The child is created for ${ctx.createdBy}, the person prompting this session, and appears in their sidebar; reply with its URL. When they ask for "a new session", this tool is what they mean.`
+              : " Not available from automation sessions."),
         {
           prompt: z
             .string()
@@ -1482,7 +1519,10 @@ export function createSessionsMcpServer(
       ),
       tool(
         "cancel_task",
-        "Cancel a spawned task's in-flight run (drops queued messages too). Only runs this server owns.",
+        "Cancel a spawned task's in-flight run (drops queued messages too). Only runs this server owns" +
+          (ctx.isAdmin
+            ? "."
+            : ", and only tasks this session started with spawn_task."),
         {
           taskId: z
             .string()
@@ -1492,6 +1532,7 @@ export function createSessionsMcpServer(
           text(
             await cancelTaskImpl(
               args,
+              ctx,
               undefined,
               durableToolRequestId(ctx, "cancel_task", extra, args),
             ),

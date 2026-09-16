@@ -666,6 +666,7 @@ async function spawnHostRun(
     registerRunToken(rpcToken, {
       sessionId: opts.osSessionId,
       user: opts.user,
+      humanPrompter: opts.accountUser,
       promptEntryId: opts.promptEntryId,
     });
 
@@ -2223,6 +2224,7 @@ export async function resumeLocalHostRun(
     registerRunToken(spec.rpcToken, {
       sessionId: spec.osSessionId,
       user: spec.user,
+      humanPrompter: spec.accountUser,
       promptEntryId: spec.promptEntryId,
     });
   }

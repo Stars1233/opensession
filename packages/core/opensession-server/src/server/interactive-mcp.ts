@@ -15,6 +15,7 @@
 
 import { deskNavigationMcp } from "./desk-navigation-mcp";
 import { createSessionsMcpServer } from "../agents/slack/sessions-tools";
+import { interactivePrompter } from "./session-actors";
 import { isDevInstance } from "./dev-mode";
 import { createRunnersMcpServer } from "./runners-mcp";
 import { createAdminMcpServer } from "../agents/slack/admin-tools";
@@ -28,6 +29,7 @@ import { createDesktopMcpServer } from "./desktop-mcp";
 import { getSandboxProvider } from "./sandbox";
 import { createWalkthroughMcpServer } from "../agents/slack/walkthrough-tools";
 import { createSlackComposeMcpServer } from "../agents/slack/slack-compose-tools";
+import { createPlainDiscussionMcpServer } from "../agents/plain/discussion-tools";
 import { createMemoryMcpServer } from "../agents/slack/memory-tools";
 import {
   createGoalsMcpServer,
@@ -126,6 +128,29 @@ function desktopServerFor(sessionId: string): Record<string, unknown> {
           ? provider.desktopControl(sandbox.id)
           : null;
       },
+    }),
+  };
+}
+
+/**
+ * The whole in-process set for a session that answers a Plain discussion
+ * (plainDiscussionId): the approval-gated customer reply / Stripe action
+ * (discussion-tools.ts) and nothing else. A teammate drives the discussion,
+ * but the ticket text the session reads is untrusted, so it gets the triage
+ * automation's surface — external connectors under the discussion deny-set,
+ * none of the interactive siblings (admin, sessions, workflows, publish,
+ * self-deploy, keychain). Served on the opening turn, every resume, and the
+ * run-rpc fallback builder below, so a hosted or sandboxed run cannot ask
+ * for more.
+ */
+export function plainDiscussionSessionMcp(
+  sessionId: string,
+  discussionId: string,
+): Record<string, unknown> {
+  return {
+    "opensession-plain-discussion": createPlainDiscussionMcpServer({
+      sessionId,
+      discussionId,
     }),
   };
 }
@@ -453,12 +478,31 @@ export function interactiveMcpServers(
  * opensession-* servers into a detached run host (run-session's hosted pi
  * path) can compute proxy names that resolve to this same fail-closed set,
  * never the interactive siblings.
+ *
+ * `humanPrompter` names the person whose message this turn answers, when a
+ * person (not the automation's tick) prompted the session. Their turn adds
+ * `opensession-sessions` in its `humanResume` shape: the spawn suite only
+ * (spawn_task/task_status/cancel_task plus the list/get reads), never
+ * answer/send/cancel/create on other sessions, with children created for that
+ * person as ordinary interactive sessions. The automation's own runs never
+ * carry it: the prompt they act on is untrusted text, and a person asking
+ * for "a new session" in the thread is what makes spawning legitimate here.
+ * The gate is applied here, at the one mount point every launch and reattach
+ * path resolves through: `interactivePrompter` drops every machine actor and
+ * every scheduled /loop tick sent in a person's name (`"Kent (loop)"`), so a
+ * caller that only has the persisted account user still fails closed.
+ * Descendants (sandboxed children with a publication policy) are excluded.
  */
 export async function automationSessionMcp(
-  session: { automation?: string; worktreeDir?: string | null },
+  session: {
+    automation?: string;
+    worktreeDir?: string | null;
+    automationDescendantPolicy?: unknown;
+  },
   sessionId: string,
+  opts: { humanPrompter?: string } = {},
 ): Promise<Record<string, unknown>> {
-  return {
+  const servers: Record<string, unknown> = {
     ...papercutsServerFor(
       sessionId,
       "automation",
@@ -467,25 +511,42 @@ export async function automationSessionMcp(
     ...((await automationRunMcpForSession(session, sessionId)) || {}),
     ...((await selfImproveMcpForSession(session, sessionId)) || {}),
   };
+  const prompter = interactivePrompter(opts.humanPrompter);
+  if (prompter && session.automation && !session.automationDescendantPolicy) {
+    servers["opensession-sessions"] = createSessionsMcpServer({
+      createdBy: prompter,
+      isAdmin: false,
+      humanResume: true,
+      currentSessionId: sessionId,
+    });
+  }
+  return servers;
 }
 
-registerInteractiveMcpBuilder(async (sessionId, user, promptEntryId) => {
-  // Automation-owned sessions run on untrusted event/ticket text. Their runs
-  // only ever carry the automation-bar set (automationSessionMcp above), but
-  // this builder is also run-rpc's FALLBACK resolver for any registered run
-  // token, so it must fail closed here rather than hand session-control or
-  // admin tools to an automation that asks for them.
-  const session = sessionId ? findSession(sessionId) : undefined;
-  if (sessionId && session?.automation) {
-    return automationSessionMcp(session, sessionId);
-  }
-  const servers = interactiveMcpServers(user, sessionId, promptEntryId);
-  const goalId = session?.goalId;
-  if (goalId)
-    (servers as Record<string, unknown>)["opensession-goal-self"] =
-      createGoalSelfMcpServer(goalId);
-  return servers;
-});
+registerInteractiveMcpBuilder(
+  async (sessionId, user, promptEntryId, humanPrompter) => {
+    // Automation-owned sessions run on untrusted event/ticket text. Their runs
+    // only ever carry the automation-bar set (automationSessionMcp above), but
+    // this builder is also run-rpc's FALLBACK resolver for any registered run
+    // token, so it must fail closed here rather than hand session-control or
+    // admin tools to an automation that asks for them.
+    const session = sessionId ? findSession(sessionId) : undefined;
+    if (sessionId && session?.automation) {
+      return automationSessionMcp(session, sessionId, { humanPrompter });
+    }
+    // Same fail-closed rule for a Plain discussion session: untrusted ticket
+    // text, so only the approval server (plainDiscussionSessionMcp above).
+    if (sessionId && session?.plainDiscussionId) {
+      return plainDiscussionSessionMcp(sessionId, session.plainDiscussionId);
+    }
+    const servers = interactiveMcpServers(user, sessionId, promptEntryId);
+    const goalId = session?.goalId;
+    if (goalId)
+      (servers as Record<string, unknown>)["opensession-goal-self"] =
+        createGoalSelfMcpServer(goalId);
+    return servers;
+  },
+);
 
 // NOTE: the run-rpc unix socket and the loopback MCP HTTP listener are NOT
 // started here. Registering a builder is a cheap in-memory assignment; binding

@@ -82,6 +82,37 @@ describe("sessionInProcessMcpBranch", () => {
     ).toBe("automation-self-improve");
   });
 
+  test("a person's turn in an automation-owned session adds the spawn suite", () => {
+    expect(
+      sessionInProcessMcpBranch(
+        { ...plain, automation: "Health monitor" },
+        "Michiel",
+      ),
+    ).toBe("automation+human-spawn");
+  });
+
+  test("a sandboxed descendant stays on the automation branch even for a person", () => {
+    expect(
+      sessionInProcessMcpBranch(
+        {
+          ...plain,
+          automation: "Health monitor",
+          automationDescendantPolicy: {
+            automationId: "auto-1",
+            automationName: "Health monitor",
+            mcpServers: [],
+            repo: "opensession",
+            publicationRepo: "opensession",
+            baseBranch: "main",
+            allowedRunners: [],
+            publication: "branch-pr-only",
+          },
+        },
+        "Michiel",
+      ),
+    ).toBe("automation-self-improve");
+  });
+
   test("a goal session adds its own controls", () => {
     expect(sessionInProcessMcpBranch({ ...plain, goalId: "g1" })).toBe(
       "interactive+goal-self",
@@ -90,6 +121,20 @@ describe("sessionInProcessMcpBranch", () => {
 
   test("a normal session gets the interactive set", () => {
     expect(sessionInProcessMcpBranch(plain)).toBe("interactive");
+  });
+
+  test("a Plain discussion session gets only its approval server", () => {
+    expect(
+      sessionInProcessMcpBranch({ ...plain, plainDiscussionId: "disc_1" }),
+    ).toBe("plain-discussion");
+    // Even with a goal: the interactive set never reaches ticket text.
+    expect(
+      sessionInProcessMcpBranch({
+        ...plain,
+        plainDiscussionId: "disc_1",
+        goalId: "g1",
+      }),
+    ).toBe("plain-discussion");
   });
 });
 
@@ -136,7 +181,60 @@ describe("resolveSessionRunInputs", () => {
     expect(inputs.deniedTools).toHaveProperty("mcp__plain__reply_to_thread");
     // No memory / repos / personal-prompt note for an automation run.
     expect(inputs.sessionNote).toBe(false);
+    // Kent is a person, so this turn may spawn work for him; the allowlist,
+    // denials and dropped user above are unchanged by that.
+    expect(inputs.accountUser).toBe("Kent");
+    expect(inputs.inProcessMcpBranch).toBe("automation+human-spawn");
+  });
+
+  test("an automation's own tick never gets the spawn suite", async () => {
+    const inputs = await resolveSessionRunInputs(
+      { ...plain, automation: "Plain ticket triage" },
+      { user: "Plain ticket triage (automation)" },
+    );
+    expect(inputs.accountUser).toBeUndefined();
+    expect(inputs.humanPrompter).toBeUndefined();
     expect(inputs.inProcessMcpBranch).toBe("automation-self-improve");
+  });
+
+  test("a Plain discussion session drops the user and denies customer and money writes", async () => {
+    const inputs = await resolveSessionRunInputs(
+      { ...plain, plainDiscussionId: "disc_1" },
+      { user: "Kent" },
+    );
+    expect(inputs.isAutomationSession).toBe(false);
+    // Untrusted ticket text: no user for the allowedUsers gate, same as an
+    // automation run, even when a person prompts it from the UI.
+    expect(inputs.user).toBeUndefined();
+    expect(inputs.accountUser).toBe("Kent");
+    expect(inputs.deniedTools).toHaveProperty("mcp__plain__reply_to_thread");
+    expect(inputs.deniedTools).toHaveProperty("mcp__stripe__create_refund");
+    expect(inputs.deniedTools).toHaveProperty(
+      "mcp__workos__get_impersonation_url",
+    );
+    expect(inputs.inProcessMcpBranch).toBe("plain-discussion");
+  });
+
+  test("a scheduled loop tick in a person's name never gets the spawn suite", async () => {
+    // Kent set the loop, so the turn is still billed to him, but nobody
+    // pressed send: scheduled prompt text must not start person-owned
+    // sessions on every tick.
+    for (const user of ["Kent (loop)", "loop"]) {
+      const inputs = await resolveSessionRunInputs(
+        { ...plain, automation: "Plain ticket triage" },
+        { user },
+      );
+      expect(inputs.humanPrompter).toBeUndefined();
+      expect(inputs.inProcessMcpBranch).toBe("automation-self-improve");
+    }
+    expect(
+      (
+        await resolveSessionRunInputs(
+          { ...plain, automation: "Plain ticket triage" },
+          { user: "Kent (loop)" },
+        )
+      ).accountUser,
+    ).toBe("Kent (loop)");
   });
 
   test("a person taking over an automation-owned session keeps their provider account", async () => {

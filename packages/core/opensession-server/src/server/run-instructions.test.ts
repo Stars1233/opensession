@@ -20,6 +20,37 @@ describe("buildRunInstructions", () => {
     );
   });
 
+  // Runs answered a pasted screenshot with "upload it in the session's Assets
+  // tab", a step no person can take. With the assets tools wired, the standing
+  // instructions say where a chat attachment lands and that Assets is not an
+  // inbox; without them there is no Assets tab to be misled by.
+  test("explains chat attachments and that nobody can upload to Assets", () => {
+    const prompt = buildRunInstructions({
+      isAsk: false,
+      hasSession: true,
+      inProcessMcp: { "opensession-assets": {} },
+    });
+    expect(prompt).toContain("## Attachments");
+    expect(prompt).toContain(
+      "every file saved to disk at the path a note on that turn lists",
+    );
+    expect(prompt).toContain("nobody can upload there, so never ask for that");
+    expect(prompt).not.toContain("not reachable from the Sandbox");
+
+    const sandboxed = buildRunInstructions({
+      isAsk: true,
+      sandboxed: true,
+      inProcessMcp: { "opensession-assets": {} },
+    });
+    expect(sandboxed).toContain(
+      "Open Session host paths are not reachable from the Sandbox; use the scratch copies the note lists.",
+    );
+
+    expect(
+      buildRunInstructions({ isAsk: false, hasSession: true }),
+    ).not.toContain("## Attachments");
+  });
+
   test("limits automatic reviewers to unattended automation pull requests", async () => {
     const prompt = buildRunInstructions({
       isAsk: false,

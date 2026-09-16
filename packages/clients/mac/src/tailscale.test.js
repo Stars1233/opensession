@@ -49,6 +49,29 @@ const legacyProfiles = profileTable([
 ]);
 
 describe("Tailscale CLI", () => {
+  test("sets CLI mode and a plain TERM even when launched without a terminal", async () => {
+    const previousTerm = process.env.TERM;
+    const cli = new Tailscale({
+      platform: "darwin",
+      findBinary: async () => process.execPath,
+    });
+    try {
+      for (const term of [undefined, "", "xterm-256color"]) {
+        if (term === undefined) delete process.env.TERM;
+        else process.env.TERM = term;
+        const output = await cli.command([
+          "--eval",
+          "console.log(JSON.stringify({ term: process.env.TERM, cli: process.env.TS_BE_CLI }))",
+        ]);
+        expect(JSON.parse(output)).toEqual({ term: "dumb", cli: "1" });
+        expect(process.env.TERM).toBe(term);
+      }
+    } finally {
+      if (previousTerm === undefined) delete process.env.TERM;
+      else process.env.TERM = previousTerm;
+    }
+  });
+
   test("reads legacy table columns, spaced names and the selected marker", () => {
     expect(parseProfiles(legacyProfiles)).toEqual([
       {

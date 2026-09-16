@@ -38,6 +38,8 @@ import { commitAuthorFor } from "./shared/user-mappings";
 import { makeAskHandler } from "./asks";
 import type { McpScope } from "./runner-shared";
 import type { StreamEvent } from "./agent-runner";
+import type { StagedAttachment } from "./prompt-attachments";
+import { readPromptFiles } from "./uploads";
 import type { ImageInput } from "./run-events";
 import { resolveSessionRunInputs, runAccountSpec } from "./session-run-inputs";
 import {
@@ -57,10 +59,17 @@ type RunnerLaunchOpts = {
   hostId?: string;
   engineSessionId?: string;
   images?: ImageInput[];
+  /** Server-staged file attachments; their bytes ship in the spec because
+   *  the Runner cannot read the server's uploads dir. */
+  attachments?: StagedAttachment[];
   mcpServers?: McpScope;
   user?: string;
   reposNote?: string;
   shouldCancel?: () => boolean;
+  /** The automation-bar server names a non-descendant automation-owned
+   *  turn proxies over run-rpc; computed once by run-session so the Runner,
+   *  sandbox, hosted and in-process paths describe the same set. */
+  automationProxyMcpServers?: string[];
 };
 
 type RunnerEvents = AsyncGenerator<StreamEvent> & { runnerId: string };
@@ -170,11 +179,14 @@ export async function maybeLaunchRunnerRun(
     // Runner tries their own subscription before the automation's account.
     ...runAccountSpec(session, runInputs),
     images: opts.images,
+    files: await readPromptFiles(opts.attachments),
     mcpServers: runInputs.isAutomationSession
       ? (runInputs.mcpServers ?? [])
       : (opts.mcpServers ?? "all"),
     proxyMcpServers: runInputs.isAutomationSession
-      ? []
+      ? automationPolicy
+        ? []
+        : (opts.automationProxyMcpServers ?? [])
       : Object.keys(interactiveMcpServers(opts.user, session.id)),
     rpcToken: crypto.randomUUID(),
     wsToken: crypto.randomUUID(),
@@ -241,6 +253,7 @@ export async function maybeLaunchRunnerRun(
   registerRunToken(rpcToken, {
     sessionId: session.id,
     user: runUser,
+    humanPrompter: runInputs.accountUser,
     promptEntryId: opts.promptEntryId,
   });
   registerRunWsHost(hostId, wsToken);
@@ -452,6 +465,7 @@ export async function resumeRunnerRun(
   registerRunToken(spec.rpcToken!, {
     sessionId: session.id,
     user: spec.user,
+    humanPrompter: spec.accountUser,
     promptEntryId: spec.promptEntryId,
   });
   registerRunWsHost(spec.hostId, spec.wsToken!);

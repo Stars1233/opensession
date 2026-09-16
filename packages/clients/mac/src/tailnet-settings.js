@@ -3,7 +3,8 @@ const organization = document.getElementById("organization");
 const profile = document.getElementById("profile");
 const status = document.getElementById("status");
 const save = document.getElementById("save");
-const connect = document.getElementById("connect");
+const connectNow = document.getElementById("connect-now");
+const connectOption = document.getElementById("connect-option");
 const refresh = document.getElementById("refresh");
 let state = null;
 let busy = false;
@@ -13,8 +14,14 @@ function setBusy(value) {
   organization.disabled = value || !state?.accounts.length;
   profile.disabled = value || !state?.accounts.length;
   save.disabled = value || !state?.accounts.length;
-  connect.disabled = value || !state?.accounts.length;
+  connectNow.disabled = value || !state?.accounts.length;
   refresh.disabled = value;
+}
+
+function selectProfile() {
+  connectNow.checked = false;
+  connectOption.hidden = !profile.value;
+  save.textContent = "Save";
 }
 
 function selectOrganization() {
@@ -31,6 +38,7 @@ function selectOrganization() {
     profile.add(new Option("Saved profile unavailable", selected));
   }
   profile.value = selected;
+  selectProfile();
 }
 
 async function load() {
@@ -53,17 +61,19 @@ async function load() {
       state.error ||
       (!state.profiles.length
         ? "No saved profiles. Open Tailscale and sign in, then refresh."
-        : "Selecting an organization will use its saved profile.");
+        : "");
   } catch {
     status.textContent =
       "Couldn't read profiles. Close this window and try again.";
   } finally {
     setBusy(false);
+    if (state?.accounts.length) organization.focus();
   }
 }
 
-async function persist(shouldConnect) {
+async function persist() {
   if (busy) return;
+  const shouldConnect = !!profile.value && connectNow.checked;
   setBusy(true);
   status.textContent = "Saving…";
   try {
@@ -80,6 +90,7 @@ async function persist(shouldConnect) {
         (row) => row.id === organization.value,
       );
       if (account) account.profileId = profile.value || null;
+      if (!shouldConnect) bridge.action("close");
     }
   } catch {
     status.textContent = "Couldn't save the profile. Try again.";
@@ -89,15 +100,31 @@ async function persist(shouldConnect) {
 }
 
 organization.addEventListener("change", selectOrganization);
+profile.addEventListener("change", selectProfile);
+connectNow.addEventListener("change", () => {
+  save.textContent = connectNow.checked ? "Save and connect" : "Save";
+});
 document.getElementById("form").addEventListener("submit", (event) => {
   event.preventDefault();
-  void persist(true);
+  void persist();
 });
-save.addEventListener("click", () => void persist(false));
 refresh.addEventListener("click", () => void load());
-document
-  .getElementById("close")
-  .addEventListener("click", () => bridge.action("close"));
+const close = () => bridge.action("close");
+document.getElementById("close").addEventListener("click", close);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !event.defaultPrevented) {
+    event.preventDefault();
+    close();
+  }
+});
+let pressedBackdrop = false;
+document.body.addEventListener("pointerdown", (event) => {
+  pressedBackdrop = event.target === document.body;
+});
+document.body.addEventListener("click", (event) => {
+  if (pressedBackdrop && event.target === document.body) close();
+  pressedBackdrop = false;
+});
 document.getElementById("open").addEventListener("click", async () => {
   if (!(await bridge.action("open"))?.ok)
     status.textContent =

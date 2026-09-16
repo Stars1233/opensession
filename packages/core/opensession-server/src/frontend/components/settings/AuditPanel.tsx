@@ -1,4 +1,4 @@
-import { agentIdentity } from "../../lib/agent-identity";
+import { AgentName } from "../AgentIdentity";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { fetchAudit } from "../../lib/api";
@@ -163,7 +163,7 @@ export function AuditPanel() {
                     href={`${BASE_PATH}/session/${sid}`}
                     onClick={(ev) => ev.stopPropagation()}
                   >
-                    {agentIdentity(sid).name}
+                    <AgentName sessionId={sid} />
                   </a>
                 )}
               </button>

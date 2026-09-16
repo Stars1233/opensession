@@ -57,6 +57,14 @@ configuration for the run.
   deny-by-default on journal kind: interactive kinds
   (prompt/goal/create/linear/slack), unattended kinds
   (automation/plain/action/security-scan/github-*), everything else refused.
+- A Plain Ask Sidekick discussion session (`plainDiscussionId`,
+  `docs/setup/plain.md`) is prompted by a teammate but reads the same untrusted
+  ticket text, so every one of its turns carries the automation deny-set plus
+  the Plain customer-facing writes and the Stripe money movers, passes no
+  user, gets no AWS credentials, and mounts only `opensession-plain-discussion`
+  (the Approve/Deny-gated customer reply and Stripe execution) in place of the
+  interactive set. The run-rpc fallback builder serves that same set, so a
+  hosted or sandboxed turn cannot ask for more.
 - `mode` is per automation. Ask has guarded read/find/grep/ls/bash tools but
   no Write/Edit. For an unsandboxed ordinary repository it uses a stable,
   shared detached worktree pinned to `origin/<defaultBranch>`; only a
@@ -346,8 +354,9 @@ paths (`runSessionPrompt`, both `create_session` paths). This unrestricted
 interactive set is withheld from automation runs **and** from interactive
 resumes of automation-owned sessions (gated on `!isAutomationSession`, the same
 gate as `deniedTools`). Automation-owned runs instead receive only the explicit
-set documented below. Untrusted ticket text must never reach the interactive
-set. Open Session is network- and team-gated and already exposes all of this
+set documented below; a person's own turn in one of those sessions adds the
+spawn-only `humanResume` shape of `opensession-sessions` described there.
+Untrusted ticket text must never reach the interactive set. Open Session is network- and team-gated and already exposes all of this
 through its UI, so interactive
 users are treated as `isAdmin: true` there. The in-process servers are built
 with `packages/core/opensession-server/src/server/inprocess-mcp.ts` (a thin @modelcontextprotocol/sdk wrapper)
@@ -405,6 +414,29 @@ set:
   and `AUTOMATION_DENIED_TOOLS` policy.
 - The scoped `opensession-sessions`/`opensession-self` pair is mounted only when
   a human enables `automation.selfImprove`.
+- `opensession-sessions` in its `humanResume` shape is mounted on a turn a
+  person sends to an automation-owned session (a thread reply or a message in
+  the web UI; `resolveSessionRunInputs` reports it as the
+  `automation+human-spawn` branch). It carries the session list/get reads and
+  `spawn_task`, `task_status`, and `cancel_task` only, never
+  `answer_session_question`, `send_to_session`, `cancel_session`, or
+  `create_session`. Without `isAdmin`, `cancel_task` cancels only children
+  this session started with `spawn_task` (persisted `parentSessionId`), so it
+  is not `cancel_session` under another name. Children are created for the
+  person who prompted, so they are ordinary interactive sessions in that
+  person's workspaces, depth-guarded like every spawned child. The
+  automation's own ticks never carry it, and neither does a scheduled `/loop`
+  tick sent in a person's name (`"Kent (loop)"`, `loopActor`): the prompter
+  is `interactivePrompter(user)` (`RunInputs.humanPrompter`), undefined for
+  every machine actor and every scheduled actor, while `accountUser` keeps
+  the name for billing. `automationSessionMcp` applies the same classifier at
+  the mount, so a reattachment (local host, Runner, sandbox) that registers
+  the persisted account user on the run token's `humanPrompter` still fails
+  closed. Runner and sandbox turns proxy the same automation-bar
+  set over run-rpc that the in-process and hosted paths mount; run-session
+  computes it once before choosing a backend. Sandboxed descendants (sessions
+  with an `automationDescendantPolicy`) are excluded. The turn keeps the
+  automation's MCP allowlist, denials, and dropped `user`.
 
 A self-improving automation's runs and thread-reply resumes receive session
 list/get reads plus `spawn_task`, `task_status`, and `cancel_task`; the direct

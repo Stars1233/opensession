@@ -1,9 +1,16 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { setTurnPrefs } from "./TranscriptBlocks.test-setup";
 import { agentIdentity } from "../lib/agent-identity";
+import { setSessionTitles, resetResolvedSessionTitles } from "../lib/markdown";
+afterEach(() => {
+  setSessionTitles([]);
+  resetResolvedSessionTitles();
+});
 import type { TranscriptEntry } from "../lib/types";
+
+Object.assign(document, { querySelectorAll: () => [] });
 
 const { MessageBubble } = await import("./MessageBubble");
 const { TranscriptBlocks } = await import("./TranscriptBlocks");
@@ -161,7 +168,10 @@ test("identifies the local agent and keeps sender and recipient in one header", 
       .split("</div>")[0]!;
     expect(header).toContain(agentIdentity("os-self").name);
     expect(header).toContain(agentIdentity("os-peer").name);
-    expect(header).toContain("Current agent");
+    expect(header).toContain(
+      `aria-label="Current agent: ${agentIdentity("os-self").name}"`,
+    );
+    expect(header).not.toContain(">Current agent</span>");
     expect(header).toContain('sr-only">to</span>');
     expect(header).not.toContain('data-session-id="os-self"');
     expect(header).toContain('data-session-id="os-peer"');
@@ -212,4 +222,68 @@ test("the top bar keeps only an accessible avatar, with its name in the tooltip"
   expect(html).not.toContain(`>${agentIdentity("os-self").name}</span>`);
   expect(html).not.toContain(">Current agent</span>");
   expect(html).toContain("Check the retry loop");
+});
+
+test("a worker message uses its family surname, not its independent surname", () => {
+  setSessionTitles([
+    ["os-self", "Parent"],
+    ["os-peer", "Worker", false, null, undefined, "os-self"],
+  ]);
+  const html = renderToStaticMarkup(
+    <MessageBubble entry={incoming} sessionId="os-self" />,
+  );
+  expect(html).toContain(agentIdentity("os-peer", "os-self").name);
+  expect(html).not.toContain(agentIdentity("os-peer").name);
+  expect(html).toContain('data-session-id="os-peer"');
+});
+
+test("agent tooltip gives the session title secondary emphasis", async () => {
+  const { AgentTooltipLabel } = await import("./AgentIdentity");
+  const html = renderToStaticMarkup(
+    <AgentTooltipLabel name="Fensan Emberfall" sessionTitle="Fix retries" />,
+  );
+  expect(html).toContain('<span class="block">Fensan Emberfall</span>');
+  expect(html).toContain("text-meta font-normal text-tooltip-fg/70");
+  expect(html).toContain(">Fix retries</span>");
+});
+
+test("agent correspondence uses a three-line preview but normal replies do not", () => {
+  for (const entry of [
+    incoming,
+    outgoing,
+    {
+      ...incoming,
+      content: "[worker os-peer] <!--os:worker-report-->\nWorker report text",
+    },
+  ]) {
+    const html = renderToStaticMarkup(
+      <MessageBubble entry={entry} sessionId="os-self" />,
+    );
+    expect(html).toContain("max-h-[3lh] overflow-hidden");
+  }
+  const html = renderToStaticMarkup(
+    <MessageBubble
+      entry={{
+        id: "normal",
+        type: "assistant",
+        timestamp,
+        content: "An ordinary reply.",
+      }}
+      sessionId="os-self"
+    />,
+  );
+  expect(html).not.toContain("max-h-[3lh]");
+});
+
+test("wire-clamped agent messages keep one accessible expansion control", () => {
+  const html = renderToStaticMarkup(
+    <MessageBubble
+      entry={{ ...incoming, contentClamped: true, contentLength: 50_000 }}
+      sessionId="os-self"
+    />,
+  );
+  expect(html).toContain('aria-expanded="false"');
+  expect(html).toContain("aria-controls=");
+  expect(html.match(/>Show more</g)).toHaveLength(1);
+  expect(html).not.toContain("Show full message");
 });

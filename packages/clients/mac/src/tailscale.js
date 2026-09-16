@@ -73,7 +73,9 @@ class Tailscale {
         execFileAsync(file, args, {
           timeout,
           maxBuffer: 1024 * 1024,
-          env: { ...process.env, TS_BE_CLI: "1" },
+          // The Mac app launcher also needs TERM to enter CLI mode. Finder
+          // omits it; use a plain terminal because we capture output in pipes.
+          env: { ...process.env, TS_BE_CLI: "1", TERM: "dumb" },
         }).then(({ stdout }) => stdout));
     this.findBinary =
       findBinary ||

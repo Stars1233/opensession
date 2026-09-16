@@ -1184,3 +1184,150 @@ describe("local repository registration", () => {
     });
   });
 });
+
+describe("new repository creation", () => {
+  test.serial(
+    "starts a checkout with a bare origin and registers it",
+    async () => {
+      const root = localRoot();
+      const configPath = join(root, "config.json");
+      writeFileSync(configPath, JSON.stringify({ repos: {} }));
+      process.env.HOME = root;
+      process.env.OPENSESSION_CONFIG = configPath;
+      process.env.OPENSESSION_WORKTREES_DIR = join(root, "worktrees");
+
+      const response = await handleSetupRepoRoutes(
+        postRepo({ source: "new", name: "My.Widget" }),
+      );
+
+      expect(response?.status).toBe(201);
+      const checkout = join(root, "checkouts", "my.widget");
+      const origin = join(root, "checkouts", "my.widget.git");
+      expect(await response?.json()).toMatchObject({
+        id: "my.widget",
+        label: "My.Widget",
+        repo: realpathSync(checkout),
+        defaultBranch: "main",
+        default: true,
+      });
+      expect(readFileSync(join(checkout, "README.md"), "utf-8")).toBe(
+        "# My.Widget\n",
+      );
+      expect(git(["remote", "get-url", "origin"], checkout)).toBe(origin);
+      expect(git(["rev-parse", "--is-bare-repository"], origin)).toBe("true");
+      expect(git(["symbolic-ref", "HEAD"], origin)).toBe("refs/heads/main");
+      expect(git(["rev-parse", "main"], origin)).toBe(
+        git(["rev-parse", "main"], checkout),
+      );
+      const saved = JSON.parse(readFileSync(configPath, "utf-8"));
+      expect(saved.repos["my.widget"].ghRepo).toBeUndefined();
+      const worktree = await createWorktree("first-feature", "my.widget");
+      expect(existsSync(worktree)).toBe(true);
+      expect(git(["branch", "--show-current"], worktree)).toBe("first-feature");
+    },
+  );
+
+  test.serial("rejects a name the checkout layout cannot take", async () => {
+    const root = localRoot();
+    const configPath = join(root, "config.json");
+    writeFileSync(configPath, JSON.stringify({ repos: {} }));
+    process.env.HOME = root;
+    process.env.OPENSESSION_CONFIG = configPath;
+
+    for (const name of [
+      "",
+      "acme/widget",
+      "widget.git",
+      "..",
+      "a b",
+      7,
+      // The registry is a plain object; these are its prototype's keys, and
+      // the update route refuses them as ids already.
+      "__proto__",
+      "constructor",
+      "Prototype",
+    ]) {
+      const response = await handleSetupRepoRoutes(
+        postRepo({ source: "new", name }),
+      );
+      expect(response?.status).toBe(400);
+    }
+    expect(existsSync(join(root, "checkouts"))).toBe(false);
+    expect(JSON.parse(readFileSync(configPath, "utf-8"))).toEqual({
+      repos: {},
+    });
+  });
+
+  test.serial(
+    "refuses a name whose checkout already exists and leaves it alone",
+    async () => {
+      const root = localRoot();
+      const configPath = join(root, "config.json");
+      writeFileSync(configPath, JSON.stringify({ repos: {} }));
+      process.env.HOME = root;
+      process.env.OPENSESSION_CONFIG = configPath;
+      const existing = join(root, "checkouts", "widget");
+      mkdirSync(existing, { recursive: true });
+      writeFileSync(join(existing, "keep.txt"), "mine\n");
+
+      const response = await handleSetupRepoRoutes(
+        postRepo({ source: "new", name: "widget" }),
+      );
+
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toEqual({
+        error: `A checkout already exists at ${existing}. Register it as a local folder instead.`,
+      });
+      expect(readFileSync(join(existing, "keep.txt"), "utf-8")).toBe("mine\n");
+      expect(existsSync(join(root, "checkouts", "widget.git"))).toBe(false);
+      expect(JSON.parse(readFileSync(configPath, "utf-8"))).toEqual({
+        repos: {},
+      });
+    },
+  );
+
+  test.serial(
+    "an inherited key on an empty registry does not read as taken",
+    async () => {
+      const root = localRoot();
+      const checkout = createRemoteCheckout(root, "constructor");
+      const configPath = join(root, "config.json");
+      writeFileSync(configPath, JSON.stringify({ repos: {} }));
+      process.env.HOME = root;
+      process.env.OPENSESSION_CONFIG = configPath;
+
+      const response = await handleSetupRepoRoutes(
+        postRepo({ source: "local", path: checkout }),
+      );
+
+      expect(response?.status).toBe(201);
+      expect(await response?.json()).toMatchObject({ id: "constructor" });
+    },
+  );
+
+  test.serial("refuses an id another repository already holds", async () => {
+    const root = localRoot();
+    const checkout = createRemoteCheckout(root, "taken");
+    const configPath = join(root, "config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        repos: {
+          taken: { repo: checkout, wtPrefix: "taken", defaultBranch: "trunk" },
+        },
+      }),
+    );
+    process.env.HOME = root;
+    process.env.OPENSESSION_CONFIG = configPath;
+
+    const response = await handleSetupRepoRoutes(
+      postRepo({ source: "new", name: "Taken" }),
+    );
+
+    expect(response?.status).toBe(409);
+    expect(await response?.json()).toEqual({
+      error: "Repository id already registered: taken",
+    });
+    expect(existsSync(join(root, "checkouts"))).toBe(false);
+  });
+});

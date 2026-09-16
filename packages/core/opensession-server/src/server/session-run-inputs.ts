@@ -22,7 +22,8 @@ import {
   automationDeniedTools,
   automationMcpServersByName,
 } from "./automations";
-import { humanPrompter } from "./session-actors";
+import { humanPrompter, interactivePrompter } from "./session-actors";
+import { plainDiscussionDeniedTools } from "./automation-denied-tools";
 
 /** Which config decided the run's MCP allowlist. */
 export type McpScopeSource =
@@ -37,8 +38,18 @@ export type McpScopeSource =
 
 /** Which in-process opensession-* server set the run carries. */
 export type InProcessMcpBranch =
-  /** Automation-owned: nothing, unless the automation is `selfImprove`. */
+  /** Automation-owned: the automation-bar set, plus the scoped spawn/self
+   *  pair when the automation is `selfImprove`. */
   | "automation-self-improve"
+  /** Automation-owned, prompted by a person themselves: the automation-bar
+   *  set plus `opensession-sessions` in its spawn-only `humanResume` shape,
+   *  so the session can start the work the person asked for. Never the
+   *  automation's own ticks, a scheduled /loop tick sent in a person's name,
+   *  or a sandboxed descendant. */
+  | "automation+human-spawn"
+  /** Plain discussion session: only the approval server
+   *  (opensession-plain-discussion), never the interactive siblings. */
+  | "plain-discussion"
   /** Goal-driven session: the interactive set plus opensession-goal-self. */
   | "interactive+goal-self"
   /** The normal interactive self-management set. */
@@ -68,8 +79,16 @@ export interface SessionRunInputs {
    *  survives an automation-owned session, because a person who takes one
    *  over and presses send is spending their own subscription; the shared
    *  pool stays the backup. It reaches provider account selection only,
-   *  never MCP, GitHub or trust policy. */
+   *  never MCP, GitHub or trust policy. A scheduled /loop tick keeps the
+   *  name of the person who set it here, because the turn is billed to them. */
   accountUser: string | undefined;
+  /** The person who sent this turn themselves, or undefined: every machine
+   *  actor and every scheduled tick (`"Kent (loop)"`) resolves to undefined
+   *  even though `accountUser` keeps the name. This, not `accountUser`, is
+   *  what an automation-owned session's `automation+human-spawn` branch and
+   *  the run token's `humanPrompter` read: a capability a present person
+   *  unlocks must not fire from scheduled prompt text. */
+  humanPrompter: string | undefined;
   inProcessMcpBranch: InProcessMcpBranch;
   /** Whether the run gets the repos/memory/personal-prompt note. Automation
    *  runs get none: their prompts are untrusted text. */
@@ -87,15 +106,21 @@ export type RunInputsSession = Pick<
   | "goalId"
   | "startedBy"
   | "createdByLogin"
+  | "plainDiscussionId"
 >;
 
 /** Which in-process server set the next turn carries. Pure — mirrors the
- *  `inProcessMcp` ternary at the runAgent call site. */
+ *  `inProcessMcp` ternary at the runAgent call site. `humanPrompter` is the
+ *  person who sent this turn themselves (`interactivePrompter(user)`), if
+ *  any; a scheduled tick or machine actor passes undefined. */
 export function sessionInProcessMcpBranch(
   session: RunInputsSession,
+  humanPrompter?: string | null,
 ): InProcessMcpBranch {
-  if (session.automation || session.automationDescendantPolicy)
-    return "automation-self-improve";
+  if (session.automationDescendantPolicy) return "automation-self-improve";
+  if (session.automation)
+    return humanPrompter ? "automation+human-spawn" : "automation-self-improve";
+  if (session.plainDiscussionId) return "plain-discussion";
   return session.goalId ? "interactive+goal-self" : "interactive";
 }
 
@@ -127,6 +152,14 @@ export async function resolveSessionRunInputs(
   const isAutomationSession = !!(
     session.automation || session.automationDescendantPolicy
   );
+  // A discussion session answers a trusted teammate but reads untrusted
+  // ticket text, so its turns get the triage automation's policy: the
+  // automation deny-set plus the customer-facing Plain writes and the Stripe
+  // money movers (both go through the opensession-plain-discussion approval
+  // card instead), and no user, so an allowedUsers-gated server stays
+  // invisible to it.
+  const isPlainDiscussionSession =
+    !isAutomationSession && !!session.plainDiscussionId;
   const source = sessionMcpScopeSource(session);
   const mcpServers = session.automationDescendantPolicy
     ? [...session.automationDescendantPolicy.mcpServers]
@@ -142,17 +175,25 @@ export async function resolveSessionRunInputs(
               await import("./feeds")
             ).feedMcpServersForRefs(session.externalRefs!)
           : undefined;
+  const accountUser = humanPrompter(opts.user) ?? undefined;
+  const prompter = interactivePrompter(opts.user) ?? undefined;
   return {
     isAutomationSession,
     mcpServers,
     // An automation whose record is gone (or that names no allowlist) resolves
     // to undefined, i.e. no allowlist — report the source honestly.
     mcpServersSource: mcpServers === undefined ? "all" : source,
-    deniedTools: isAutomationSession ? automationDeniedTools() : undefined,
-    user: isAutomationSession ? undefined : opts.user,
+    deniedTools: isAutomationSession
+      ? automationDeniedTools()
+      : isPlainDiscussionSession
+        ? plainDiscussionDeniedTools()
+        : undefined,
+    user:
+      isAutomationSession || isPlainDiscussionSession ? undefined : opts.user,
     mcpGrantUser: session.createdByLogin || undefined,
-    accountUser: humanPrompter(opts.user) ?? undefined,
-    inProcessMcpBranch: sessionInProcessMcpBranch(session),
+    accountUser,
+    humanPrompter: prompter,
+    inProcessMcpBranch: sessionInProcessMcpBranch(session, prompter),
     sessionNote: !isAutomationSession,
   };
 }

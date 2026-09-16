@@ -5,7 +5,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { agentIdentity } from "../lib/agent-identity";
+import { sessionAgentName } from "../lib/markdown";
+import { useAgentName } from "../hooks/useAgentName";
 import type { TranscriptEntry } from "../lib/types";
 import { CodeHighlight } from "./LazyCode";
 import { ToolInputDiff } from "./ToolInputDiff";
@@ -225,6 +226,7 @@ export function toolSummary(
   rawInput: TranscriptEntry["toolInput"],
   fallback: string,
   roots: readonly PathRoot[] = [],
+  agentName?: string,
 ): string {
   // Pi routes every bridged MCP call through its `mcp_call` dispatcher, so the
   // envelope is what a transcript stores. Summarize the call inside it.
@@ -238,7 +240,7 @@ export function toolSummary(
   const sessionId = sessionToolId(unwrapped.toolName, input.value);
   if (detail)
     return sessionId
-      ? detail.replaceAll(sessionId, agentIdentity(sessionId).name)
+      ? detail.replaceAll(sessionId, agentName ?? sessionAgentName(sessionId))
       : detail;
   if (
     parseMcpTool(unwrapped.toolName) &&
@@ -438,7 +440,15 @@ export const ToolCallBlock = function ToolCallBlock({
   const mcpParts = mcp ? mcpLabelParts(mcp.server, mcp.tool) : [];
   const scopedOpenSession =
     mcpParts[0] === "Open Session" && mcpParts.length > 2;
-  const summary = toolSummary(toolName, callInput.value, entry.content, roots);
+  const linkedSessionId = sessionToolId(toolName, callInput.value);
+  const agentName = useAgentName(linkedSessionId || undefined);
+  const summary = toolSummary(
+    toolName,
+    callInput.value,
+    entry.content,
+    roots,
+    agentName,
+  );
   const isFileTool =
     canonical === "Read" || canonical === "Edit" || canonical === "Write";
   const lineStats = toolLineStats(toolName, callInput.value);
@@ -475,7 +485,6 @@ export const ToolCallBlock = function ToolCallBlock({
   // the one thing on the row a reader cannot act on by reading it: the chip is
   // the way into that session. Not offered when the call is about this very
   // session, where it would only reload the page the reader is on.
-  const linkedSessionId = sessionToolId(toolName, callInput.value);
   const canOpenSession =
     Boolean(linkedSessionId) && linkedSessionId !== sessionId;
 
@@ -666,10 +675,10 @@ export const ToolCallBlock = function ToolCallBlock({
                 e.stopPropagation();
                 e.currentTarget.click();
               }}
-              title={`Open ${agentIdentity(linkedSessionId).name}`}
-              aria-label={`Open ${agentIdentity(linkedSessionId).name}'s session`}
+              title={`Open ${agentName}`}
+              aria-label={`Open ${agentName}'s session`}
             >
-              {agentIdentity(linkedSessionId).name}
+              {agentName}
               <IconArrowUpRight className="size-4 shrink-0 opacity-70" />
             </span>
           )}

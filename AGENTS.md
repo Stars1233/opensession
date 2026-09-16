@@ -30,12 +30,34 @@ and phone together. For protocol, preference, or transcript changes, check the
 native app and Chrome extension for matching wire models or behavior. Read the
 nearest nested `AGENTS.md` before editing a client.
 
-## Shared checkout and deployment workflow
+## Checkout, publication, and deployment workflow
 
-Sessions edit the shared `main` checkout, but the live services run from an
-immutable release worktree selected by `~/.opensession/deploy/current`. Other
-sessions may edit and stage files in the shared checkout at the same time.
-Uncommitted checkout edits never become live, including frontend edits.
+Checkout isolation and publication are separate repository settings. Sessions
+may use the shared `main` checkout or an isolated branch worktree. Follow the
+session's injected branch instructions and repository publication policy;
+being in a worktree does not itself require a PR.
+
+### Isolated worktrees
+
+- Stay on the session branch and preserve sibling commits and uncommitted work.
+- Run `bun run check` before committing. Stage only your files and inspect the
+  staged diff. Do not commit if the check fails.
+- The default worktree publication policy is `pull-request`. With an explicit
+  repo policy of `direct`, review the complete branch diff, fetch and integrate
+  the latest `origin/main`, check the final candidate, then publish with a normal
+  fast-forward `git push origin HEAD:refs/heads/main`. Never force-push `main`.
+  If the remote advances, integrate it and rerun checks before trying again.
+- Explicit PR requests, existing PRs, and stacked PR work keep the PR workflow.
+  Publication preferences never bypass credential, automation, or branch
+  protection restrictions.
+- The shared-checkout sync script operates on the checkout where it is run.
+  Do not run it in a feature worktree to sync `main`. After landing work, run it
+  from the registered main checkout to preserve other sessions' edits there.
+
+### Shared main checkout
+
+The following sync rules apply only when working in the shared `main` checkout.
+Other sessions may edit and stage files there at the same time.
 
 - **Local `main` must always equal `origin/main`.** Start every task, and
   finish every push, with `bun scripts/shared-checkout-sync.ts`. It fetches,
@@ -78,6 +100,13 @@ Uncommitted checkout edits never become live, including frontend edits.
 - Inspect `git diff --cached --name-only` and `git diff --cached` before every
   commit. Commit with a pathspec when the index contains other work.
 - Commit and push promptly. Never use `git add -A`.
+
+### Deployment (both checkout modes)
+
+Live services run from an immutable release worktree selected by
+`~/.opensession/deploy/current`. Uncommitted checkout edits never become live,
+including frontend edits.
+
 - Do not use an ad-hoc `systemctl restart`. It only restarts the already pinned
   release and can violate the gateway/kernel rollout order.
 - Commit and push before deploying. Deployment may be autonomous when the task

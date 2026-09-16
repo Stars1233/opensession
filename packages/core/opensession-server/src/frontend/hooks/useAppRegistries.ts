@@ -50,6 +50,7 @@ export function useAppRegistries({
             s.isRunning,
             s.title,
             s.aliasIds,
+            s.parentSessionId,
           ] as const,
       ),
     );
@@ -90,6 +91,7 @@ export function useAppRegistries({
                         title: sessionReferenceTitle(session),
                         tabTitle: session.title,
                         aliases: session.aliasIds,
+                        parentSessionId: session.parentSessionId,
                         archived: session.archived === true,
                       }
                     : { title: null }),

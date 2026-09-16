@@ -1,4 +1,4 @@
-import { agentIdentity } from "../lib/agent-identity";
+import { AgentName } from "./AgentIdentity";
 import { BASE_PATH } from "../lib/base";
 import React, { useEffect, useEffectEvent, useState } from "react";
 import {
@@ -747,7 +747,7 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
                             }}
                             href={`${BASE_PATH}/session/${sel.lastRunSessionId}`}
                           >
-                            {agentIdentity(sel.lastRunSessionId).name}
+                            <AgentName sessionId={sel.lastRunSessionId} />
                           </a>
                         </>
                       )}
@@ -1015,7 +1015,7 @@ function RunLedger({
               onOpenSession(r.sessionId);
             }}
           >
-            {agentIdentity(r.sessionId).name}
+            <AgentName sessionId={r.sessionId} />
           </a>
           {r.status !== "running" && (
             <button

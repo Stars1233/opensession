@@ -167,6 +167,30 @@ describe("config loader", () => {
     expect(configuredPaths().worktreesDir).toBe("/srv/worktrees");
   });
 
+  test("publication mode is per repo and independent of checkout isolation", () => {
+    withConfig(
+      JSON.stringify({
+        selfDev: "worktree",
+        repos: {
+          direct: {
+            repo: "/srv/direct",
+            sharedCheckout: true,
+            publicationMode: "direct",
+          },
+          explicit: { repo: "/srv/explicit", publicationMode: "pull-request" },
+          normal: { repo: "/srv/normal" },
+          invalid: { repo: "/srv/invalid", publicationMode: "force" },
+        },
+      }),
+    );
+    const repos = configuredRepos();
+    expect(repos.direct.publicationMode).toBe("direct");
+    expect(repos.direct.sharedCheckout).toBe(true);
+    expect(repos.explicit.publicationMode).toBe("pull-request");
+    expect(repos.normal.publicationMode).toBeUndefined();
+    expect(repos.invalid.publicationMode).toBeUndefined();
+  });
+
   test("unsafe default branch text falls back before reaching prompts", () => {
     withConfig(
       JSON.stringify({

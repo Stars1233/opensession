@@ -3000,6 +3000,7 @@ export async function resumeRemoteSandboxRun(
         registerRunToken(oldSpec.rpcToken, {
           sessionId: oldSpec.osSessionId,
           user: oldSpec.user,
+          humanPrompter: oldSpec.accountUser,
         });
       }
       registerRunWsHost(oldSpec.hostId, oldSpec.wsToken);
@@ -3044,7 +3045,11 @@ export async function resumeRemoteSandboxRun(
     ? crypto.randomUUID()
     : undefined;
   if (rpcToken)
-    registerRunToken(rpcToken, { sessionId: run.osSessionId, user: run.user });
+    registerRunToken(rpcToken, {
+      sessionId: run.osSessionId,
+      user: run.user,
+      humanPrompter: run.accountUser,
+    });
   const hostId = `rh-${Bun.randomUUIDv7()}`;
   const spec: RunHostSpec =
     recovery.kind === "replay"
