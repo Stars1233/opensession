@@ -39,7 +39,9 @@ export type McpScopeSource =
 /** Which in-process opensession-* server set the run carries. */
 export type InProcessMcpBranch =
   /** Automation-owned: the automation-bar set, plus the scoped spawn/self
-   *  pair when the automation is `selfImprove`. */
+   *  pair when the automation is `selfImprove`. Both automation branches add
+   *  the approval server when the session reports into a Plain discussion
+   *  (an auto-triage run's `plainDiscussionId`; see automationSessionMcp). */
   | "automation-self-improve"
   /** Automation-owned, prompted by a person themselves: the automation-bar
    *  set plus `opensession-sessions` in its spawn-only `humanResume` shape,
@@ -157,9 +159,9 @@ export async function resolveSessionRunInputs(
   // automation deny-set plus the customer-facing Plain writes and the Stripe
   // money movers (both go through the opensession-plain-discussion approval
   // card instead), and no user, so an allowedUsers-gated server stays
-  // invisible to it.
-  const isPlainDiscussionSession =
-    !isAutomationSession && !!session.plainDiscussionId;
+  // invisible to it. An automation-owned session that reports into a
+  // discussion keeps its automation branch and takes the same wider deny-set.
+  const isPlainDiscussionSession = !!session.plainDiscussionId;
   const source = sessionMcpScopeSource(session);
   const mcpServers = session.automationDescendantPolicy
     ? [...session.automationDescendantPolicy.mcpServers]
@@ -183,10 +185,10 @@ export async function resolveSessionRunInputs(
     // An automation whose record is gone (or that names no allowlist) resolves
     // to undefined, i.e. no allowlist — report the source honestly.
     mcpServersSource: mcpServers === undefined ? "all" : source,
-    deniedTools: isAutomationSession
-      ? automationDeniedTools()
-      : isPlainDiscussionSession
-        ? plainDiscussionDeniedTools()
+    deniedTools: isPlainDiscussionSession
+      ? plainDiscussionDeniedTools()
+      : isAutomationSession
+        ? automationDeniedTools()
         : undefined,
     user:
       isAutomationSession || isPlainDiscussionSession ? undefined : opts.user,

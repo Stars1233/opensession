@@ -769,6 +769,10 @@ describe("session kernel actor service", () => {
   });
 
   test("reports per-lane occupancy and cumulative counters on /ready", async () => {
+    type LaneReport = {
+      workers: { capacity: number };
+      lanes: Array<Record<string, unknown>>;
+    };
     // Complete at least one turn so counters have advanced.
     await rpc({
       t: "call",
@@ -776,10 +780,19 @@ describe("session kernel actor service", () => {
       outputBytes: 256 * 1024,
       request: { t: "store", method: "stats", args: [] },
     });
-    const ready = (await (await fetch(`${service.url}/ready`)).json()) as {
-      workers: { capacity: number };
-      lanes: Array<Record<string, unknown>>;
-    };
+    // A lane whose earlier turn overran the fixture budget on a slow host is
+    // replaced in the background and reports ready:false, restarting:false
+    // while its worker boots. Wait for every lane to settle first; the lane
+    // shape and counters are what this test is about.
+    let ready: LaneReport | undefined;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      ready = (await (
+        await fetch(`${service.url}/ready`)
+      ).json()) as LaneReport;
+      if (ready.lanes.every((lane) => lane.ready && !lane.restarting)) break;
+      await Bun.sleep(50);
+    }
+    if (!ready) throw new Error("no /ready report");
     // Catalog lane (index 0) plus every session lane.
     expect(ready.lanes.length).toBe(ready.workers.capacity + 1);
     for (const lane of ready.lanes) {

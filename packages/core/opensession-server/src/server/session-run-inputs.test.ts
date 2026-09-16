@@ -215,6 +215,30 @@ describe("resolveSessionRunInputs", () => {
     expect(inputs.inProcessMcpBranch).toBe("plain-discussion");
   });
 
+  test("an auto-triage session that reports into a discussion keeps its automation branch with the wider deny-set", async () => {
+    const session = {
+      ...plain,
+      automation: "Plain ticket triage",
+      plainDiscussionId: "thd_1",
+    };
+    // A follow-up relayed from the discussion: the sender is the channel,
+    // not a person, so no spawn suite and no subscription to bill.
+    const relayed = await resolveSessionRunInputs(session, { user: "Plain" });
+    expect(relayed.isAutomationSession).toBe(true);
+    expect(relayed.user).toBeUndefined();
+    expect(relayed.accountUser).toBeUndefined();
+    expect(relayed.humanPrompter).toBeUndefined();
+    expect(relayed.inProcessMcpBranch).toBe("automation-self-improve");
+    expect(relayed.deniedTools).toHaveProperty("mcp__stripe__create_refund");
+    expect(relayed.deniedTools).toHaveProperty("mcp__plain__reply_to_thread");
+    // A person steering the same session from the UI keeps what #399 gives
+    // an automation-owned session.
+    const steered = await resolveSessionRunInputs(session, { user: "Kent" });
+    expect(steered.humanPrompter).toBe("Kent");
+    expect(steered.inProcessMcpBranch).toBe("automation+human-spawn");
+    expect(steered.deniedTools).toHaveProperty("mcp__stripe__create_refund");
+  });
+
   test("a scheduled loop tick in a person's name never gets the spawn suite", async () => {
     // Kent set the loop, so the turn is still billed to him, but nobody
     // pressed send: scheduled prompt text must not start person-owned

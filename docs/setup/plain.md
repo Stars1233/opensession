@@ -89,7 +89,8 @@ Subscribe the endpoint to these events
   subscriber exists, filter and route the ticket, then fire every enabled
   subscriber asynchronously.
 - `thread.thread_status_transitioned`: when the new status is `DONE`, archive
-  every non-archived Open Session session linked to that thread.
+  every non-archived Open Session session linked to that thread, resolving
+  each session's auto-triage discussion first (see below).
 - `thread.note_created`: when a note contains the configured mention and its
   author has `actorType === "user"`, deliver it to the newest live linked
   session. If no linked session can accept it, run the legacy mention flow.
@@ -103,7 +104,10 @@ A separate archive safety sweep starts even when the Plain agent is disabled.
 With `PLAIN_API_KEY` set, it first runs 60 seconds after boot and then every 15
 minutes, checking up to 40 distinct threads with active linked sessions per
 pass. The webhook gives immediate archival; the sweep covers missed status
-events.
+events. Both run the same archive path (`server/plain-archive.ts`): a session
+with an auto-triage discussion is archived only after that discussion is
+resolved, so a resolution that fails (Plain down, agent key missing) leaves the
+session unarchived and the next webhook or sweep pass retries it.
 
 ### New-ticket filtering and routing
 
@@ -264,6 +268,34 @@ including Sidekick's own and the agent's own replies (a person's turn is
 only `AGENT_SESSION` discussions whose agent is this machine user, for
 `OUTBOUND` messages, while the discussion is not `RESOLVED`; everything else
 is dropped silently.
+
+### Auto-triage discussions
+
+With the agent set up, every ticket the auto-triage flow actually triages
+(past the outbound and spam gates in `handlers.ts`) also gets an Ask Sidekick
+discussion opened by each `plain:thread_created` subscriber as its run starts,
+before model and repository setup. Subscribers get separate discussions, never a
+shared timeline. The triage session is that discussion's session: it runs
+exactly as before and still posts the diagnosis as an internal note, and on
+top of that every tool call shows on the discussion timeline and its final
+message is posted there. The discussion stays open after triage: a teammate
+who asks a follow-up in it is answered by the same session, with the
+investigation already in context, and the session then carries the
+`opensession-plain-discussion` approval tools beside its automation set (the
+discussion deny-set applies, so replies and Stripe actions only go through the
+card). A turn relayed from the discussion is sent as `Plain`, which counts as a
+machine actor: it bills no subscription and unlocks no spawn suite. When the
+ticket reaches DONE, whether the status webhook reports it or the periodic
+DONE sweep catches a missed one, the discussion is resolved and the session
+then archived. A resolution that fails (Plain down, agent key missing) leaves
+the session unarchived, so the next sweep retries it.
+
+A ticket that the classifier skips gets the existing "auto-triage skipped" note
+and no discussion. If the discussion cannot be opened (no agent key, Plain
+down) the run still fires, without one. The discussion id is recorded in the
+run's durable intent the moment Plain returns it, before the discussion is
+marked in progress or the run does anything else, so a run replayed after a
+restart reports into the same discussion instead of opening a second one.
 
 ## Internal notes in English
 

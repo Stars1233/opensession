@@ -113,6 +113,16 @@ import {
   type AutomationOutput,
 } from "./automation-outputs";
 import { automationIntentAlreadySettled } from "./automation-intent-recovery";
+import {
+  openTriageDiscussion,
+  triageDiscussionThread,
+} from "../agents/plain/discussions";
+import {
+  forgetPlainDiscussionRun,
+  plainDiscussionToolResult,
+  plainDiscussionToolUse,
+  settlePlainDiscussionTurn,
+} from "../agents/plain/discussion-mirror";
 
 const SESSIONS_DIR = OPENSESSION_SESSIONS_DIR;
 
@@ -1510,6 +1520,9 @@ type PendingAutomationIntent = {
   modelOverride?: string;
   acceptedAt: string;
   deleteAutomationAfterRun?: boolean;
+  /** The Plain discussion this run opened, recorded as soon as Plain returns
+   *  it so a replay of the intent reuses it instead of creating another. */
+  plainDiscussionId?: string;
   terminalAt?: string;
   terminalError?: string;
 };
@@ -1524,7 +1537,12 @@ const automationIntentPath = (sessionId: string) =>
     `${sessionId.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`,
   );
 
-function persistAutomationIntent(intent: PendingAutomationIntent): void {
+/** Persist a run's intent, or return the one already on disk when a replay
+ *  presents the same identity, so progress it recorded (the discussion it
+ *  opened) is reused rather than repeated. */
+function persistAutomationIntent(
+  intent: PendingAutomationIntent,
+): PendingAutomationIntent {
   mkdirSync(automationIntentDir, { recursive: true, mode: 0o700 });
   const path = automationIntentPath(intent.sessionId);
   if (existsSync(path)) {
@@ -1533,15 +1551,28 @@ function persistAutomationIntent(intent: PendingAutomationIntent): void {
     ) as PendingAutomationIntent;
     const identity = ({
       acceptedAt: _acceptedAt,
+      plainDiscussionId: _plainDiscussionId,
       terminalAt: _terminalAt,
       terminalError: _terminalError,
       ...value
     }: PendingAutomationIntent) => JSON.stringify(value);
     if (identity(existing) !== identity(intent))
       throw new Error(`Automation intent ${intent.sessionId} changed identity`);
-    return;
+    return existing;
   }
   writeJsonAtomic(path, intent, true, 0o600);
+  return intent;
+}
+
+function recordAutomationIntentDiscussion(
+  sessionId: string,
+  plainDiscussionId: string,
+): void {
+  const path = automationIntentPath(sessionId);
+  const intent = JSON.parse(
+    readFileSync(path, "utf8"),
+  ) as PendingAutomationIntent;
+  writeJsonAtomic(path, { ...intent, plainDiscussionId }, true, 0o600);
 }
 
 function recordAutomationIntentTerminal(
@@ -1704,7 +1735,7 @@ export async function runAutomation(
   }
   const bksId = options?.osSessionId || newSessionId();
   const acceptedAt = options?.acceptedAt || new Date().toISOString();
-  persistAutomationIntent({
+  const durableIntent = persistAutomationIntent({
     version: 1,
     automationId: automation.id,
     sessionId: bksId,
@@ -1737,8 +1768,31 @@ export async function runAutomation(
   // run rather than to whatever owns the session when it lands. Declared out
   // here so the outer catch can settle a launch that threw before dispatch.
   const automationRunKey = `rh-${randomUUIDv7()}`;
+  // The Plain discussion an auto-triage run reports into, and the reply it
+  // posts there when the turn is over (the whole assistant text; textTail
+  // below is only a verdict window).
+  let plainDiscussionId: string | undefined;
+  let discussionReply = "";
 
   try {
+    // Open one discussion per subscriber, before any fallible run setup. Never
+    // accept a discussion id from eventContext (also public webhook input);
+    // the only id taken from outside is the one this very intent recorded
+    // before a crash, so a replay reports into that discussion again. A new
+    // id is recorded the moment Plain returns it, before the discussion is
+    // marked in progress, so an exit during that call cannot lose it.
+    const triageThreadId = triageDiscussionThread({
+      trigger,
+      eventKey: automation.eventKey,
+      eventContext: options?.eventContext,
+    });
+    if (triageThreadId)
+      plainDiscussionId = await openTriageDiscussion(
+        triageThreadId,
+        durableIntent.plainDiscussionId,
+        (id) => recordAutomationIntentDiscussion(bksId, id),
+      );
+
     const runModel = automationModel(
       options?.modelOverride || automation.model,
     );
@@ -1912,6 +1966,9 @@ export async function runAutomation(
         }
       } catch {}
     }
+    if (plainDiscussionId) {
+      prompt += `\n\n## Plain discussion\n\nThis run also reports into the ticket's "Ask Sidekick" discussion (${plainDiscussionId}): every tool call shows on its timeline and your final message is posted there for the support team, who may ask follow-up questions in it later. Keep posting the diagnosis as an internal note as instructed above; make your final message a concise summary of what you found and did. Nothing in the discussion reaches the customer.`;
+    }
     // File ticket-triggered sessions under the ticket's ONE workspace so they
     // show up as session tabs there (adopt-don't-duplicate; workspace-resolve.ts).
     let ticketWorkspaceId: string | undefined;
@@ -1991,6 +2048,7 @@ export async function runAutomation(
             ? { automationEvent: options.eventContext.slice(0, 10_000) }
             : {}),
           ...(plainThreadId ? { plainThreadId } : {}),
+          ...(plainDiscussionId ? { plainDiscussionId } : {}),
           ...(ticketWorkspaceId ? { workspaceId: ticketWorkspaceId } : {}),
           ...existing,
           // Intent recovery reuses the session id but may materialize a new
@@ -2202,7 +2260,12 @@ export async function runAutomation(
       }
       if (event.type === "text_chunk" && event.text) {
         textTail = (textTail + event.text).slice(-16384);
+        if (plainDiscussionId) discussionReply += event.text;
       }
+      if (event.type === "tool_use")
+        plainDiscussionToolUse(plainDiscussionId, event);
+      if (event.type === "tool_result")
+        plainDiscussionToolResult(plainDiscussionId, event);
       if (event.type === "error") {
         sawTerminalEvent = true;
         errorMsg = event.content || "Unknown error";
@@ -2261,6 +2324,11 @@ export async function runAutomation(
       );
 
     await persistSession(engineSessionId);
+    settlePlainDiscussionTurn(plainDiscussionId, automationRunKey, {
+      assistantText: discussionReply,
+      endedWithError: !!errorMsg,
+      runFailure: errorMsg || null,
+    });
 
     if (!errorMsg) {
       await deliverAutomationOutputs({
@@ -2287,6 +2355,11 @@ export async function runAutomation(
   } catch (e: any) {
     console.error(`[automations] "${automation.name}" failed:`, e);
     const errorMessage = e.message || String(e);
+    settlePlainDiscussionTurn(plainDiscussionId, automationRunKey, {
+      assistantText: discussionReply,
+      endedWithError: true,
+      runFailure: errorMessage,
+    });
     // A throw is usually ambiguous. The host may still be executing, so the
     // journal stays and boot recovery owns settling it. A definitive launch
     // failure has neither a journal record nor a live engine. Retire that
@@ -2306,6 +2379,7 @@ export async function runAutomation(
     // Keep the intent; boot reconciles its active journal or terminal receipt
     // before replay.
   } finally {
+    forgetPlainDiscussionRun(automationRunKey);
     automationPreparations.delete(bksId);
     activeAutomationIntentSessions.delete(bksId);
     unregisterRunToken(sandboxRpcToken);

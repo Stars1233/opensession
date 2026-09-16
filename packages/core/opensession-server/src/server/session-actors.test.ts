@@ -26,6 +26,7 @@ describe("machine actors", () => {
       "system (restart)",
       "Automation",
       "GitHub",
+      "Plain",
       "Plain ticket triage (automation)",
       workerActor(SESSION),
       agentActor(SESSION),

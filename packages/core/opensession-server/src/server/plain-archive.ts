@@ -2,10 +2,21 @@
  * Auto-archive opensession sessions when their Plain ticket reaches DONE.
  * Two paths: the Plain webhook (status transition events) and a periodic
  * sweep as a safety net in case the webhook subscription misses them.
+ *
+ * A session that reports into an auto-triage discussion has that discussion
+ * resolved first and is archived only once that succeeded. A failed
+ * resolution therefore leaves the session unarchived, which keeps it in the
+ * sweep's candidate set: the next pass retries both steps, so the session file
+ * itself is the retry index and no separate pending-resolution state exists.
  */
 import { executeSessionProjection } from "./session-projection-executor";
 import { readdirSync, readFileSync, existsSync } from "fs";
 import { plainApiUrl } from "./config";
+import {
+  discussionAgentConfigured,
+  resolveDiscussion,
+  withDiscussionOrder,
+} from "../agents/plain/discussion-api";
 import { homeDir, OPENSESSION_SESSIONS_DIR } from "./paths";
 import { updateSessionFile } from "./session-cache";
 import { releasePreviewPathLease } from "./preview-path-leases";
@@ -16,6 +27,21 @@ const SESSIONS_DIR = OPENSESSION_SESSIONS_DIR;
 
 type PlainSessionCandidate = { data: NativeSessionFile };
 type SessionProjector = typeof executeSessionProjection;
+type DiscussionResolver = (discussionId: string) => Promise<void>;
+
+/** Resolve the discussion a triage session reports into. Throws on failure,
+ *  a missing agent key included (the session proves the discussion exists,
+ *  and an archived session never comes back to the sweep), so the caller
+ *  keeps the session for a later retry. */
+export async function resolvePlainDiscussion(
+  discussionId: string,
+): Promise<void> {
+  if (!discussionAgentConfigured())
+    throw new Error("Plain discussion agent is not configured");
+  await withDiscussionOrder(discussionId, () =>
+    resolveDiscussion(discussionId),
+  );
+}
 
 function activePlainSessions(): PlainSessionCandidate[] {
   if (!existsSync(SESSIONS_DIR)) return [];
@@ -63,7 +89,8 @@ export async function clearSessionFileArchive(id: string): Promise<boolean> {
   }
 }
 
-/** Mark every session tied to this thread as archived. Returns count. */
+/** Resolve the discussions of every session tied to this thread and mark the
+ *  sessions archived. Returns how many sessions were archived. */
 export async function archiveSessionsForThread(
   threadId: string,
 ): Promise<number> {
@@ -75,7 +102,9 @@ export async function archiveSessionsForThread(
 }
 
 /** Archive matching files independently so one quarantined session cannot
- * abort the Plain sweep before the remaining sessions are processed. */
+ * abort the Plain sweep before the remaining sessions are processed. A
+ * session whose discussion cannot be resolved is reported and left
+ * unarchived so the next webhook or sweep pass retries it. */
 export async function archivePlainSessionCandidates(
   threadId: string,
   sessions: PlainSessionCandidate[],
@@ -89,11 +118,14 @@ export async function archivePlainSessionCandidates(
       error,
     ),
   releaseLease: (sessionId: string) => void = releasePreviewPathLease,
+  resolveSessionDiscussion: DiscussionResolver = resolvePlainDiscussion,
 ): Promise<number> {
   let archived = 0;
   for (const { data } of sessions) {
     if (data.plainThreadId !== threadId) continue;
     try {
+      if (data.plainDiscussionId)
+        await resolveSessionDiscussion(data.plainDiscussionId);
       await project(data.id, "plain_archive_set", () =>
         updateSessionFile(data.id, (current) => ({
           ...current,
