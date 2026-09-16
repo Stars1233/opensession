@@ -61,7 +61,9 @@ configuration for the run.
   `docs/setup/plain.md`) is prompted by a teammate but reads the same untrusted
   ticket text, so every one of its turns carries the automation deny-set plus
   the Plain customer-facing writes and the Stripe money movers, passes no
-  user, gets no AWS credentials, and mounts only `opensession-plain-discussion`
+  user, gets no AWS credentials (unless the instance opts untrusted runs in
+  with `integrations.aws.untrustedRuns`), and mounts only
+  `opensession-plain-discussion`
   (the Approve/Deny-gated customer reply and Stripe execution) in place of the
   interactive set. The run-rpc fallback builder serves that same set, so a
   hosted or sandboxed turn cannot ask for more.

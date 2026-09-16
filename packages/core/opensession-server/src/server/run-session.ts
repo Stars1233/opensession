@@ -38,6 +38,7 @@ import { runAgentHosted } from "./host-client";
 import { getRunState, transitionRunState } from "./run-state";
 import { resolveSessionRunInputs, runAccountSpec } from "./session-run-inputs";
 import { defaultRepo } from "./config";
+import { agentAwsCredsForUntrustedRuns } from "./aws-creds";
 import { isDevInstance } from "./dev-mode";
 import {
   buildSessionContextNote,
@@ -1927,8 +1928,11 @@ export function sandboxRunSecuritySpec(
         }
       : undefined,
     // No AWS credentials for untrusted text: automation runs and Plain
-    // discussion sessions (which read customer ticket text).
-    aws: !opts.isAutomationSession && !session.plainDiscussionId,
+    // discussion sessions (which read customer ticket text), unless the
+    // instance opts them in (`integrations.aws.untrustedRuns`).
+    aws:
+      (!opts.isAutomationSession && !session.plainDiscussionId) ||
+      agentAwsCredsForUntrustedRuns(),
     user: opts.isAutomationSession ? undefined : opts.user,
     mcpGrantUser: opts.isAutomationSession
       ? undefined
@@ -3343,7 +3347,9 @@ async function runSessionPromptInner(
               }
             : undefined,
           confirmTools: STRIPE_CONFIRM_TOOLS,
-          aws: !isAutomationSession && !session.plainDiscussionId,
+          aws:
+            (!isAutomationSession && !session.plainDiscussionId) ||
+            agentAwsCredsForUntrustedRuns(),
           author: commitAuthorFor(user, sessionPrincipal(session)),
           user: runInputs.user,
           accountUser: runInputs.accountUser,
@@ -3434,8 +3440,11 @@ async function runSessionPromptInner(
         : undefined,
       confirmTools: STRIPE_CONFIRM_TOOLS,
       // Automation descendants and Plain discussion sessions (untrusted
-      // ticket text) never receive AWS credentials.
-      aws: !isAutomationSession && !session.plainDiscussionId,
+      // ticket text) receive AWS credentials only when the instance opts
+      // them in (`integrations.aws.untrustedRuns`).
+      aws:
+        (!isAutomationSession && !session.plainDiscussionId) ||
+        agentAwsCredsForUntrustedRuns(),
       // Attribute any commits this turn makes to whoever sent the prompt, or
       // to the person the session acts for when nobody did (an auto-continue,
       // a restart resume, a queue drain): the last person who prompted it,

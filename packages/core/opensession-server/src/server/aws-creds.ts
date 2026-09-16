@@ -55,6 +55,23 @@ export function agentAwsCredsEnabled(): boolean {
   return Boolean(process.env.AGENT_AWS_REGION?.trim() || str(cfg.region));
 }
 
+/**
+ * Do runs that hold untrusted text (automation runs and Plain discussion
+ * sessions, which read customer ticket text) get the vended credentials too?
+ * Off by default: the trust gates in run-session.ts, runner-session.ts and
+ * session-create.ts withhold AWS from those runs. An operator whose instance
+ * role is read-only and whose ticket work needs S3 (raw uploads, recorder
+ * logs) turns it on per instance. Resolution, first hit wins:
+ *
+ * 1. `AGENT_AWS_UNTRUSTED_RUNS` in env, literal `true` only,
+ * 2. `integrations.aws.untrustedRuns` in config.json.
+ */
+export function agentAwsCredsForUntrustedRuns(): boolean {
+  const flag = process.env.AGENT_AWS_UNTRUSTED_RUNS?.trim();
+  if (flag) return flag === "true";
+  return configuredIntegration("aws").untrustedRuns === true;
+}
+
 /** Region stamped into the vended env. */
 function awsRegion(): string {
   return (

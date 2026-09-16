@@ -19,6 +19,7 @@
  * session-control-wiring.ts.
  */
 
+import { agentAwsCredsForUntrustedRuns } from "./aws-creds";
 import {
   mirrorSlackSessionReply,
   SLACK_SESSION_NOTE,
@@ -491,7 +492,8 @@ export function openingCreateTrustPolicy(
     // stays invisible (session-run-inputs.ts makes the same call on resume).
     user: policy || spec.plainDiscussionId ? undefined : spec.user,
     mcpGrantUser: policy ? undefined : spec.createdByLogin,
-    aws: !policy && !spec.plainDiscussionId,
+    aws:
+      (!policy && !spec.plainDiscussionId) || agentAwsCredsForUntrustedRuns(),
     trustProfile: policy ? "automation" : "interactive",
     ...(policy
       ? {
