@@ -208,7 +208,12 @@ watcher does the rest. A sleeping Portal Sandbox catches up when a Portal
 wakes it, and a start or restart lands the latest checkpoint first, before
 the Portals the machine was running are relaunched; when that landing
 fails, the start fails with it and says why, and nothing is relaunched,
-rather than bringing the app up on the older tree the machine still holds. The
+rather than bringing the app up on the older tree the machine still holds.
+A start or wake from the Portals panel while the agent is working is
+refused ("Wait for the agent to finish"), since it would checkpoint a tree
+mid-edit; the agent's own `start_declared_portal` call is not, its worktree
+being at rest while the tool runs. A turn asked for while a Portal Sandbox
+wakes starts once the wake is done. The
 checkout there is nobody's work: nothing in it is ever pushed or restored
 back, and its origin stays credential-free.
 

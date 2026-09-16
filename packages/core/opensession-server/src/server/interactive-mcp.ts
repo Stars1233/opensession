@@ -278,6 +278,9 @@ export function interactiveMcpServers(
                 ? sandboxForPortals(session, {
                     wake: options?.wake,
                     provision: options?.wake,
+                    // The agent's own call, mid-turn: its worktree is at
+                    // rest while the tool runs.
+                    ownTurn: true,
                   })
                 : null;
             },

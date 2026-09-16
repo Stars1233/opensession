@@ -196,12 +196,14 @@ type LiveSandboxOptions = {
 };
 
 /**
- * A wake's finalization (recording the machine awake, landing the checkout,
- * relaunching its Portals) runs on the session's lifecycle lane, where moves,
- * releases, and deletion run, and each record write lands only while the
- * record still names this machine. A wake that resumed a machine the session
- * has meanwhile stopped running on throws `disowned` and relaunches nothing:
- * the move that took the machine away tears it down.
+ * A wake runs on the session's lifecycle lane from before the resume, where
+ * moves, releases, and deletion run and where run admission waits: a turn
+ * asked for while the machine comes up starts once the wake is finalized
+ * (the machine recorded awake, its checkout landed, its Portals relaunched),
+ * never under it. Each record write lands only while the record still names
+ * this machine. A wake that resumed a machine the session has meanwhile
+ * stopped running on throws `disowned` and relaunches nothing: the move
+ * that took the machine away tears it down.
  */
 async function liveSandbox(
   session: UnifiedSession,
@@ -235,23 +237,23 @@ async function liveSandbox(
     return failed(error);
   }
   if (!stopped || !options.wake || !provider.resume) return null;
-  if (
-    !(await lifecycle.persist({
-      lifecycle: "waking",
-      lastLifecycleError: undefined,
-    }))
-  )
-    throw new Error(lifecycle.disowned);
-  let woken: Sandbox | null;
-  try {
-    woken = await provider.resume(record.sandboxId);
-    if (woken && (await woken.status()) !== "running") woken = null;
-  } catch (error) {
-    return failed(error);
-  }
-  if (!woken) return null;
-  const running = woken;
+  const resume = provider.resume.bind(provider);
   return withSessionLifecycleLane(session.id, async () => {
+    if (
+      !(await lifecycle.persist({
+        lifecycle: "waking",
+        lastLifecycleError: undefined,
+      }))
+    )
+      throw new Error(lifecycle.disowned);
+    let woken: Sandbox | null;
+    try {
+      woken = await resume(record.sandboxId);
+      if (woken && (await woken.status()) !== "running") woken = null;
+    } catch (error) {
+      return failed(error);
+    }
+    if (!woken) return null;
     if (
       !(await lifecycle.persist({
         lifecycle: "awake",
@@ -261,13 +263,13 @@ async function liveSandbox(
       throw new Error(lifecycle.disowned);
     // Not caught: a machine that is up but could not be prepared is not
     // "sleeping or unavailable", and the reason belongs to the caller.
-    await options.beforeRestore?.(running);
+    await options.beforeRestore?.(woken);
     try {
-      await restoreSandboxPortals(session, running);
+      await restoreSandboxPortals(session, woken);
     } catch (error) {
       return failed(error);
     }
-    return running;
+    return woken;
   });
 }
 

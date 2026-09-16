@@ -14,6 +14,8 @@
  * its Portals there and never gets one of these.
  */
 
+import { isAgentSessionBusy } from "./agent-runner";
+import { hostRunBusy } from "./host-registry";
 import { getSandboxProvider, type Sandbox } from "./sandbox";
 import {
   checkpointHostWorkspace,
@@ -111,11 +113,14 @@ export function portalsInSandbox(session: PortalSession): boolean {
  * whatever the machine had before. A Portal Sandbox the provider has lost
  * is replaced when
  * provisioning is allowed. Throws when provisioning or the landing fails;
- * the reason is recorded on the session as well.
+ * the reason is recorded on the session as well. Landing captures the
+ * worktree, so while a turn is running it is refused, unless the caller is
+ * that turn (`ownTurn`: the agent's own Portal tool call, the post-turn
+ * refresh), whose worktree is at rest while the call runs.
  */
 export async function sandboxForPortals(
   session: UnifiedSession,
-  options: { wake?: boolean; provision?: boolean } = {},
+  options: { wake?: boolean; provision?: boolean; ownTurn?: boolean } = {},
 ): Promise<Sandbox | null> {
   if (session.sandbox?.sandboxId)
     return activeSandboxFor(session, { wake: options.wake });
@@ -128,12 +133,13 @@ export async function sandboxForPortals(
       // checkpoint first, or they would come back public on the older tree
       // even though the start itself then fails.
       beforeRestore: async (woken) => {
-        await landForWake(session, woken);
+        await landForWake(session, woken, options.ownTurn);
         synced = true;
       },
     });
     if (sandbox) {
-      if (options.wake && !synced) await landForWake(session, sandbox);
+      if (options.wake && !synced)
+        await landForWake(session, sandbox, options.ownTurn);
       return sandbox;
     }
     if (
@@ -148,7 +154,7 @@ export async function sandboxForPortals(
   if (!options.provision) return null;
   const provider = portalSandboxProvider(session);
   if (!provider) return null;
-  return provisionPortalSandbox(session, provider);
+  return provisionPortalSandbox(session, provider, options.ownTurn);
 }
 
 /**
@@ -160,9 +166,24 @@ export async function sandboxForPortals(
 async function landForWake(
   session: UnifiedSession,
   sandbox: Sandbox,
+  ownTurn: boolean | undefined,
 ): Promise<void> {
-  if ((await syncPortalSandbox(session, sandbox)) === "skipped")
+  if ((await syncPortalSandbox(session, sandbox, { ownTurn })) === "skipped")
     throw new Error("the session no longer runs its Portals on this machine");
+}
+
+/**
+ * The refusal the lifecycle routes make, checked on the lifecycle lane after
+ * claiming it: run admission waits for the lane before it reserves the
+ * session, so a reservation seen here belongs to a turn that is running (or
+ * starts the moment the lane is free), and the worktree is that turn's to
+ * change. Capturing it now would checkpoint a tree mid-edit.
+ */
+function refuseWhileTurnRuns(sessionId: string): void {
+  if (hostRunBusy(sessionId) || isAgentSessionBusy(sessionId))
+    throw new Error(
+      "Wait for the agent to finish before starting its Portal in a Sandbox.",
+    );
 }
 
 /**
@@ -181,8 +202,16 @@ async function landForWake(
 async function provisionPortalSandbox(
   session: UnifiedSession,
   provider: string,
+  ownTurn: boolean | undefined,
 ): Promise<Sandbox> {
   const dir = session.worktreeDir!;
+  // The machine mirrors this worktree, and the checkpoint just taken is the
+  // only faithful copy of it. Captured before anything is recorded: a
+  // session at work is refused outright, which is nobody's failure to show.
+  const outcome = await withSessionLifecycleLane(session.id, async () => {
+    if (!ownTurn) refuseWhileTurnRuns(session.id);
+    return checkpointHostWorkspace(session, dir);
+  });
   await touchNativeSessionStrict(session.id, {
     portalSandbox: { provider, lifecycle: "preparing" },
   });
@@ -193,11 +222,9 @@ async function provisionPortalSandbox(
   // (Assigned inside the lane callback, which the narrowing does not see.)
   let phase = "preparing" as "preparing" | "recorded" | "disowned";
   try {
-    // The machine mirrors this worktree, and the checkpoint just taken is
-    // the only faithful copy of it. A worktree that cannot be checkpointed
-    // (not on GitHub, on the default branch, no credential) gets no Portal
-    // Sandbox rather than one built from origin that shows older code.
-    const outcome = await checkpointHostWorkspace(session, dir);
+    // A worktree that cannot be checkpointed (not on GitHub, on the default
+    // branch, no credential) gets no Portal Sandbox rather than one built
+    // from origin that shows older code.
     if (outcome.state === "skipped")
       throw new Error(
         `this worktree cannot be checkpointed (${outcome.reason}), and the Portal Sandbox would show older code`,
@@ -248,7 +275,7 @@ async function provisionPortalSandbox(
         // start waiting on this machine never sees the older tree. A failure
         // here fails the start, with the machine kept and recorded: the next
         // wake retries the landing.
-        await landForWake(owner, sandbox);
+        await landForWake(owner, sandbox, ownTurn);
       });
     } catch (error) {
       if (phase === "recorded") throw error;
@@ -299,12 +326,14 @@ async function provisionPortalSandbox(
 export function syncPortalSandbox(
   session: UnifiedSession,
   sandbox: Sandbox,
+  options: { ownTurn?: boolean } = {},
 ): Promise<"landed" | "current" | "skipped"> {
   return withSessionLifecycleLane(session.id, async () => {
     const current = await findSessionAsync(session.id);
     const record = current?.portalSandbox;
     if (!current?.worktreeDir || record?.sandboxId !== sandbox.id)
       return "skipped";
+    if (!options.ownTurn) refuseWhileTurnRuns(current.id);
     try {
       const outcome = await checkpointHostWorkspace(
         current,
@@ -351,7 +380,7 @@ export function syncPortalSandboxAfterTurn(
     if (!current?.portalSandbox?.sandboxId) return;
     const sandbox = await activePortalSandboxFor(current);
     if (!sandbox) return;
-    await syncPortalSandbox(current, sandbox);
+    await syncPortalSandbox(current, sandbox, { ownTurn: true });
   });
 }
 
