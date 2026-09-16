@@ -271,8 +271,11 @@ export async function inProcessServerNames(
   session: UnifiedSession,
   inputs: SessionRunInputs,
 ): Promise<string[]> {
-  const { interactiveMcpServers, automationSessionMcp } =
-    await import("./interactive-mcp");
+  const {
+    interactiveMcpServers,
+    automationSessionMcp,
+    plainDiscussionSessionMcp,
+  } = await import("./interactive-mcp");
   if (
     inputs.inProcessMcpBranch === "automation-self-improve" ||
     inputs.inProcessMcpBranch === "automation+human-spawn"
@@ -284,6 +287,11 @@ export async function inProcessServerNames(
       await automationSessionMcp(session, session.id, {
         humanPrompter: inputs.humanPrompter,
       }),
+    );
+  }
+  if (inputs.inProcessMcpBranch === "plain-discussion") {
+    return Object.keys(
+      plainDiscussionSessionMcp(session.id, session.plainDiscussionId || ""),
     );
   }
   const servers: Record<string, unknown> = {

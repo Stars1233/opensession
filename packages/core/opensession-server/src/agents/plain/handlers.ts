@@ -15,12 +15,14 @@ import {
 import {
   buildMentionPrompt,
   buildWorkPrompt,
+  buildDiscussionRefundExecutionPrompt,
   buildRefundExecutionPrompt,
 } from "./prompts";
 import { getDefaultModel, toPiModel } from "../../server/models";
-import { runAgent } from "../../server/agent-runner";
+import { cancelAgentRun, runAgent } from "../../server/agent-runner";
 import { STRIPE_CONFIRM_TOOLS } from "../../server/runner-shared";
 import { classifyRefundApproval } from "./refund-intent";
+import { handleDiscussionEvent, type DiscussionWebhook } from "./discussions";
 import { createWorktree as createRepoWorktree } from "../../server/worktree";
 import {
   configuredIntegration,
@@ -138,6 +140,10 @@ async function runWorkTurn(
   // the approved "@<bot> go ahead" execution path. Closes the gap where any
   // mention note ran with every tool — including Stripe writes — allowed.
   allowMoneyTools: boolean = false,
+  // Aborts the turn through the engine's own cancel path (the same one Stop
+  // takes on any run), so an approved action a teammate stopped in Plain
+  // does not keep executing in this detached run.
+  signal?: AbortSignal,
 ): Promise<{ result: string; sessionId: string }> {
   console.log(
     `[plain] Running agent in ${cwd}${resumeSessionId ? ` (resuming ${resumeSessionId})` : ""}${allowMoneyTools ? " [money tools UNLOCKED]" : ""}`,
@@ -145,6 +151,9 @@ async function runWorkTurn(
 
   let result = "";
   let sessionId = resumeSessionId || "";
+  const runToken = crypto.randomUUID();
+  const onAbort = () => void cancelAgentRun(runToken);
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
     for await (const event of runAgent({
@@ -153,6 +162,8 @@ async function runWorkTurn(
       cwd,
       mode: "code",
       model: toPiModel(getDefaultModel()),
+      startToken: runToken,
+      shouldCancel: () => signal?.aborted === true,
       // Every configured connector, as this loop has always run. Untrusted
       // ticket text reaches it, so the containment is the deny-set below +
       // per-server allowedUsers — not the mount list. Narrow this to the
@@ -190,9 +201,34 @@ async function runWorkTurn(
   } catch (e: any) {
     console.error(`[plain] agent run error:`, e);
     result = `Error: ${e.message || String(e)}`;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
 
   return { result, sessionId };
+}
+
+/** The approved-refund execution turn: money tools unlocked, the exact
+ *  proposal only. Shared by the note flow, where the proposal is the agent's
+ *  own "needs approval" note on the thread, and the discussion approval card,
+ *  where the approved proposal text is the action itself (a discussion opened
+ *  from Home has no thread to find a note on). */
+export async function executeApprovedStripeAction(
+  request: string,
+  threadContext: string,
+  source: "note" | "discussion" = "note",
+  signal?: AbortSignal,
+): Promise<string> {
+  const { result } = await runWorkTurn(
+    source === "discussion"
+      ? buildDiscussionRefundExecutionPrompt(request, threadContext)
+      : buildRefundExecutionPrompt(request, threadContext),
+    DEFAULT_REPO_DIR,
+    undefined,
+    /*allowMoneyTools*/ true,
+    signal,
+  );
+  return result;
 }
 
 // --- Worktree creation ---
@@ -761,6 +797,11 @@ export async function handleWebhook(
 ): Promise<Response> {
   const eventType = payload.type;
   console.log(`[plain] Webhook received: ${eventType}`);
+
+  // Ask Sidekick discussions carry no thread envelope (discussions.ts).
+  if (eventType.startsWith("discussion.")) {
+    return handleDiscussionEvent(payload as unknown as DiscussionWebhook);
+  }
 
   const thread = payload.payload.thread;
   if (!thread) {

@@ -212,8 +212,19 @@ import {
   retrievedMemoryNoteFor,
   sessionRepoIds,
 } from "./session-repos";
-import { automationSessionMcp, interactiveMcpServers } from "./interactive-mcp";
+import {
+  automationSessionMcp,
+  interactiveMcpServers,
+  plainDiscussionSessionMcp,
+} from "./interactive-mcp";
 import { makeAskHandler, settleRestoredAskAfterRecovery } from "./asks";
+import {
+  forgetPlainDiscussionRun,
+  lastAssistantReply,
+  plainDiscussionToolResult,
+  plainDiscussionToolUse,
+  settlePlainDiscussionTurn,
+} from "../agents/plain/discussion-mirror";
 import {
   registerSessionEffectExecutor,
   SessionEffectDeferredError,
@@ -1312,6 +1323,22 @@ export async function recordRecoveredRunEvent(
 
   if (event.type === "done" || event.type === "error") {
     recoveredFeedStarted.delete(osSessionId);
+    // A discussion turn that outlived a gateway restart still owes Plain its
+    // answer and IDLE. The in-memory reply is gone with the old process, so
+    // the complete final text comes from the transcript the host proxied.
+    if (session.plainDiscussionId) {
+      const runKey = `recovered:${osSessionId}`;
+      const assistantText = lastAssistantReply(
+        await mergedSessionTranscriptAsync(session).catch(() => []),
+      );
+      settlePlainDiscussionTurn(session.plainDiscussionId, runKey, {
+        assistantText,
+        endedWithError: event.type === "error",
+        runFailure:
+          event.type === "error" ? event.content || "run failed" : null,
+      });
+      forgetPlainDiscussionRun(runKey);
+    }
     // Exact steer-delivered events already retired anything the engine read.
     // Every remaining receipt becomes the immediate next turn, even after a
     // clean finish: the run may have ended between buffering and its next step.
@@ -1866,12 +1893,20 @@ export function sandboxRunSecuritySpec(
       ? []
       : opts.isAutomationSession
         ? (opts.automationProxyMcpServers ?? [])
-        : [
-            ...Object.keys(
-              interactiveMcpServers(opts.user, session.id, opts.promptEntryId),
-            ),
-            ...(session.goalId ? ["opensession-goal-self"] : []),
-          ],
+        : session.plainDiscussionId
+          ? Object.keys(
+              plainDiscussionSessionMcp(session.id, session.plainDiscussionId),
+            )
+          : [
+              ...Object.keys(
+                interactiveMcpServers(
+                  opts.user,
+                  session.id,
+                  opts.promptEntryId,
+                ),
+              ),
+              ...(session.goalId ? ["opensession-goal-self"] : []),
+            ],
     reposNote: undefined,
     deniedTools: opts.deniedTools,
     publicationPolicy: descendant
@@ -1881,7 +1916,9 @@ export function sandboxRunSecuritySpec(
           headBranch: session.branch || "",
         }
       : undefined,
-    aws: !opts.isAutomationSession,
+    // No AWS credentials for untrusted text: automation runs and Plain
+    // discussion sessions (which read customer ticket text).
+    aws: !opts.isAutomationSession && !session.plainDiscussionId,
     user: opts.isAutomationSession ? undefined : opts.user,
     mcpGrantUser: opts.isAutomationSession
       ? undefined
@@ -2623,8 +2660,23 @@ export async function runSessionPrompt(
     // dispatch in and must retain it for the caller to restore atomically.
     if (!promptEntryId)
       await acknowledgePromptDispatch(sessionId, durablePromptEntryId);
+    // A throw is the one terminal path the run loop cannot settle itself:
+    // the discussion still gets its IDLE (and the failure, unless the throw
+    // came from a Stop). No-op when the loop already mirrored this run.
+    settlePlainDiscussionTurn(
+      findSession(sessionId)?.plainDiscussionId,
+      startToken,
+      isAgentSessionCancelled(sessionId, startToken)
+        ? { assistantText: "", endedWithError: false, runFailure: null }
+        : {
+            assistantText: "",
+            endedWithError: true,
+            runFailure: e instanceof Error ? e.message : String(e),
+          },
+    );
     throw e;
   } finally {
+    forgetPlainDiscussionRun(startToken);
     finishDeskNavigation();
     unmarkSessionStarting(sessionId, startToken);
   }
@@ -3074,7 +3126,18 @@ async function runSessionPromptInner(
           (entry) => entry.id !== durablePromptEntryId,
         )
       : undefined;
-  if (isAgentSessionCancelled(session.id, startToken)) return;
+  // Every terminal path of this run settles its Plain discussion through the
+  // same idempotent finalizer (see settlePlainDiscussionTurn); the wrapper's
+  // catch covers throws under this key.
+  const plainRunKey = startToken ?? sessionId;
+  if (isAgentSessionCancelled(session.id, startToken)) {
+    settlePlainDiscussionTurn(session.plainDiscussionId, plainRunKey, {
+      assistantText: "",
+      endedWithError: false,
+      runFailure: null,
+    });
+    return;
+  }
   if (
     session.automationDescendantPolicy &&
     !session.runner?.id &&
@@ -3165,6 +3228,11 @@ async function runSessionPromptInner(
       sessionId,
       isRunning: false,
     });
+    settlePlainDiscussionTurn(session.plainDiscussionId, plainRunKey, {
+      assistantText: "",
+      endedWithError: true,
+      runFailure: msg,
+    });
     return;
   }
 
@@ -3180,6 +3248,31 @@ async function runSessionPromptInner(
   // scoping intact: proxy names come from the same fail-closed automation
   // set the run-rpc fallback builder serves, while the repos note and MCP
   // grant identity are withheld.
+  // The in-process opensession-* set this turn carries, rebuilt per call
+  // because an McpServer holds exactly one transport. Self-management tools
+  // for normal sessions; withheld from automation sessions (and their
+  // interactive resumes), same gate as deniedTools above. Automation-owned
+  // sessions keep their automation-bar set (papercuts + report/workflows
+  // rebuild + the selfImprove pair, plus a person's own spawn suite — the
+  // same fail-closed set the hosted path proxies and run-rpc's fallback
+  // builder serves, resolved once above as automationMcp) so a Slack thread
+  // reply reaches a session with the same tools its unattended run had. A
+  // Plain discussion session gets only its approval server: it reads
+  // untrusted ticket text. A goal-driven session also gets its own
+  // opensession-goal-self controls, so an interactive turn (a human steering
+  // it in the UI) can set the next wake, append to the ledger, or
+  // pause/finish — the same tools the headless wake has.
+  const inProcessMcpForTurn = (): Record<string, unknown> =>
+    isAutomationSession
+      ? automationMcp
+      : session.plainDiscussionId
+        ? plainDiscussionSessionMcp(sessionId, session.plainDiscussionId)
+        : session.goalId
+          ? {
+              ...interactiveMcpServers(user, sessionId, durablePromptEntryId),
+              "opensession-goal-self": createGoalSelfMcpServer(session.goalId),
+            }
+          : interactiveMcpServers(user, sessionId, durablePromptEntryId);
   const hostedRun =
     !runnerRun && !sandboxRun && routedEngine === "pi"
       ? runAgentHosted({
@@ -3202,18 +3295,7 @@ async function runSessionPromptInner(
           mcpServers: mcpServers ?? "all",
           proxyMcpServers: session.automationDescendantPolicy
             ? []
-            : isAutomationSession
-              ? automationProxyMcpServers
-              : [
-                  ...Object.keys(
-                    interactiveMcpServers(
-                      user,
-                      sessionId,
-                      durablePromptEntryId,
-                    ),
-                  ),
-                  ...(session.goalId ? ["opensession-goal-self"] : []),
-                ],
+            : Object.keys(inProcessMcpForTurn()),
           reposNote: isAutomationSession
             ? undefined
             : await buildSessionNote(session, user),
@@ -3226,7 +3308,7 @@ async function runSessionPromptInner(
               }
             : undefined,
           confirmTools: STRIPE_CONFIRM_TOOLS,
-          aws: !isAutomationSession,
+          aws: !isAutomationSession && !session.plainDiscussionId,
           author: commitAuthorFor(user, sessionPrincipal(session)),
           user: runInputs.user,
           accountUser: runInputs.accountUser,
@@ -3241,21 +3323,7 @@ async function runSessionPromptInner(
           journalKind: "prompt",
           onAskUser: makeAskHandler(sessionId),
           onSteerFailed: (text) => requeueFailedSteer(session.id, text, user),
-          fallbackInProcessMcp: () =>
-            isAutomationSession
-              ? automationMcp
-              : session.goalId
-                ? {
-                    ...interactiveMcpServers(
-                      user,
-                      sessionId,
-                      durablePromptEntryId,
-                    ),
-                    "opensession-goal-self": createGoalSelfMcpServer(
-                      session.goalId,
-                    ),
-                  }
-                : interactiveMcpServers(user, sessionId, durablePromptEntryId),
+          fallbackInProcessMcp: inProcessMcpForTurn,
         })
       : null;
 
@@ -3314,28 +3382,10 @@ async function runSessionPromptInner(
           ? switchHandoffEntries
           : undefined,
       mcpServers: mcpServers ?? "all",
-      // Self-management tools for normal sessions; withheld from automation
-      // sessions (and their interactive resumes), same gate as deniedTools
-      // above. Automation-owned sessions keep their automation-bar set
-      // (papercuts + report/workflows rebuild + the selfImprove pair, the
-      // same fail-closed set the hosted path proxies and run-rpc's fallback
-      // builder serves) so a Slack thread reply reaches a session with the
-      // same tools its unattended run had.
-      // A goal-driven session also gets its own opensession-goal-self controls, so an
-      // interactive turn (a human steering it in the UI) can set the next wake,
-      // append to the ledger, or pause/finish — the same tools the headless wake has.
+      // See inProcessMcpForTurn above for what each session kind carries.
       inProcessMcp: session.automationDescendantPolicy
         ? {}
-        : isAutomationSession
-          ? automationMcp
-          : session.goalId
-            ? {
-                ...interactiveMcpServers(user, sessionId, durablePromptEntryId),
-                "opensession-goal-self": createGoalSelfMcpServer(
-                  session.goalId,
-                ),
-              }
-            : interactiveMcpServers(user, sessionId, durablePromptEntryId),
+        : inProcessMcpForTurn(),
       reposNote: isAutomationSession
         ? undefined
         : await buildSessionNote(session, user),
@@ -3348,7 +3398,9 @@ async function runSessionPromptInner(
           }
         : undefined,
       confirmTools: STRIPE_CONFIRM_TOOLS,
-      aws: !isAutomationSession, // automation descendants never receive AWS credentials
+      // Automation descendants and Plain discussion sessions (untrusted
+      // ticket text) never receive AWS credentials.
+      aws: !isAutomationSession && !session.plainDiscussionId,
       // Attribute any commits this turn makes to whoever sent the prompt, or
       // to the person the session acts for when nobody did (an auto-continue,
       // a restart resume, a queue drain): the last person who prompted it,
@@ -3483,6 +3535,7 @@ async function runSessionPromptInner(
       }
       case "tool_use":
         toolUseCount++;
+        plainDiscussionToolUse(session.plainDiscussionId, event);
         broadcastToSession(sessionId, {
           type: "stream_tool_use",
           sessionId,
@@ -3498,6 +3551,7 @@ async function runSessionPromptInner(
         });
         break;
       case "tool_result":
+        plainDiscussionToolResult(session.plainDiscussionId, event);
         broadcastToSession(sessionId, {
           type: "stream_tool_result",
           sessionId,
@@ -3737,6 +3791,14 @@ async function runSessionPromptInner(
       slackReplyTo.threadTs,
     ).catch(() => {});
   }
+
+  // A session answering a Plain discussion posts the turn there and reports
+  // itself idle, whoever started the turn.
+  settlePlainDiscussionTurn(session.plainDiscussionId, plainRunKey, {
+    assistantText,
+    endedWithError,
+    runFailure,
+  });
 
   // Announce-then-stop guard (shared with the create path — see
   // maybeQueueAutoContinue). runSessionPromptAndDrain delivers what it queues.
