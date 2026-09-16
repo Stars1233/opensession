@@ -60,7 +60,10 @@ import { cacheMissNotice } from "@tellahq/opensession-protocol/notices";
 import { RESTART_QUEUE_NOTICE_MESSAGE } from "@tellahq/opensession-protocol/session";
 import { dropSandboxPreviewRoutes } from "./preview";
 import { activeSandboxFor, restoreSandboxPortals } from "./session-sandbox";
-import { checkpointSessionWorkspace } from "./sandbox/checkpoint";
+import {
+  checkpointSessionWorkspace,
+  settleSessionCheckpoints,
+} from "./sandbox/checkpoint";
 import {
   wrapContext,
   stripContext,
@@ -161,7 +164,6 @@ import {
   applyRunOutcomeProjection,
   touchNativeSession,
   updateSessionFile,
-  findSessionAsync,
   SESSIONS_DIR,
 } from "./session-cache";
 import { markRecapPendingIfUnwatched } from "./recap";
@@ -2525,6 +2527,10 @@ export async function runSessionPrompt(
 ): Promise<void> {
   // Any explicit new run lifts a user stop — the queue may drain again.
   stoppedSessions.delete(sessionId);
+  // A workspace checkpoint still in flight from the previous turn (or from a
+  // move or a manual save) reads the tree and force-pushes the hidden ref;
+  // the agent must not start editing under it. Resolves at once when none is.
+  await settleSessionCheckpoints(sessionId);
   // A direct send to a sandbox can spend minutes provisioning before its run
   // journal exists. Give it the same durable dispatch record as a queue drain,
   // so a restart during provisioning requeues the complete prompt.
@@ -3666,6 +3672,35 @@ async function runSessionPromptInner(
     );
   }
 
+  // Push the workspace checkpoint to origin (sandbox/checkpoint.ts) so the
+  // session's work survives a lost or replaced Sandbox and can move to another
+  // machine. Claimed on the session's checkpoint lane BEFORE the run settles
+  // below: from the moment the session reads as idle, the next turn waits on
+  // that lane (runSessionPrompt), so no turn edits the tree while the capture
+  // reads it. Detached from the reply otherwise; the failure is logged, not
+  // surfaced as a turn error. Never waking: the Sandbox just ran the turn.
+  if (
+    !endedWithError &&
+    sandboxRun?.sandboxId &&
+    isRunnableSandboxProvider(sandboxRun.sandboxProvider)
+  ) {
+    void checkpointSessionWorkspace(session, (current) =>
+      activeSandboxFor(current as UnifiedSession),
+    )
+      .then((outcome) => {
+        if (outcome.state === "skipped")
+          console.log(
+            `[sandbox] ${sessionId}: checkpoint skipped (${outcome.reason})`,
+          );
+      })
+      .catch((error) => {
+        console.warn(
+          `[sandbox] ${sessionId}: workspace checkpoint failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+  }
+
   // A terminal failure keeps the session in the "Needs input" bucket until a
   // later run finishes cleanly (which clears it here too), and lands in the
   // transcript as a system chip. finalSessionId wins over the session file's
@@ -3744,24 +3779,6 @@ async function runSessionPromptInner(
           );
         });
       }
-      // Push the workspace checkpoint to origin (sandbox/checkpoint.ts) so
-      // the session's work survives a lost or replaced Sandbox and can move
-      // to another machine. Never waking: the Sandbox just ran the turn.
-      void (async () => {
-        const current = (await findSessionAsync(sessionId)) || session;
-        const sandbox = await activeSandboxFor(current);
-        if (!sandbox) return;
-        const outcome = await checkpointSessionWorkspace(current, sandbox);
-        if (outcome.state === "skipped")
-          console.log(
-            `[sandbox] ${sessionId}: checkpoint skipped (${outcome.reason})`,
-          );
-      })().catch((error) => {
-        console.warn(
-          `[sandbox] ${sessionId}: workspace checkpoint failed:`,
-          error instanceof Error ? error.message : String(error),
-        );
-      });
     }
     // Publish any commits the turn left unpushed so the status header doesn't
     // linger on "Ahead by N commits" (see autoPushSessionBranches). Only on a

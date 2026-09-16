@@ -78,15 +78,21 @@ export function attachSandbox(
   });
 }
 
+/** Lifecycle actions. A rebuild first checkpoints the Sandbox; when that is
+ * impossible on a reachable Sandbox the server answers 428 and only
+ * `discard: true` lets the rebuild throw the Sandbox's files away. */
 export function sandboxAction(
   sessionId: string,
   action: "pause" | "resume" | "recreate" | "checkpoint",
+  options: { discard?: boolean } = {},
 ): Promise<SessionSandboxStatus> {
   const path = `/sessions/${encodeURIComponent(sessionId)}/sandbox/${action}`;
   const label = `Failed to ${action} sandbox`;
-  return action === "recreate"
-    ? request(path, { method: "POST", body: { confirm: true }, label })
-    : request(path, { method: "POST", label });
+  if (action !== "recreate") return request(path, { method: "POST", label });
+  const body = options.discard
+    ? { confirm: true, discard: true }
+    : { confirm: true };
+  return request(path, { method: "POST", body, label });
 }
 
 /** Moves a Sandbox session back to this machine: the Sandbox's work is

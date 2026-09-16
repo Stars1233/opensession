@@ -1870,39 +1870,44 @@ export async function setupRemoteWorkspace(
     }
   }
   mark("branch ready");
-  // A fresh workspace (cold clone or adopted warm clone) continues from the
-  // session's last checkpoint while origin still carries the clone credential:
-  // the branch lands on the checkpoint head with its uncommitted changes. A
-  // failure here is loud, because silently starting from origin's branch tip
-  // is exactly the data loss the checkpoint exists to prevent.
-  if (options.restoreCheckpoint && workspaceState !== "cwd") {
-    const { ref, commit } = options.restoreCheckpoint;
-    const restored = await driver.exec(checkpointRestoreScript(ref, commit), {
-      cwd,
-      timeoutMs: 300_000,
-    });
-    if (restored.exitCode !== 0) {
-      throw new Error(
-        `could not restore checkpoint ${commit.slice(0, 12)} from ${ref}: ` +
-          `${redactUrl((restored.stderr || restored.stdout).trim().slice(0, 300))}`,
-      );
+  try {
+    // A fresh workspace (cold clone or adopted warm clone) continues from the
+    // session's last checkpoint while origin still carries the clone
+    // credential: the branch lands on the checkpoint head with its uncommitted
+    // changes. A failure here is loud, because silently starting from origin's
+    // branch tip is exactly the data loss the checkpoint exists to prevent.
+    if (options.restoreCheckpoint && workspaceState !== "cwd") {
+      const { ref, commit } = options.restoreCheckpoint;
+      const restored = await driver.exec(checkpointRestoreScript(ref, commit), {
+        cwd,
+        timeoutMs: 300_000,
+      });
+      if (restored.exitCode !== 0) {
+        throw new Error(
+          `could not restore checkpoint ${commit.slice(0, 12)} from ${ref}: ` +
+            `${redactUrl((restored.stderr || restored.stdout).trim().slice(0, 300))}`,
+        );
+      }
+      mark(`checkpoint ${commit.slice(0, 12)} restored`);
     }
-    mark(`checkpoint ${commit.slice(0, 12)} restored`);
-  }
-  // Installation tokens expire in about an hour. Keep them only for this
-  // bounded clone/fetch, then leave a credential-free GitHub origin. Every run
-  // projects a fresh token through the process-local credential helper below,
-  // so lazy blob fetches and pushes never depend on a token at rest.
-  if (isGithubHttpsUrl(cloneUrl)) {
-    const safeOrigin = credentialFreeHttpsUrl(cloneUrl);
-    const scrubbed = await driver.exec(
-      `git remote set-url origin ${shellQuoteWord(safeOrigin)}`,
-      { cwd },
-    );
-    if (scrubbed.exitCode !== 0)
-      throw new Error(
-        `could not scrub GitHub clone credential: ${scrubbed.stderr.trim().slice(0, 300)}`,
+  } finally {
+    // Installation tokens expire in about an hour. Keep them only for this
+    // bounded clone/fetch/restore, then leave a credential-free GitHub origin,
+    // also when the restore just failed and the Sandbox is about to be parked
+    // as needs-attention. Every run projects a fresh token through the
+    // process-local credential helper below, so lazy blob fetches and pushes
+    // never depend on a token at rest.
+    if (isGithubHttpsUrl(cloneUrl)) {
+      const safeOrigin = credentialFreeHttpsUrl(cloneUrl);
+      const scrubbed = await driver.exec(
+        `git remote set-url origin ${shellQuoteWord(safeOrigin)}`,
+        { cwd },
       );
+      if (scrubbed.exitCode !== 0)
+        throw new Error(
+          `could not scrub GitHub clone credential: ${scrubbed.stderr.trim().slice(0, 300)}`,
+        );
+    }
   }
   // Per-session only: warm/template preparation never calls this path, so
   // private files are injected after restore and can never land in a shared
@@ -1928,11 +1933,21 @@ export async function setupRemoteWorkspace(
 /** Shell that restores a checkpoint into the checkout at the current
  * directory: fetch the hidden ref, verify it is the recorded commit, land the
  * branch on the checkpoint's parent, and leave the checkpointed tree as
- * uncommitted changes (sandbox/checkpoint.ts explains the commit shape). */
-export function checkpointRestoreScript(ref: string, commit: string): string {
+ * uncommitted changes (sandbox/checkpoint.ts explains the commit shape).
+ * `onlyForward` additionally refuses unless the current HEAD is an ancestor
+ * of the checkpoint, so a checkout that is reused rather than fresh can lose
+ * no commit. Nothing is touched before every check has passed. */
+export function checkpointRestoreScript(
+  ref: string,
+  commit: string,
+  options: { onlyForward?: boolean } = {},
+): string {
   return [
     `git fetch --no-tags --quiet origin ${shellQuoteWord(`+${ref}:refs/opensession/checkpoint`)}`,
     `test "$(git rev-parse --verify 'refs/opensession/checkpoint^{commit}')" = ${shellQuoteWord(commit)}`,
+    ...(options.onlyForward
+      ? ["git merge-base --is-ancestor HEAD refs/opensession/checkpoint"]
+      : []),
     "git -c advice.detachedHead=false reset --hard --quiet refs/opensession/checkpoint",
     "git reset --mixed --quiet 'refs/opensession/checkpoint^'",
     "git update-ref -d refs/opensession/checkpoint",

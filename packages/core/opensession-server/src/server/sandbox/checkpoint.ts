@@ -20,17 +20,24 @@
  * processes on the machine that wrote it. The GitHub App credential used for
  * the push lives only in the push command's environment; the origin remote
  * stays credential-free.
+ *
+ * Every checkpoint of a session runs on that session's lane: one at a time,
+ * in request order, and a turn does not start while one is in flight
+ * (run-session awaits `settleSessionCheckpoints`). Two captures can therefore
+ * never race each other's force-push, and the recorded commit is always the
+ * one the hidden ref points at.
  */
 
 import { $ } from "bun";
 import { githubServiceCredentialEnv } from "../github-app";
-import { touchNativeSessionStrict } from "../session-cache";
+import { findSessionAsync, touchNativeSessionStrict } from "../session-cache";
 import type { SandboxCheckpointRecord, UnifiedSession } from "../types";
 import {
   createWorktree,
   createWorktreeForExistingBranch,
   getRepo,
   isSharedCheckoutDir,
+  listWorktrees,
   type Repo,
 } from "../worktree";
 import { existsSync } from "node:fs";
@@ -52,6 +59,42 @@ const OPENSESSION_GIT_IDENTITY = {
 
 export function checkpointRef(sessionId: string): string {
   return `refs/opensession/checkpoints/${sessionId}`;
+}
+
+/** Per-session serialization: the tail of the chain of checkpoint operations
+ * still in flight. Module-global across reloads like the other session lanes. */
+const checkpointLanes: Map<string, Promise<void>> = ((
+  globalThis as { __osCheckpointLanes?: Map<string, Promise<void>> }
+).__osCheckpointLanes ??= new Map());
+
+/**
+ * Run `fn` after every checkpoint operation already queued for the session.
+ * The lane is claimed synchronously, before the first await, so a caller that
+ * schedules a checkpoint and returns has already made later turns wait on it.
+ */
+export function withCheckpointLane<T>(
+  sessionId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prior = checkpointLanes.get(sessionId) ?? Promise.resolve();
+  const run = prior.then(fn);
+  const settled: Promise<void> = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  void settled.then(() => {
+    if (checkpointLanes.get(sessionId) === settled)
+      checkpointLanes.delete(sessionId);
+  });
+  checkpointLanes.set(sessionId, settled);
+  return run;
+}
+
+/** Resolves once no checkpoint is in flight for the session. Never rejects:
+ * a failed checkpoint is reported where it was requested, not to the turn
+ * that merely waited for it. */
+export function settleSessionCheckpoints(sessionId: string): Promise<void> {
+  return checkpointLanes.get(sessionId) ?? Promise.resolve();
 }
 
 /** Only a GitHub-hosted repository can hold a checkpoint: the push uses the
@@ -128,23 +171,31 @@ export type CheckpointOutcome =
   | { state: "pushed" | "unchanged"; checkpoint: SandboxCheckpointRecord }
   | { state: "skipped"; reason: string };
 
+type CheckpointSession = Pick<
+  UnifiedSession,
+  "id" | "repo" | "branch" | "worktreeDir" | "sandbox" | "sandboxCheckpoint"
+>;
+
+/** Runs the checkpoint script somewhere and returns its exit code and output:
+ * inside a Sandbox (`sandbox.exec`) or on this machine (`bun`'s shell). */
+type ScriptRunner = (
+  script: string,
+  env: Record<string, string>,
+) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+
 /**
- * Push the session's current workspace state from `sandbox` to origin and
- * record it on the session. Never throws for an expected limitation (no
- * branch, no GitHub credential, codestorage repo); a git failure does.
+ * One checkpoint on the session's lane. Callers pass the session record as
+ * it stands once the lane is theirs (a queued caller's own copy may be
+ * stale). `unchanged` needs no write; `pushed` becomes the session's
+ * `sandboxCheckpoint` before the lane is released, so the next checkpoint
+ * and the next turn both see it.
  */
-export async function checkpointSessionWorkspace(
-  session: Pick<
-    UnifiedSession,
-    "id" | "repo" | "branch" | "worktreeDir" | "sandbox" | "sandboxCheckpoint"
-  >,
-  sandbox: Sandbox,
+async function runCheckpoint(
+  session: CheckpointSession,
+  cwd: string,
+  run: ScriptRunner,
 ): Promise<CheckpointOutcome> {
-  if (!isRemoteSandboxProvider(session.sandbox?.provider))
-    return { state: "skipped", reason: "not a Sandbox session" };
   if (!session.branch) return { state: "skipped", reason: "no branch" };
-  const cwd = sandbox.cwd || session.worktreeDir;
-  if (!cwd) return { state: "skipped", reason: "no workspace" };
   const repo = getRepo(session.repo);
   if (!checkpointCapable(repo))
     return { state: "skipped", reason: "repository is not on GitHub" };
@@ -154,21 +205,15 @@ export async function checkpointSessionWorkspace(
   if (!env) return { state: "skipped", reason: "no GitHub credential" };
   const ref = checkpointRef(session.id);
   const last = session.sandboxCheckpoint;
-  const result = await sandbox.exec(
-    ["bash", "-c", checkpointScript(excludedPaths(repo))],
-    {
-      env: {
-        ...env,
-        OS_CWD: cwd,
-        OS_REF: ref,
-        OS_SESSION: session.id,
-        OS_BRANCH: session.branch,
-        OS_LAST_HEAD: last?.ref === ref ? last.head : "",
-        OS_LAST_TREE: last?.ref === ref ? last.tree : "",
-      },
-      timeoutMs: CHECKPOINT_TIMEOUT_MS,
-    },
-  );
+  const result = await run(checkpointScript(excludedPaths(repo)), {
+    ...env,
+    OS_CWD: cwd,
+    OS_REF: ref,
+    OS_SESSION: session.id,
+    OS_BRANCH: session.branch,
+    OS_LAST_HEAD: last?.ref === ref ? last.head : "",
+    OS_LAST_TREE: last?.ref === ref ? last.tree : "",
+  });
   if (result.exitCode !== 0) {
     throw new Error(
       `checkpoint push failed: ${(result.stderr || result.stdout).trim().slice(0, 400)}`,
@@ -196,64 +241,84 @@ export async function checkpointSessionWorkspace(
 }
 
 /**
+ * Push the session's current workspace state from its Sandbox to origin and
+ * record it on the session. Never throws for an expected limitation (no
+ * branch, no GitHub credential, codestorage repo); a git failure does.
+ * Serialized on the session's checkpoint lane, which is claimed synchronously
+ * here; `sandbox` may be a resolver that is only called once the lane is
+ * ours, with the session record as it stands then. A resolver that yields
+ * null (no reachable Sandbox) makes the checkpoint a no-op `skipped`.
+ */
+export function checkpointSessionWorkspace(
+  session: CheckpointSession,
+  sandbox: Sandbox | ((current: CheckpointSession) => Promise<Sandbox | null>),
+): Promise<CheckpointOutcome> {
+  return withCheckpointLane(session.id, async () => {
+    const current = (await findSessionAsync(session.id)) || session;
+    if (!isRemoteSandboxProvider(current.sandbox?.provider))
+      return { state: "skipped", reason: "not a Sandbox session" };
+    const target =
+      typeof sandbox === "function" ? await sandbox(current) : sandbox;
+    if (!target) return { state: "skipped", reason: "Sandbox not reachable" };
+    const cwd = target.cwd || current.worktreeDir;
+    if (!cwd) return { state: "skipped", reason: "no workspace" };
+    return runCheckpoint(current, cwd, (script, env) =>
+      target.exec(["bash", "-c", script], {
+        env,
+        timeoutMs: CHECKPOINT_TIMEOUT_MS,
+      }),
+    );
+  });
+}
+
+/**
  * The same checkpoint from a worktree on this machine, for a session moving
  * INTO a Sandbox: its uncommitted work travels with it instead of staying
  * behind. A shared checkout is never checkpointed (the tree is everyone's).
  */
-export async function checkpointHostWorkspace(
-  session: Pick<
-    UnifiedSession,
-    "id" | "repo" | "branch" | "worktreeDir" | "sandboxCheckpoint"
-  >,
+export function checkpointHostWorkspace(
+  session: Omit<CheckpointSession, "sandbox">,
   dir: string,
 ): Promise<CheckpointOutcome> {
-  if (!session.branch) return { state: "skipped", reason: "no branch" };
-  if (!existsSync(dir)) return { state: "skipped", reason: "no worktree" };
-  if (isSharedCheckoutDir(dir))
-    return { state: "skipped", reason: "shared checkout" };
-  const repo = getRepo(session.repo);
-  if (!checkpointCapable(repo))
-    return { state: "skipped", reason: "repository is not on GitHub" };
-  if (repo.defaultBranch === session.branch)
-    return { state: "skipped", reason: "session is on the default branch" };
-  const env = await checkpointGitEnv(repo);
-  if (!env) return { state: "skipped", reason: "no GitHub credential" };
-  const ref = checkpointRef(session.id);
-  const last = session.sandboxCheckpoint;
-  const result = await $`bash -c ${checkpointScript(excludedPaths(repo))}`
-    .env({
-      ...process.env,
-      ...env,
-      OS_CWD: dir,
-      OS_REF: ref,
-      OS_SESSION: session.id,
-      OS_BRANCH: session.branch,
-      OS_LAST_HEAD: last?.ref === ref ? last.head : "",
-      OS_LAST_TREE: last?.ref === ref ? last.tree : "",
-    })
-    .quiet()
-    .nothrow();
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `checkpoint push failed: ${result.stderr.toString().trim().slice(0, 400)}`,
+  return withCheckpointLane(session.id, async () => {
+    if (!existsSync(dir)) return { state: "skipped", reason: "no worktree" };
+    if (isSharedCheckoutDir(dir))
+      return { state: "skipped", reason: "shared checkout" };
+    const current = (await findSessionAsync(session.id)) || session;
+    return runCheckpoint(
+      { ...current, sandbox: undefined },
+      dir,
+      async (script, env) => {
+        const result = await $`bash -c ${script}`
+          .env({ ...process.env, ...env })
+          .quiet()
+          .nothrow();
+        return {
+          exitCode: result.exitCode,
+          stdout: result.stdout.toString(),
+          stderr: result.stderr.toString(),
+        };
+      },
     );
-  }
-  const line = result.stdout.toString().trim().split("\n").at(-1) || "";
-  const [state, ...parts] = line.split(/\s+/);
-  if (state === "unchanged" && last?.ref === ref)
-    return { state: "unchanged", checkpoint: last };
-  if (state !== "pushed" || parts.length < 3)
-    throw new Error(`checkpoint produced no result: ${line.slice(0, 200)}`);
-  const checkpoint: SandboxCheckpointRecord = {
-    ref,
-    commit: parts[0]!,
-    head: parts[1]!,
-    tree: parts[2]!,
-    branch: session.branch,
-    at: new Date().toISOString(),
-  };
-  await touchNativeSessionStrict(session.id, { sandboxCheckpoint: checkpoint });
-  return { state: "pushed", checkpoint };
+  });
+}
+
+/**
+ * Where `branch` is already checked out on this machine: a per-branch
+ * worktree or the repository's shared checkout. Null when nowhere.
+ */
+async function hostCheckoutOf(
+  repo: Repo,
+  branch: string,
+): Promise<string | null> {
+  const worktree = (await listWorktrees(repo.id)).find(
+    (w) => w.branch === branch,
+  );
+  if (worktree) return worktree.path;
+  const shared = (
+    await $`git -C ${repo.repo} branch --show-current`.quiet().nothrow().text()
+  ).trim();
+  return shared === branch ? repo.repo : null;
 }
 
 /**
@@ -261,26 +326,53 @@ export async function checkpointHostWorkspace(
  * checkpoint into it: the branch ends on the checkpoint's head with the
  * checkpointed changes uncommitted. Works whether or not origin has ever seen
  * the branch, because the checkpoint commit carries the branch tip.
+ *
+ * The restore is `reset --hard`, so it must never land in a checkout that
+ * holds someone else's work. A branch already checked out on this machine is
+ * refused, with one exception: the detaching session's own former worktree
+ * (`ownWorktreeDir`) is re-adopted when that is provably lossless, that is,
+ * its tree is clean and its tip is an ancestor of the checkpoint. Anything
+ * else, including a dirty tree of the session's own, is left for a person
+ * to look at.
  */
 export async function restoreCheckpointToHostWorktree(
   repo: Repo,
   branch: string,
   checkpoint: Pick<SandboxCheckpointRecord, "ref" | "commit">,
+  ownWorktreeDir?: string,
 ): Promise<string> {
   const env = await checkpointGitEnv(repo);
   if (!env) throw new Error("no GitHub credential to fetch the checkpoint");
+  const occupied = await hostCheckoutOf(repo, branch);
   let dir: string;
-  try {
-    dir = await createWorktreeForExistingBranch(branch, repo.id, env);
-  } catch {
-    // Neither origin nor this machine knows the branch: start it anywhere and
-    // let the restore below move it onto the checkpoint's head.
-    dir = await createWorktree(branch, repo.id, {
-      isolated: true,
-      gitEnv: env,
-    });
+  let onlyForward = false;
+  if (occupied) {
+    if (occupied !== ownWorktreeDir || isSharedCheckoutDir(occupied))
+      throw new Error(
+        `branch ${branch} is already checked out at ${occupied} on this machine, and restoring the checkpoint there would overwrite its files. Move or remove that checkout first.`,
+      );
+    const dirty = (
+      await $`git -C ${occupied} status --porcelain`.quiet().nothrow().text()
+    ).trim();
+    if (dirty)
+      throw new Error(
+        `this session's former worktree at ${occupied} has uncommitted changes that the checkpoint would overwrite. Commit, stash, or discard them there first.`,
+      );
+    dir = occupied;
+    onlyForward = true;
+  } else {
+    try {
+      dir = await createWorktreeForExistingBranch(branch, repo.id, env);
+    } catch {
+      // Neither origin nor this machine knows the branch: start it anywhere and
+      // let the restore below move it onto the checkpoint's head.
+      dir = await createWorktree(branch, repo.id, {
+        isolated: true,
+        gitEnv: env,
+      });
+    }
   }
-  const script = `cd ${shellQuoteWord(dir)} && ${checkpointRestoreScript(checkpoint.ref, checkpoint.commit)}`;
+  const script = `cd ${shellQuoteWord(dir)} && ${checkpointRestoreScript(checkpoint.ref, checkpoint.commit, { onlyForward })}`;
   const result = await $`bash -c ${script}`
     .env({ ...process.env, ...env })
     .quiet()

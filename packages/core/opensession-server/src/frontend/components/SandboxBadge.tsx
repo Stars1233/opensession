@@ -10,6 +10,7 @@ import {
 } from "../lib/api/sandboxes";
 import { IconBox, IconConnections } from "./icons";
 import { errorMessage } from "../lib/error-message";
+import { ApiError } from "../lib/api/request";
 
 type SandboxRef = {
   provider: string;
@@ -169,9 +170,7 @@ export function SandboxBadge({
     if (
       action === "recreate" &&
       !window.confirm(
-        status?.checkpoint
-          ? "Rebuild this sandbox on a fresh machine? Its current files are checkpointed first and restored on the new one."
-          : "Rebuild this sandbox on a fresh machine? It continues from the branch as origin has it; files that exist only inside it are lost.",
+        "Rebuild this sandbox on a fresh machine? Its current files are checkpointed first and restored on the new one.",
       )
     )
       return;
@@ -181,6 +180,23 @@ export function SandboxBadge({
       setStatus(await sandboxAction(sessionId, action));
     })()
       .catch(async (cause) => {
+        // 428 on rebuild: the Sandbox is reachable but its files cannot be
+        // checkpointed. Only an explicit second answer throws them away.
+        if (
+          action === "recreate" &&
+          cause instanceof ApiError &&
+          cause.status === 428
+        ) {
+          if (!window.confirm(cause.message)) return;
+          try {
+            setStatus(
+              await sandboxAction(sessionId, action, { discard: true }),
+            );
+          } catch (again) {
+            setError(errorMessage(again, "Could not rebuild sandbox"));
+          }
+          return;
+        }
         setError(errorMessage(cause, `Could not ${action} sandbox`));
       })
       .finally(async () => {

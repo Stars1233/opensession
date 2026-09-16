@@ -93,8 +93,21 @@ session that has one: a **Rebuild sandbox** from the badge, a replacement
 machine after the provider lost the old one, or a move. The branch lands on
 the checkpoint's tip with the checkpointed changes uncommitted, exactly as the
 agent left them. A restore that fails is loud (the badge shows Needs
-attention with the reason) rather than silently starting from origin.
+attention with the reason) rather than silently starting from origin, and the
+clone credential is scrubbed from the workspace's origin either way.
 `POST /api/sessions/<id>/sandbox/checkpoint` takes one on demand.
+
+A session's checkpoints run one at a time, in order, and the next turn does
+not start while one is in flight, so a capture never reads a tree the agent
+is editing and the recorded commit is always the one the ref points at.
+
+Nothing destroys a reachable Sandbox on the strength of an older checkpoint.
+A rebuild or a move away from a Sandbox first takes a checkpoint now; when
+that is impossible (no branch, default branch, no credential) the request is
+refused with the reason, and only an explicit second answer (the badge's
+rebuild asks again; a move to this machine asks to leave the files behind)
+proceeds without the Sandbox's files. The recorded checkpoint is used only
+when the Sandbox cannot be reached at all.
 
 ## Moving a session
 
@@ -121,7 +134,10 @@ transcript, so the conversation carries over.
   server (the branch need not exist on origin), and the Sandbox is released.
   An unreachable Sandbox falls back to its last checkpoint; with none, the
   move answers 428 and continues from the branch as origin has it only after
-  confirmation.
+  confirmation. The restore never lands in a checkout that may hold someone
+  else's work: a branch already checked out on this machine refuses the move
+  (409, naming the checkout), except the session's own former worktree when
+  it is clean and the checkpoint extends its tip.
 
 A move that failed shows Needs attention and can be attempted again.
 

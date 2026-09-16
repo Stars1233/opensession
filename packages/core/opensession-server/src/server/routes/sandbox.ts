@@ -217,6 +217,69 @@ async function checkpointFromSandbox(
 }
 
 /**
+ * What may replace or destroy a Sandbox: a checkpoint taken from it NOW
+ * (`pushed` or `unchanged`), or the recorded one when the Sandbox cannot be
+ * reached at all. A reachable Sandbox whose state cannot be captured is
+ * never destroyed on the strength of an older checkpoint, because the work
+ * since then exists nowhere else; the response says why instead. Returns the
+ * session as it stands after the checkpoint so the caller's spec carries the
+ * fresh record.
+ */
+async function freshCheckpoint(
+  session: StoredSession,
+): Promise<
+  | { ok: true; session: StoredSession; reachable: boolean }
+  | { ok: false; response: Response; reachable: boolean }
+> {
+  let outcome: CheckpointOutcome | null;
+  try {
+    outcome = await checkpointFromSandbox(session);
+  } catch (error) {
+    return {
+      ok: false,
+      reachable: true,
+      response: Response.json(
+        {
+          error: `Could not checkpoint the Sandbox: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        { status: 502 },
+      ),
+    };
+  }
+  if (!outcome) {
+    if (session.sandboxCheckpoint)
+      return { ok: true, session, reachable: false };
+    return {
+      ok: false,
+      reachable: false,
+      response: Response.json(
+        {
+          error:
+            "The Sandbox cannot be reached and no checkpoint exists, so its work cannot be carried over. Wake it first.",
+        },
+        { status: 409 },
+      ),
+    };
+  }
+  if (outcome.state === "skipped")
+    return {
+      ok: false,
+      reachable: true,
+      response: Response.json(
+        {
+          error: `This session's work cannot be checkpointed (${outcome.reason}), so the Sandbox's files would be lost. Push from the Sandbox first.`,
+        },
+        { status: 409 },
+      ),
+    };
+  return {
+    ok: true,
+    reachable: true,
+    session: (await findSessionAsync(session.id)) || session,
+  };
+}
+
+/**
  * Release a session's current Sandbox because the session is leaving it:
  * Portal routes are dropped and the machine is destroyed. The caller has
  * already checkpointed what it needs.
@@ -281,33 +344,10 @@ async function attachSandbox(
     isRemoteSandboxProvider(session.sandbox.provider);
   if (fromSandbox) {
     // Sandbox to Sandbox: the work exists only on the old machine, so the
-    // move is refused outright when it cannot be checkpointed.
-    let outcome: CheckpointOutcome | null;
-    try {
-      outcome = await checkpointFromSandbox(session);
-    } catch (error) {
-      return Response.json(
-        {
-          error: `Could not checkpoint the current Sandbox: ${error instanceof Error ? error.message : String(error)}`,
-        },
-        { status: 502 },
-      );
-    }
-    if (!outcome && !session.sandboxCheckpoint)
-      return Response.json(
-        {
-          error:
-            "The current Sandbox cannot be reached and no checkpoint exists, so its work cannot move. Wake it first.",
-        },
-        { status: 409 },
-      );
-    if (outcome?.state === "skipped" && !session.sandboxCheckpoint)
-      return Response.json(
-        {
-          error: `This session's work cannot be checkpointed (${outcome.reason}).`,
-        },
-        { status: 409 },
-      );
+    // move is refused unless a checkpoint taken NOW holds it. Only a Sandbox
+    // that cannot be reached at all falls back to the recorded checkpoint.
+    const fresh = await freshCheckpoint(session);
+    if (!fresh.ok) return fresh.response;
     await releaseSandbox(session, `moving to ${provider}`);
   } else {
     const target = resolveWorktreeTarget(session);
@@ -401,14 +441,20 @@ async function detachSandbox(
       { status: 409 },
     );
   const repo = getRepo(session.repo);
-  let checkpoint = session.sandboxCheckpoint;
+  // The checkpoint the move restores: one taken now from a reachable Sandbox,
+  // or the recorded one when the Sandbox is gone. A reachable Sandbox whose
+  // state cannot be captured now yields none, whatever was recorded earlier:
+  // restoring an older checkpoint would silently replace the newer work.
+  let checkpoint: SandboxCheckpointRecord | undefined;
   let reachable = false;
+  let skippedReason: string | undefined;
   if (session.sandbox?.sandboxId) {
     try {
       const outcome = await checkpointFromSandbox(session);
       reachable = outcome !== null;
-      if (outcome && outcome.state !== "skipped")
-        checkpoint = outcome.checkpoint;
+      if (!outcome) checkpoint = session.sandboxCheckpoint;
+      else if (outcome.state === "skipped") skippedReason = outcome.reason;
+      else checkpoint = outcome.checkpoint;
     } catch (error) {
       return Response.json(
         {
@@ -417,12 +463,14 @@ async function detachSandbox(
         { status: 502 },
       );
     }
+  } else {
+    checkpoint = session.sandboxCheckpoint;
   }
   if (!checkpoint && body.confirm !== true)
     return Response.json(
       {
         error: reachable
-          ? "This session's work cannot be checkpointed, so the move starts from the branch as origin has it. Push from the Sandbox first, or move anyway."
+          ? `This session's work cannot be checkpointed (${skippedReason}), so the move would start from the branch as origin has it. Push from the Sandbox first, or move anyway and leave the Sandbox's files behind.`
           : "The Sandbox cannot be reached and no checkpoint exists. Move anyway to continue from the branch as origin has it.",
         confirmRequired: true,
       },
@@ -431,20 +479,28 @@ async function detachSandbox(
   let dir: string;
   try {
     dir = checkpoint
-      ? await restoreCheckpointToHostWorktree(repo, session.branch, checkpoint)
+      ? await restoreCheckpointToHostWorktree(
+          repo,
+          session.branch,
+          checkpoint,
+          session.worktreeDir ?? undefined,
+        )
       : await createWorktreeForExistingBranch(session.branch, repo.id);
   } catch (error) {
     return Response.json(
       {
         error: `Could not prepare a worktree on this machine: ${error instanceof Error ? error.message : String(error)}`,
       },
-      { status: 500 },
+      { status: 409 },
     );
   }
   await releaseSandbox(session, "moving to this machine");
   await touchNativeSessionStrict(session.id, {
     sandbox: { provider: "local" },
     worktreeDir: dir,
+    // A move that carried nothing must not leave a checkpoint that predates
+    // the work it left behind, or a later move would restore that instead.
+    ...(checkpoint ? {} : { sandboxCheckpoint: undefined }),
     // The engine's state lived in the Sandbox; the next turn seeds a fresh
     // engine from the stored transcript, as a move into a Sandbox does.
     claudeSessionId: undefined,
@@ -720,6 +776,7 @@ export async function handleSandboxRoutes(
     } else {
       const body = (await ctx.req.json().catch(() => ({}))) as {
         confirm?: boolean;
+        discard?: boolean;
       };
       if (body.confirm !== true)
         return Response.json(
@@ -729,18 +786,28 @@ export async function handleSandboxRoutes(
           },
           { status: 400 },
         );
-      // Take the Sandbox's current state along when it can still be read.
-      // A Sandbox that is already lost rebuilds from its last checkpoint.
+      // The rebuild continues from a checkpoint taken now; a Sandbox that is
+      // already lost rebuilds from its last one. A reachable Sandbox whose
+      // state cannot be captured is destroyed only with an explicit `discard`,
+      // and then continues from the branch as origin has it, never from an
+      // older checkpoint that would masquerade as the current files.
       let current = session;
-      try {
-        const outcome = await checkpointFromSandbox(session);
-        if (outcome && outcome.state !== "skipped")
-          current = (await findSessionAsync(session.id)) || session;
-      } catch (error) {
-        console.warn(
-          `[sandbox] ${session.id}: checkpoint before rebuild failed:`,
-          error instanceof Error ? error.message : String(error),
+      const fresh = await freshCheckpoint(session);
+      if (fresh.ok) current = fresh.session;
+      else if (!fresh.reachable) return fresh.response;
+      else if (body.discard !== true)
+        return Response.json(
+          {
+            error: `${(await fresh.response.json()).error} Or rebuild anyway and discard the Sandbox's files.`,
+            discardRequired: true,
+          },
+          { status: 428 },
         );
+      else {
+        await touchNativeSessionStrict(session.id, {
+          sandboxCheckpoint: undefined,
+        });
+        current = (await findSessionAsync(session.id)) || session;
       }
       // destroy() deletes the provider's state file, so the sandbox's
       // recorded trust policy has to be read before it.
