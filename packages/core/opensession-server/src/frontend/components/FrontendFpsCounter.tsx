@@ -29,7 +29,7 @@ export function FrontendFpsCounter() {
   return (
     <span
       aria-label="Frontend FPS"
-      className="inline-flex w-11 shrink-0 items-center justify-end gap-1 text-meta leading-tight tabular-nums text-dim"
+      className="inline-flex w-6 shrink-0 flex-col items-center text-meta leading-tight tabular-nums text-dim"
     >
       <span>{fps ?? "–"}</span>
       <span className="text-faint">FPS</span>

@@ -5,6 +5,7 @@ import {
   makeServerResourceSampler,
   parseCpuTimes,
   parseMemory,
+  parseMacMemory,
   resourceCapacity,
 } from "./server-resources";
 
@@ -29,6 +30,54 @@ describe("server resource metrics", () => {
       usedBytes: 900,
       usedPct: 90,
     });
+  });
+  const macMemory = (
+    pageSize: number,
+  ) => `Mach Virtual Memory Statistics: (page size of ${pageSize} bytes)
+Pages free:                                     10.
+Pages active:                                  400.
+Pages inactive:                                200.
+Pages speculative:                              50.
+Pages wired down:                              100.
+Pages purgeable:                                50.
+File-backed pages:                             250.
+Anonymous pages:                               400.
+Pages stored in compressor:                    600.
+Pages occupied by compressor:                  200.
+`;
+  test.each([4096, 16384])(
+    "macOS uses app, wired and physical compressed memory with %i-byte pages",
+    (pageSize) => {
+      expect(parseMacMemory(macMemory(pageSize), 1000 * pageSize)).toEqual({
+        totalBytes: 1000 * pageSize,
+        usedBytes: 650 * pageSize,
+        usedPct: 65,
+      });
+      // Free, cached and uncompressed logical compressor pages do not count.
+      const changedCache = macMemory(pageSize)
+        .replace("10.", "1.")
+        .replace("250.", "300.")
+        .replace("600.", "900.");
+      expect(parseMacMemory(changedCache, 1000 * pageSize).usedPct).toBe(65);
+    },
+  );
+  test("macOS rejects missing, malformed or impossible memory counters", () => {
+    const text = macMemory(16384);
+    for (const invalid of [
+      "",
+      macMemory(0),
+      text.replace("Anonymous pages:", "Missing pages:"),
+      text.replace("Pages purgeable:", "Missing purgeable:"),
+      text.replace("Pages wired down:", "Missing wired:"),
+      text.replace("Pages occupied by compressor:", "Missing compressor:"),
+      text.replace(/Anonymous pages:\s+400\./, "Anonymous pages: -400."),
+      text.replace(/Anonymous pages:\s+400\./, "Anonymous pages: unknown."),
+      text.replace("50.\nFile-backed", "10000.\nFile-backed"),
+    ]) {
+      expect(() => parseMacMemory(invalid, 1000 * 16384)).toThrow();
+    }
+    expect(() => parseMacMemory(text, 100 * 16384)).toThrow();
+    expect(() => parseMacMemory(text, 0)).toThrow();
   });
   test("shares concurrent requests, caps history and resets CPU after gaps", async () => {
     let at = 0;
@@ -83,6 +132,25 @@ describe("server resource metrics", () => {
     fail = false;
     at += 2000;
     expect((await snapshot()).samples.at(-1)?.disk?.usedPct).toBe(90);
+  });
+  test("failed memory reads leave a gap and recover on the next sample", async () => {
+    let at = 0;
+    const snapshot = makeServerResourceSampler({
+      now: () => at,
+      cpu: async () => ({ idle: at / 2, total: at }),
+      memory: async () =>
+        parseMacMemory(at ? macMemory(16384) : "", 1000 * 16384),
+      disk: async () => resourceCapacity(1000, 100),
+    });
+    expect((await snapshot()).samples[0]).toMatchObject({
+      memory: null,
+      disk: { usedPct: 90 },
+    });
+    at += 2000;
+    expect((await snapshot()).samples.at(-1)).toMatchObject({
+      cpu: 50,
+      memory: { usedPct: 65 },
+    });
   });
   test("reads the real host using the bounded async sampler", async () => {
     const result = await makeServerResourceSampler()();

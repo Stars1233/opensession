@@ -72,13 +72,13 @@ export function ServerHealthMonitor({
         aria-label="Server health"
         render={<Button variant="ghost" size="sm" />}
         className={cn(
-          "shrink-0 gap-2 min-h-10 font-normal [-webkit-app-region:no-drag] [app-region:no-drag]",
+          "shrink-0 gap-1.5 min-h-8 phone:min-h-11 font-normal [-webkit-app-region:no-drag] [app-region:no-drag]",
           compact
             ? cn(
                 MOBILE_TOP_BAR_CONTROL,
                 "phone:w-auto phone:gap-1.5 phone:px-2",
               )
-            : "px-1 @max-[224px]/server-health:p-0",
+            : "px-1 @max-[160px]/server-health:p-0",
         )}
       >
         {/* The sidebar slot measures space left after traffic lights and navigation. */}
@@ -86,24 +86,24 @@ export function ServerHealthMonitor({
           className={
             compact
               ? "flex"
-              : "hidden @min-[80px]/server-health:@max-[224px]/server-health:flex"
+              : "hidden @min-[64px]/server-health:@max-[160px]/server-health:flex"
           }
         >
           {latest?.cpu != null ? (
             <ResourceGraph
               samples={samples}
               metric="cpu"
-              className="h-6 w-6 text-dim"
+              className="h-5 w-5 text-dim"
             />
           ) : (
             <IconServer size={20} />
           )}
         </span>
         {!compact && (
-          <span className="flex gap-2 @max-[224px]/server-health:hidden">
+          <span className="flex gap-1.5 @max-[160px]/server-health:hidden">
             {RESOURCE_METRICS.map(({ key, shortLabel }) => (
-              <span key={key} className="flex w-12 flex-col gap-0.5">
-                <span className="flex items-center justify-between gap-1 text-meta leading-tight">
+              <span key={key} className="flex w-9 flex-col gap-0.5">
+                <span className="flex flex-col items-center gap-0.5 text-meta leading-none">
                   <span className="text-faint">{shortLabel}</span>
                   <span className="tabular-nums text-dim">
                     {formatResourcePercent(resourcePercent(latest, key))}
@@ -112,7 +112,7 @@ export function ServerHealthMonitor({
                 <ResourceGraph
                   samples={samples}
                   metric={key}
-                  className="h-4 w-full text-dim"
+                  className="h-1 w-full text-dim"
                 />
               </span>
             ))}

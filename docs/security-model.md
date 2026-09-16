@@ -286,6 +286,15 @@ Enabling `userPrAuth` activates both halves below:
   (identity.team[].github), not code. Person-authored PRs need no bot-attribution
   assignee. Repository instructions, GitHub permissions, and rulesets govern
   interactive publication; automation and ask-mode restrictions remain enforced.
+  A person-started code turn in the registered repository's main checkout may
+  follow its direct-push workflow even without a connected personal token: the
+  base-branch command guard is omitted there, but PR merge and approval guards
+  remain. This exception follows the actual working directory, not the repo's
+  default checkout mode, so isolated worktrees on the same project keep their
+  base-branch guard. Ask, unattended, and machine-authored turns retain the full
+  guard in either checkout mode. Credential selection is unchanged: this grants
+  no token or ambient-login fallback, and GitHub still enforces permissions and
+  rulesets.
 - **GitHub web sign-in** (packages/core/opensession-server/src/server/web-auth.ts + routes/auth.ts): when
   active, the UI's name picker is replaced by a real sign-in (UserGate →
   device flow → HttpOnly `opensession_auth` cookie; sessions in

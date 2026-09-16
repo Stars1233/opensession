@@ -50,6 +50,30 @@ export function parseMemory(text: string) {
   return resourceCapacity(Number(total[1]) * 1024, Number(available[1]) * 1024);
 }
 
+/** Activity Monitor's Memory Used: app (non-purgeable anonymous), wired and
+ * physically occupied compressor pages. File cache is reclaimable, not used. */
+export function parseMacMemory(text: string, totalBytes: number) {
+  const pageSize = Number(text.match(/page size of (\d+) bytes/)?.[1]);
+  if (!Number.isSafeInteger(pageSize) || pageSize <= 0)
+    throw new Error("Invalid memory page size");
+  const pages = (name: string) => {
+    const match = text.match(new RegExp(`^${name}:\\s+(\\d+)\\.$`, "m"));
+    const value = Number(match?.[1]);
+    if (!Number.isSafeInteger(value) || value < 0)
+      throw new Error(`Invalid memory counter: ${name}`);
+    return value;
+  };
+  const usedBytes =
+    (pages("Anonymous pages") -
+      pages("Pages purgeable") +
+      pages("Pages wired down") +
+      pages("Pages occupied by compressor")) *
+    pageSize;
+  if (!Number.isSafeInteger(usedBytes) || usedBytes < 0)
+    throw new Error("Invalid used memory");
+  return resourceCapacity(totalBytes, totalBytes - usedBytes);
+}
+
 async function readCpuTimes(): Promise<CpuTimes> {
   if (process.platform === "linux")
     return parseCpuTimes(await readFile("/proc/stat", "utf8"));
@@ -69,9 +93,23 @@ async function readCpuTimes(): Promise<CpuTimes> {
 }
 
 async function readMemory() {
-  return process.platform === "linux"
-    ? parseMemory(await readFile("/proc/meminfo", "utf8"))
-    : resourceCapacity(totalmem(), freemem());
+  if (process.platform === "linux")
+    return parseMemory(await readFile("/proc/meminfo", "utf8"));
+  if (process.platform === "darwin") {
+    const proc = Bun.spawn(["/usr/bin/vm_stat"], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      timeout: 1_000,
+    });
+    const [text, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+    if (exitCode !== 0) throw new Error("Unable to read macOS memory counters");
+    return parseMacMemory(text, totalmem());
+  }
+  return resourceCapacity(totalmem(), freemem());
 }
 
 async function readDisk() {
@@ -82,7 +120,7 @@ async function readDisk() {
 }
 
 /** Demand-sampled, single-flight and bounded across all viewers. No fleet scans,
- * subprocesses, synchronous filesystem reads, or import-time timers. */
+ * synchronous I/O, or import-time timers. macOS uses a time-bounded async vm_stat. */
 export function makeServerResourceSampler({
   now = Date.now,
   cpu = readCpuTimes,

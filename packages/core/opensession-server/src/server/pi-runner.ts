@@ -125,7 +125,7 @@ import {
 import { transcript } from "./actor-transcript";
 import { transcriptForwarder } from "./transcript-forward";
 import { gitIdentityEnv, type GitIdentity } from "./shared/user-mappings";
-import { isMachineActor, providerAccountUser } from "./session-actors";
+import { humanPrompter, providerAccountUser } from "./session-actors";
 import {
   GITHUB_RUN_AUTH_FILE_ENV,
   githubRunOwnerLogin,
@@ -237,16 +237,22 @@ export async function runGithubEnv(input: {
   return githubCodeRunEnv(input.cwd);
 }
 
-/** Only a connected person's code turn may use their GitHub authority directly.
- * Ask, unattended, and machine-authored runs retain the publication guard. */
+/** Person-started code turns follow the live checkout's direct-push workflow.
+ * Without personal GitHub authority they still cannot merge or approve PRs.
+ * Ask, unattended, and machine-authored runs retain the full guard. */
 export function runGithubMergeGuard(input: {
   isCode: boolean;
+  ownerTurn: boolean;
   ownerLogin: string | null;
   baseBranch: string;
+  /** The run is in the registered repo's main checkout, not an isolated worktree. */
+  sharedCheckout: boolean;
 }): MergeGuard | undefined {
-  return input.isCode && input.ownerLogin
-    ? undefined
-    : { baseBranch: input.baseBranch };
+  if (input.isCode && input.ownerTurn) {
+    if (input.ownerLogin) return undefined;
+    if (input.sharedCheckout) return {};
+  }
+  return { baseBranch: input.baseBranch };
 }
 
 /** Child-env name carrying the `Co-authored-by` trailer an agent run must put
@@ -2153,11 +2159,19 @@ async function* runPiAttempt(
     // The repo owning this run's cwd, or undefined for a repo-less one (a
     // scratch dir, a repo-less ask session). Dynamic import to avoid a static
     // module-init cycle through "./worktree".
-    const cwdRepo = await (async () => {
+    const { cwdRepo, sharedCheckout } = await (async () => {
       try {
-        return (await import("./worktree")).repoForPathOrNull(cwd);
+        const { repoForPathOrNull, canonicalPath } = await import("./worktree");
+        const cwdRepo = repoForPathOrNull(cwd);
+        return {
+          cwdRepo,
+          // Use the actual checkout, not the repo's default for NEW sessions:
+          // a shared-checkout repo can also have isolated worktree sessions.
+          sharedCheckout:
+            !!cwdRepo && canonicalPath(cwd) === canonicalPath(cwdRepo.repo),
+        };
       } catch {
-        return undefined;
+        return { cwdRepo: undefined, sharedCheckout: false };
       }
     })();
     // The person this turn acts for, if any: the sender, unless it is the
@@ -2170,7 +2184,7 @@ async function* runPiAttempt(
     const ownerTurn =
       !policy.unattended &&
       INTERACTIVE_KINDS.has(baseJournalKind(journal?.kind)) &&
-      !isMachineActor(githubUser);
+      humanPrompter(githubUser) !== null;
     // On a remote host this reads the launcher's projected marker, not the
     // person store, so a sandboxed owner turn drops the guard exactly when
     // a host run would.
@@ -2189,8 +2203,10 @@ async function* runPiAttempt(
     const agentGitEnv = await agentGitIdentityEnv(author);
     const mergeGuard = runGithubMergeGuard({
       isCode: mode === "code",
+      ownerTurn,
       ownerLogin: githubUserLogin,
       baseBranch: cwdRepo?.defaultBranch || "main",
+      sharedCheckout,
     });
     const binding = await createPiRuntimeBinding({
       providerID: parsed.providerID,
