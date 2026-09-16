@@ -65,7 +65,11 @@ import {
 } from "../lib/session-checkout-pref";
 import { repoSelectionHint, toggleRepoSelection } from "../lib/repo-selection";
 import { fallbackBranchName } from "../lib/workspace-draft";
-import { newSessionDefaultRepo } from "../lib/new-session-repo";
+import {
+  newSessionDefaultRepo,
+  refreshedNewSessionRepo,
+  newSessionWorkspaceScope,
+} from "../lib/new-session-repo";
 import { NewSessionPrompt } from "./NewSessionPrompt";
 import type { NewSessionPromptHandle } from "../lib/new-session-prompt-types";
 import { ComposerContextChip } from "./ComposerContextChip";
@@ -188,10 +192,10 @@ export function NewSession({
   prefillPrompt,
   initialMcpServers,
   forceMode,
-  workspaceId,
+  workspaceId: sourceWorkspaceId,
   modelWorkspaceId,
   forceRepo,
-  forceBranch,
+  forceBranch: sourceBranch,
   workspaces,
   sessions,
   onCreateStarted,
@@ -211,6 +215,12 @@ export function NewSession({
   const [repo, setRepo] = useState(
     forceMode === "scratch" ? NO_REPO : forceRepo || prefill.repo,
   );
+  // A different project must not reuse the original workspace's checkout.
+  const { workspaceId, forceBranch } = newSessionWorkspaceScope(repo, {
+    repo: forceRepo,
+    workspaceId: sourceWorkspaceId,
+    forceBranch: sourceBranch,
+  });
   // Exactly one start point owns the branch semantics. A PR is not merely an
   // existing worktree: it must send `fromPr` so the server checks out the
   // existing head branch rather than trying to create it again.
@@ -316,16 +326,9 @@ export function NewSession({
     };
   }, []);
   useEffect(() => {
-    setRepo((current) => {
-      // "No repo" is a real choice, not an unresolved id — without this it
-      // fails the `repos.some(...)` membership test below and gets replaced by
-      // the configured default the moment /repos lands.
-      if (forceRepo === NO_REPO || current === NO_REPO) return current;
-      if (forceRepo && repos.some((item) => item.id === forceRepo))
-        return forceRepo;
-      if (repos.some((item) => item.id === current)) return current;
-      return configuredDefaultRepo;
-    });
+    setRepo((current) =>
+      refreshedNewSessionRepo(current, repos, configuredDefaultRepo, forceRepo),
+    );
   }, [configuredDefaultRepo, forceRepo, repos]);
 
   /** A repo's picker label, falling back to its id before `/repos` lands. */
@@ -405,12 +408,12 @@ export function NewSession({
   const busy = status.kind === "creating" || status.kind === "reconnecting";
   // "New repository" at the foot of the Project picker: a project that exists
   // nowhere yet starts here rather than in a scratch dir. It is a setup call,
-  // so it follows the same admin rule Settings uses to show that page. A
-  // palette scoped to a workspace (`forceRepo`) exists to create in that
-  // project, and the effect above holds the selection there, so it has no row.
+  // so it follows the same admin rule Settings uses to show that page.
+  // It is available in workspace composers too: choosing a new project
+  // releases the original workspace and branch through the scope above.
   const [newRepoOpen, setNewRepoOpen] = useState(false);
   const admin = useAuthStatus()?.admin;
-  const canCreateRepo = !forceRepo && admin !== false;
+  const canCreateRepo = admin !== false;
   function adoptCreatedRepo(created: { id: string; label?: string }) {
     setRepos((current) =>
       current.some((option) => option.id === created.id)
@@ -425,7 +428,7 @@ export function NewSession({
           ],
     );
     setRepo(created.id);
-    setStartPoint(defaultStartPoint());
+    setStartPoint({ kind: "new" });
     setExtraRepos([]);
     // The row above is a stand-in until /repos answers with the real entry
     // (tile colour, checkout mode); the create already invalidated the cache.
@@ -718,7 +721,7 @@ export function NewSession({
   }
 
   useEffect(() => {
-    fetchModels(modelWorkspaceId || workspaceId)
+    fetchModels(modelWorkspaceId || sourceWorkspaceId)
       .then(async (m) => {
         setModels(m.models);
         setDefaultModel(m.default);
@@ -738,7 +741,7 @@ export function NewSession({
         });
       })
       .catch(() => {});
-  }, [modelWorkspaceId, workspaceId]);
+  }, [modelWorkspaceId, sourceWorkspaceId]);
 
   // Worktrees are per-repo; refetch and reset the selection when it changes.
   // Inside a workspace, snap back to the shared sibling branch, not "New branch".
@@ -931,7 +934,10 @@ export function NewSession({
         if (repo && repo !== NO_REPO) input.repo = repo;
         return createWorkspaceApi(input);
       };
-      const parkedId = getParkedNewSessionWorkspaceId();
+      const parkedId =
+        sourceWorkspaceId || forceRepo
+          ? null
+          : getParkedNewSessionWorkspaceId();
       const workspace = workspaceId
         ? // Scoped to an existing workspace: update its draft, never rename it.
           await updateWorkspaceApi(workspaceId, { draft })
@@ -1022,7 +1028,7 @@ export function NewSession({
     const createWorkspaceId =
       workspaceId ||
       prWorkspaceId ||
-      (!selectedPullRequest
+      (!selectedPullRequest && !sourceWorkspaceId && !forceRepo
         ? getParkedNewSessionWorkspaceId() || undefined
         : undefined);
     const worktreeMode =
@@ -1387,7 +1393,11 @@ export function NewSession({
               // Picking a project is a fresh source choice, even when it is the
               // same repo as the selected PR. Otherwise the title says Project
               // while create_session still checks out the PR's existing branch.
-              setStartPoint(defaultStartPoint());
+              setStartPoint(
+                nextRepo === forceRepo && sourceBranch
+                  ? { kind: "worktree", branch: sourceBranch }
+                  : { kind: "new" },
+              );
               // A plain pick is "work here", not "and here too": it replaces
               // the whole selection, which is what it did before any of this.
               // It does NOT become your default either — that is a setting

@@ -32,7 +32,7 @@ export interface NewSessionProps {
    *  shortcut. They use the same chips and create payload as manual picks. */
   initialMcpServers?: string[];
   forceMode?: "ask" | "code" | "scratch";
-  /** When starting a session inside a workspace, the session joins that workspace… */
+  /** Starting inside a workspace joins it unless the person chooses another project. */
   workspaceId?: string;
   /** Workspace whose model combinations this new, independent session can use. */
   modelWorkspaceId?: string;

@@ -304,3 +304,27 @@ test("a late re-park clears rather than deletes an adopted workspace", async () 
     park.indexOf("updateWorkspaceApi(workspace.id, { draft: null })"),
   ).toBeLessThan(park.indexOf("deleteWorkspaceApi(workspace.id)"));
 });
+
+test("workspace composers offer repository creation and release the old source on adoption", async () => {
+  const source = await Bun.file(
+    new URL("./NewSession.tsx", import.meta.url),
+  ).text();
+  expect(source).toContain("const canCreateRepo = admin !== false;");
+  expect(source).toContain('label: "New repository…"');
+  expect(source).toContain(
+    "refreshedNewSessionRepo(current, repos, configuredDefaultRepo, forceRepo)",
+  );
+  expect(source).toContain(
+    "const { workspaceId, forceBranch } = newSessionWorkspaceScope(repo,",
+  );
+  const adoption = source.slice(
+    source.indexOf("function adoptCreatedRepo"),
+    source.indexOf("// Which edges"),
+  );
+  expect(adoption).toContain("setRepo(created.id)");
+  expect(adoption).toContain('setStartPoint({ kind: "new" })');
+  // A new project must not pick up an unrelated parked global composer either.
+  expect(source).toContain(
+    "!selectedPullRequest && !sourceWorkspaceId && !forceRepo",
+  );
+});
