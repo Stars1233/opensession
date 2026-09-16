@@ -3,6 +3,10 @@ const { access } = require("node:fs/promises");
 const { constants } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { promisify } = require("node:util");
+const execFileAsync = promisify(execFile);
+
+class UnsupportedProfilesJson extends Error {}
 
 // Profile IDs, not account names or CLI fragments. Tailscale generates hex IDs.
 function profileId(value) {
@@ -11,14 +15,42 @@ function profileId(value) {
     : null;
 }
 
+function parseProfileTable(text) {
+  const [header, ...lines] = text.trimEnd().split(/\r?\n/);
+  if (!/^ID\s+Tailnet\s+Account\s*$/.test(header)) {
+    throw new Error("Unrecognized Tailscale profile list.");
+  }
+  // Go's tabwriter pads columns to the widest value, including names with
+  // spaces. Read the header's column offsets rather than splitting each row
+  // on whitespace. It counts Unicode code points, not UTF-16 code units.
+  const tailnetColumn = header.indexOf("Tailnet");
+  const accountColumn = header.indexOf("Account");
+  return lines
+    .filter((line) => line.trim())
+    .map((line) => {
+      const characters = Array.from(line);
+      const account = characters.slice(accountColumn).join("").trim();
+      const selected = account.endsWith("*");
+      return {
+        id: characters.slice(0, tailnetColumn).join("").trim(),
+        tailnet: characters.slice(tailnetColumn, accountColumn).join("").trim(),
+        account: selected ? account.slice(0, -1) : account,
+        selected,
+      };
+    });
+}
+
 function parseProfiles(text) {
-  const rows = JSON.parse(text);
+  const rows = text.trimStart().startsWith("[")
+    ? JSON.parse(text)
+    : parseProfileTable(text);
   if (
     !Array.isArray(rows) ||
     rows.some(
       (row) => !row || !profileId(row.id) || typeof row.selected !== "boolean",
     ) ||
-    rows.filter((row) => row.selected).length > 1
+    rows.filter((row) => row.selected).length > 1 ||
+    new Set(rows.map((row) => row.id)).size !== rows.length
   ) {
     throw new Error("Update Tailscale to read its saved profiles.");
   }
@@ -34,21 +66,15 @@ function parseProfiles(text) {
 class Tailscale {
   constructor({ platform = process.platform, run, findBinary } = {}) {
     this.platform = platform;
+    this.profileFormat = "json";
     this.run =
       run ||
       ((file, args, timeout) =>
-        new Promise((resolve, reject) => {
-          execFile(
-            file,
-            args,
-            {
-              timeout,
-              maxBuffer: 1024 * 1024,
-              env: { ...process.env, TS_BE_CLI: "1" },
-            },
-            (error, stdout) => (error ? reject(error) : resolve(stdout)),
-          );
-        }));
+        execFileAsync(file, args, {
+          timeout,
+          maxBuffer: 1024 * 1024,
+          env: { ...process.env, TS_BE_CLI: "1" },
+        }).then(({ stdout }) => stdout));
     this.findBinary =
       findBinary ||
       (async () => {
@@ -81,6 +107,12 @@ class Tailscale {
     try {
       return await this.run(file, args, timeout);
     } catch (error) {
+      if (
+        args[0] === "switch" &&
+        args.includes("--json") &&
+        /flag provided but not defined:\s*--?json\b/.test(error.stderr || "")
+      )
+        throw new UnsupportedProfilesJson();
       if (error.killed)
         throw new Error(
           "Tailscale took too long. Open Tailscale to check the connection, then retry.",
@@ -92,7 +124,19 @@ class Tailscale {
   }
 
   async profiles() {
-    const text = await this.command(["switch", "--list", "--json"]);
+    const args = ["switch", "--list"];
+    if (this.profileFormat === "json") args.push("--json");
+    let text;
+    try {
+      text = await this.command(args);
+    } catch (error) {
+      // Older Mac releases (including 1.94) support --list but not --json.
+      // Only fall back for that exact flag error, never a permission failure,
+      // missing daemon, or timeout. Remember it for checks during switching.
+      if (!(error instanceof UnsupportedProfilesJson)) throw error;
+      this.profileFormat = "table";
+      text = await this.command(["switch", "--list"]);
+    }
     try {
       return parseProfiles(text);
     } catch {

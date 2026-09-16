@@ -116,8 +116,10 @@ explicit and will not override a profile changed outside Open Session.
 Only the profile ID is stored alongside the organization in the local
 `server.json`; nothing is sent to the server and no Tailscale credentials are
 stored. The shell uses the installed Tailscale app's CLI, or the Homebrew CLI
-when the app binary is absent. It requires `tailscale switch --list --json`
-support. CLI calls and server probes have deadlines, never invoke a shell or
+when the app binary is absent. It uses `tailscale switch --list --json` where
+supported and falls back to the older `tailscale switch --list` format when the
+CLI reports that `--json` is unsupported. CLI calls and server probes have
+deadlines, never invoke a shell or
 request sudo, and errors leave the local recovery UI available. Only the shell's
 owned, packaged main-frame settings pages can enumerate profiles or change
 bindings. Remote content can only request a switch to an already configured

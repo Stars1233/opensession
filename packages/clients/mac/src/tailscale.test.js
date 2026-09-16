@@ -21,7 +21,122 @@ const rows = (selected = "aaaa") => [
   },
 ];
 
+// Mirrors Go tabwriter's fixed-width, Unicode-code-point columns.
+function profileTable(rows) {
+  const all = [["ID", "Tailnet", "Account"], ...rows];
+  const widths = [0, 1].map(
+    (column) =>
+      Math.max(...all.map((row) => Array.from(row[column]).length)) + 2,
+  );
+  return (
+    all
+      .map((row) =>
+        row
+          .map((value, index) =>
+            index < 2
+              ? value + " ".repeat(widths[index] - Array.from(value).length)
+              : value,
+          )
+          .join(""),
+      )
+      .join("\n") + "\n"
+  );
+}
+
+const legacyProfiles = profileTable([
+  ["aaaa", "Personal tailnet", "Personal account*"],
+  ["bbbb", "Work", "Work account"],
+]);
+
 describe("Tailscale CLI", () => {
+  test("reads legacy table columns, spaced names and the selected marker", () => {
+    expect(parseProfiles(legacyProfiles)).toEqual([
+      {
+        id: "aaaa",
+        label: "Personal tailnet · Personal account",
+        selected: true,
+      },
+      { id: "bbbb", label: "Work · Work account", selected: false },
+    ]);
+    expect(
+      parseProfiles(
+        profileTable([
+          ["abcd", "🦊 Studio team", "My work login*"],
+          ["cdef", "Personal", "Personal login"],
+        ]).replaceAll("\n", "\r\n"),
+      ),
+    ).toEqual([
+      { id: "abcd", label: "🦊 Studio team · My work login", selected: true },
+      { id: "cdef", label: "Personal · Personal login", selected: false },
+    ]);
+    expect(parseProfiles(profileTable([]))).toEqual([]);
+  });
+
+  test("rejects malformed or ambiguous legacy output without guessing IDs", () => {
+    for (const invalid of [
+      "",
+      "Tailscale daemon is not running",
+      "[]\nWarning: unexpected output",
+      profileTable([["--help", "Work", "Account*"]]),
+      profileTable([
+        ["aaaa", "Work", "One*"],
+        ["bbbb", "Work", "Two*"],
+      ]),
+      profileTable([
+        ["aaaa", "Work", "One"],
+        ["aaaa", "Work", "Two*"],
+      ]),
+    ])
+      expect(() => parseProfiles(invalid)).toThrow();
+  });
+
+  test("falls back only when --json is unsupported and remembers the older CLI", async () => {
+    const calls = [];
+    const cli = new Tailscale({
+      platform: "darwin",
+      findBinary: async () => "/fixed/cli",
+      run: async (_file, args) => {
+        calls.push(args);
+        if (args.includes("--json"))
+          throw Object.assign(new Error("Command failed"), {
+            stderr:
+              "flag provided but not defined: -json\nSwitch to a different Tailscale account\n",
+          });
+        return legacyProfiles;
+      },
+    });
+    expect(await cli.profiles()).toHaveLength(2);
+    expect((await cli.profiles())[0].selected).toBe(true);
+    expect(calls).toEqual([
+      ["switch", "--list", "--json"],
+      ["switch", "--list"],
+      ["switch", "--list"],
+    ]);
+  });
+
+  test("does not hide permission failures, timeouts or malformed JSON with a fallback", async () => {
+    for (const failure of [
+      { stderr: "Permission denied" },
+      { killed: true },
+      { stderr: "flag provided but not defined: -list" },
+      null,
+    ]) {
+      let calls = 0;
+      const cli = new Tailscale({
+        platform: "darwin",
+        findBinary: async () => "/fixed/cli",
+        run: async () => {
+          calls++;
+          if (failure)
+            throw Object.assign(new Error("Command failed"), failure);
+          return "not json";
+        },
+      });
+      await expect(cli.profiles()).rejects.toThrow();
+      expect(calls).toBe(1);
+    }
+  });
+
   test("parses the CLI's lowercase JSON fields without exposing raw records", () => {
     expect(parseProfiles(JSON.stringify(rows()))).toEqual([
       { id: "aaaa", label: "Personal · person@example.test", selected: true },
