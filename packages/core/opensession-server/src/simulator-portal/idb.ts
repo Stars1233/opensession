@@ -1,9 +1,16 @@
 import { createHash, randomUUID } from "crypto";
 import { mkdir, open, readFile, realpath, rename, rm, stat } from "fs/promises";
 import { basename, extname, isAbsolute, join, relative } from "path";
+import {
+  createPersistentIdbInput,
+  idbHidEvent,
+  idbTextEvents,
+  type PersistentIdbInput,
+} from "./idb-input";
 
 export type SimulatorInput =
   | { kind: "tap"; x: number; y: number }
+  | { kind: "touch"; phase: "down" | "move" | "up"; x: number; y: number }
   | {
       kind: "swipe";
       x: number;
@@ -56,6 +63,7 @@ export type IdbSimulatorDependencies = {
   platform: NodeJS.Platform;
   pid: number;
   capacityRoot?: string;
+  createInput?: (socketPath: string) => PersistentIdbInput;
 };
 
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -169,51 +177,55 @@ const finite = (value: number, label: string): void => {
   if (!Number.isFinite(value)) throw new Error(`${label} must be finite`);
 };
 
-const coordinate = (value: number, label: string): string => {
+const coordinate = (value: number, label: string): number => {
   finite(value, label);
   if (value < 0) throw new Error(`${label} must not be negative`);
-  return String(Math.round(value));
+  return Math.round(value);
 };
 
-const inputArguments = (command: SimulatorInput): string[] => {
+const touchCoordinate = (value: number, label: string): number => {
+  finite(value, label);
+  if (value < 0) throw new Error(`${label} must not be negative`);
+  return value;
+};
+
+const inputEvents = (
+  command: Exclude<SimulatorInput, { kind: "touch" }>,
+): Uint8Array[] => {
   switch (command.kind) {
-    case "tap":
-      return [
-        "ui",
-        "tap",
-        coordinate(command.x, "tap x"),
-        coordinate(command.y, "tap y"),
-      ];
+    case "tap": {
+      const x = coordinate(command.x, "tap x");
+      const y = coordinate(command.y, "tap y");
+      return [idbHidEvent.touch(x, y, "down"), idbHidEvent.touch(x, y, "up")];
+    }
     case "swipe": {
       finite(command.duration, "swipe duration");
       if (command.duration < 0)
         throw new Error("swipe duration must not be negative");
       return [
-        "ui",
-        "swipe",
-        coordinate(command.x, "swipe x"),
-        coordinate(command.y, "swipe y"),
-        coordinate(command.endX, "swipe endX"),
-        coordinate(command.endY, "swipe endY"),
-        "--duration",
-        String(command.duration),
+        idbHidEvent.swipe(
+          coordinate(command.x, "swipe x"),
+          coordinate(command.y, "swipe y"),
+          coordinate(command.endX, "swipe endX"),
+          coordinate(command.endY, "swipe endY"),
+          command.duration,
+        ),
       ];
     }
     case "text":
       if (command.text.length > 10_000)
         throw new Error("text input is too long");
-      return ["ui", "text", "--", command.text];
+      return idbTextEvents(command.text);
     case "button":
-      return ["ui", "button", command.button];
+      return [idbHidEvent.buttonHome("down"), idbHidEvent.buttonHome("up")];
     case "key":
       if (!Number.isSafeInteger(command.key) || command.key < 0) {
         throw new Error("key must be a non-negative integer");
       }
-      return ["ui", "key", String(command.key)];
-    default: {
-      const exhaustive: never = command;
-      return exhaustive;
-    }
+      return [
+        idbHidEvent.key(command.key, "down"),
+        idbHidEvent.key(command.key, "up"),
+      ];
   }
 };
 
@@ -663,15 +675,17 @@ export const openIdbSimulator = async (
   }
   let udid: string | undefined;
   let companionProcess: RunningProcess | undefined;
-  let videoProcess: RunningProcess | undefined;
+  let video: { stop: () => Promise<void> } | undefined;
+  let inputTransport: PersistentIdbInput | undefined;
   let closed = false;
   const simctlPrefix = [simctl, "--set", deviceSet];
 
   const cleanup = async (): Promise<void> => {
     if (closed) return;
     closed = true;
-    if (videoProcess !== undefined)
-      await stopProcess(videoProcess).catch(() => undefined);
+    if (video !== undefined) await video.stop().catch(() => undefined);
+    if (inputTransport !== undefined)
+      await inputTransport.close().catch(() => undefined);
     if (companionProcess !== undefined)
       await stopProcess(companionProcess).catch(() => undefined);
     if (udid !== undefined) {
@@ -750,6 +764,9 @@ export const openIdbSimulator = async (
         "--json",
       ]),
     );
+    inputTransport = (dependencies.createInput ?? createPersistentIdbInput)(
+      socketPath,
+    );
 
     return {
       udid,
@@ -757,54 +774,55 @@ export const openIdbSimulator = async (
       ...measurements,
       async startVideo(onChunk, onError) {
         if (closed) throw new Error("Simulator is closed");
-        if (videoProcess !== undefined)
+        if (video !== undefined)
           throw new Error("Simulator video is already running");
-        const child = dependencies.runner.spawn([
-          ...idbPrefix,
-          "video-stream",
-          "--format",
-          "mjpeg",
-          "--fps",
-          "15",
-          "--scale-factor",
-          "0.5",
-        ]);
-        videoProcess = child;
         let stopping = false;
+        let resolveStopped: (() => void) | undefined;
+        const stopped = new Promise<void>((resolve) => {
+          resolveStopped = resolve;
+        });
+        const current = {
+          async stop() {
+            stopping = true;
+            await stopped;
+          },
+        };
+        video = current;
         void (async () => {
           try {
-            const reader = child.stdout.getReader();
-            while (true) {
-              const next = await reader.read();
-              if (next.done) break;
-              onChunk(next.value);
-            }
-            const exitCode = await child.exited;
-            if (!stopping && !closed) {
-              onError(new Error(`idb video-stream exited with ${exitCode}`));
+            while (!stopping && !closed) {
+              const started = performance.now();
+              const frame = await inputTransport!.screenshot({
+                quality: 0.5,
+                scale: 0.5,
+              });
+              if (stopping || closed) break;
+              onChunk(frame);
+              const remaining = 1000 / 30 - (performance.now() - started);
+              if (remaining > 0) await Bun.sleep(remaining);
             }
           } catch (error) {
-            if (!stopping)
+            if (!stopping && !closed) {
               onError(
                 error instanceof Error ? error : new Error(String(error)),
               );
+            }
           } finally {
-            if (videoProcess === child) videoProcess = undefined;
+            if (video === current) video = undefined;
+            resolveStopped?.();
           }
         })();
-        return async () => {
-          if (videoProcess !== child) return;
-          stopping = true;
-          await stopProcess(child);
-          if (videoProcess === child) videoProcess = undefined;
-        };
+        return current.stop;
       },
       async input(command) {
         if (closed) throw new Error("Simulator is closed");
-        await runChecked(dependencies.runner, [
-          ...idbPrefix,
-          ...inputArguments(command),
-        ]);
+        if (command.kind === "touch") {
+          const x = touchCoordinate(command.x, "touch x");
+          const y = touchCoordinate(command.y, "touch y");
+          await inputTransport?.touch(command.phase, x, y);
+          return;
+        }
+        await inputTransport?.send(inputEvents(command));
       },
       close: cleanup,
     };

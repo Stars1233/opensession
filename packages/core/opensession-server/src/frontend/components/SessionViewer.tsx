@@ -129,6 +129,7 @@ import { useSessionWorkspaceToolsController } from "../hooks/useSessionWorkspace
 import { useRefocusComposerOnWindowFocus } from "../hooks/useRefocusComposerOnWindowFocus";
 import { os1Shell } from "../lib/os1-shell";
 import { useSessionChromeController } from "../hooks/useSessionChromeController";
+import { useSimulatorPortalPlacement } from "../hooks/useSimulatorPortalPlacement";
 import {
   sessionConversationAvailability,
   useSessionConversationActions,
@@ -739,7 +740,8 @@ export function SessionViewer({
   const { activePanelOpen, setActivePanelOpen } = viewState.panel;
   const { panelPage, setPanelPage } = viewState.panel;
   const { panelTerminalMounted, setPanelTerminalMounted } = viewState.panel;
-  const { pinnedPortal, setPinnedPortal } = viewState.panel;
+  const { pinnedPortal, pinPortal, autoPinPortal } = viewState.panel;
+  const { closePinnedPortal, expandPinnedPortal } = viewState.panel;
   const { assetFiles, refreshAssets, assetPaths } = viewState.assets;
   const { selectedAssetPath, setSelectedAssetPath } = viewState.assets;
   const { overlayAssetPath, setOverlayAssetPath } = viewState.assets;
@@ -1272,6 +1274,20 @@ export function SessionViewer({
     headerController.layout;
   const { desktopChangesRef, headerW, compactHeader } = headerController.layout;
   const { summaryOpen, setSummaryOpen, isPhone } = headerController.layout;
+  const openPortalInPreferredPlacement = useSimulatorPortalPlacement({
+    sessionId: session.id,
+    focused,
+    isPhone,
+    services: previewStatus?.services ?? [],
+    routedPortal: portalTarget,
+    pinnedPortal,
+    openPortal,
+    openSession,
+    setPanelOpen: setActivePanelOpen,
+    pinPortal,
+    autoPinPortal,
+    expandPinnedPortal,
+  });
   // Blocks a markdown body builds as plain DOM (quick replies, file trees)
   // reach the session through the messages click handler, like assets do.
   const transcriptBlocks = useTranscriptBlocks({
@@ -1587,7 +1603,7 @@ export function SessionViewer({
         infoActions={{
           setPreviewStatus,
           portalTarget,
-          openPortal,
+          openPortal: openPortalInPreferredPlacement,
           startDeclaredPortal,
           workflowRuns,
           workflowAction,
@@ -1916,22 +1932,24 @@ export function SessionViewer({
             status: previewStatus,
             activePortal: portalTarget,
             onBack: () => setActivePanelOpen(false),
-            onOpenPortal: openPortal,
-            onPinPortal: (target) => {
-              setPinnedPortal(target);
-              setActivePanelOpen(true);
-              openSession?.(session.id);
-            },
+            onOpenPortal: openPortalInPreferredPlacement,
+            onPinPortal: isPhone
+              ? undefined
+              : (target) => {
+                  pinPortal(target);
+                  setActivePanelOpen(true);
+                  openSession?.(session.id);
+                },
             pinnedPortal,
             onClosePinnedPortal: () => {
-              setPinnedPortal(null);
+              closePinnedPortal();
               setActivePanelOpen(false);
             },
             onExpandPinnedPortal: () => {
-              if (!pinnedPortal) return;
-              setPinnedPortal(null);
+              const target = expandPinnedPortal();
+              if (!target) return;
               setActivePanelOpen(false);
-              openPortal?.(pinnedPortal);
+              openPortal?.(target);
             },
             onStartPortal: startDeclaredPortal,
             onPortalAction: async (name, action) => {

@@ -307,6 +307,40 @@ export function useSessionViewStateController({
     () => activePanelOpen && sidePanel.page === "terminal",
   );
   const [pinnedPortal, setPinnedPortal] = useState<PortalTarget | null>(null);
+  const handledSidebarPortalsRef = useRef(new Set<string>());
+  useEffect(() => {
+    handledSidebarPortalsRef.current.clear();
+  }, [session.id]);
+  const sidebarPortalIdentity = (target: PortalTarget) =>
+    `${target.sessionId}\u0000${target.key}\u0000${target.name}`;
+  const pinPortal = (target: PortalTarget) => {
+    if (target.sessionId !== session.id) return;
+    const identity = sidebarPortalIdentity(target);
+    handledSidebarPortalsRef.current.add(identity);
+    setPinnedPortal(target);
+  };
+  const autoPinPortal = (target: PortalTarget) => {
+    if (
+      target.sessionId !== session.id ||
+      pinnedPortal?.sessionId === session.id
+    )
+      return false;
+    const identity = sidebarPortalIdentity(target);
+    if (handledSidebarPortalsRef.current.has(identity)) return false;
+    handledSidebarPortalsRef.current.add(identity);
+    setPinnedPortal(target);
+    return true;
+  };
+  const closePinnedPortal = () => {
+    if (pinnedPortal?.sessionId !== session.id) return;
+    setPinnedPortal(null);
+  };
+  const expandPinnedPortal = () => {
+    if (pinnedPortal?.sessionId !== session.id) return null;
+    const target = pinnedPortal;
+    setPinnedPortal(null);
+    return target;
+  };
   const assets = useSessionAssets(session.id, addHandler);
   const assetPaths = useMemo(
     () => assets.files.map((file) => file.path),
@@ -443,7 +477,10 @@ export function useSessionViewStateController({
       setPanelTerminalMounted,
       pinnedPortal:
         pinnedPortal?.sessionId === session.id ? pinnedPortal : null,
-      setPinnedPortal,
+      pinPortal,
+      autoPinPortal,
+      closePinnedPortal,
+      expandPinnedPortal,
     },
     assets: {
       assetFiles: assets.files,

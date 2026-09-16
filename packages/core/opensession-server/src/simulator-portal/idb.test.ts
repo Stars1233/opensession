@@ -75,13 +75,33 @@ const fakeDependencies = (
   dependencies: IdbSimulatorDependencies;
   commands: string[][];
   spawned: string[][];
+  inputBatches: Uint8Array[][];
+  touches: Array<{ phase: "down" | "move" | "up"; x: number; y: number }>;
 } => {
   const commands: string[][] = [];
   const spawned: string[][] = [];
+  const inputBatches: Uint8Array[][] = [];
+  const touches: Array<{
+    phase: "down" | "move" | "up";
+    x: number;
+    y: number;
+  }> = [];
   const dependencies: IdbSimulatorDependencies = {
     platform: "darwin",
     pid: process.pid,
     capacityRoot,
+    createInput: () => ({
+      async send(events) {
+        inputBatches.push(events);
+      },
+      async touch(phase, x, y) {
+        touches.push({ phase, x, y });
+      },
+      async screenshot() {
+        return new Uint8Array();
+      },
+      async close() {},
+    }),
     runner: {
       async run(argv) {
         commands.push(argv);
@@ -151,7 +171,7 @@ const fakeDependencies = (
       },
     },
   };
-  return { dependencies, commands, spawned };
+  return { dependencies, commands, spawned, inputBatches, touches };
 };
 
 describe("openIdbSimulator", () => {
@@ -179,35 +199,21 @@ describe("openIdbSimulator", () => {
       endY: 40,
       duration: 0.5,
     });
+    await simulator.input({ kind: "touch", phase: "down", x: 1.2, y: 2.8 });
+    await simulator.input({ kind: "touch", phase: "move", x: 3, y: 4 });
+    await simulator.input({ kind: "touch", phase: "up", x: 5, y: 6 });
 
     const companion = fake.spawned[0] ?? [];
     expect(companion).toContain("--device-set-path");
     expect(companion).toContain("--grpc-domain-sock");
     expect(companion).toContain(UDID);
-    const tapCommand = fake.commands.find((argv) => argv.includes("tap"));
-    expect(tapCommand).toEqual(
-      expect.arrayContaining([
-        "/usr/local/bin/idb",
-        "--companion",
-        "ui",
-        "tap",
-        "20",
-        "40",
-      ]),
-    );
-    expect(tapCommand?.[2]?.endsWith("/idb.sock")).toBe(true);
-    expect(fake.commands).toContainEqual(
-      expect.arrayContaining([
-        "ui",
-        "swipe",
-        "10",
-        "20",
-        "30",
-        "40",
-        "--duration",
-        "0.5",
-      ]),
-    );
+    expect(fake.inputBatches.map((batch) => batch.length)).toEqual([2, 1]);
+    expect(fake.touches).toEqual([
+      { phase: "down", x: 1.2, y: 2.8 },
+      { phase: "move", x: 3, y: 4 },
+      { phase: "up", x: 5, y: 6 },
+    ]);
+    expect(fake.commands.some((argv) => argv.includes("ui"))).toBe(false);
 
     await simulator.close();
     const targetCommands = fake.commands.filter(
@@ -224,25 +230,20 @@ describe("openIdbSimulator", () => {
     }
   });
 
-  test("streams MJPEG through the callback API", async () => {
+  test("streams bounded screenshot RPCs through the MJPEG callback API", async () => {
     const fixture = await createApp();
     const fake = fakeDependencies(fixture.capacityRoot);
     const videoBytes = new Uint8Array([0xff, 0xd8, 1, 2, 0xff, 0xd9]);
-    fake.dependencies.runner.spawn = (argv) => {
-      fake.spawned.push(argv);
-      if (argv[0]?.endsWith("idb_companion")) {
-        return longLivedProcess(
-          streamFrom(['{"grpc_path":"/tmp/private.sock"}\n']),
-        );
-      }
-      return longLivedProcess(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(videoBytes);
-          },
-        }),
-      );
-    };
+    const screenshotOptions: Array<{ quality: number; scale: number }> = [];
+    fake.dependencies.createInput = () => ({
+      async send() {},
+      async touch() {},
+      async screenshot(options) {
+        screenshotOptions.push(options);
+        return videoBytes;
+      },
+      async close() {},
+    });
     const simulator = await openIdbSimulator(
       {
         sessionId: "video-session",
@@ -257,12 +258,11 @@ describe("openIdbSimulator", () => {
       (chunk) => chunks.push(chunk),
       (error) => errors.push(error),
     );
-    await Bun.sleep(0);
-    expect(fake.spawned.at(-1)).toEqual(
-      expect.arrayContaining(["video-stream", "--format", "mjpeg"]),
-    );
-    expect(chunks).toEqual([videoBytes]);
+    await Bun.sleep(10);
     await stop();
+    expect(chunks).toEqual([videoBytes]);
+    expect(screenshotOptions).toEqual([{ quality: 0.5, scale: 0.5 }]);
+    expect(fake.spawned).toHaveLength(1);
     expect(errors).toEqual([]);
     await simulator.close();
   });
@@ -353,12 +353,8 @@ test("two concurrent sessions use separate device sets and a third cannot exceed
     expect(new Set(sets).size).toBe(2);
     await expect(start("third")).rejects.toThrow("capacity is full");
     await first.input({ kind: "text", text: "--help" });
-    expect(fake.commands.at(-1)?.slice(-4)).toEqual([
-      "ui",
-      "text",
-      "--",
-      "--help",
-    ]);
+    expect(fake.inputBatches.at(-1)?.length).toBe(12);
+    expect(fake.commands.some((args) => args.includes("ui"))).toBe(false);
   } finally {
     await first.close();
     await second.close();

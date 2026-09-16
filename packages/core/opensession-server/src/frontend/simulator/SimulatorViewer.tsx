@@ -6,7 +6,7 @@ import {
   type ViewerInput,
   type ViewerState,
 } from "../../simulator-portal/protocol";
-import { simulatorGesture, simulatorPointer } from "../lib/simulator-viewer";
+import { simulatorPointer } from "../lib/simulator-viewer";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
@@ -14,7 +14,11 @@ import { Spinner } from "../ui/spinner";
 export function SimulatorViewer() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const socket = useRef<WebSocket | null>(null);
-  const gesture = useRef<{ x: number; y: number; time: number } | null>(null);
+  const gesture = useRef<{ x: number; y: number; pointerId: number } | null>(
+    null,
+  );
+  const pendingMove = useRef<{ x: number; y: number } | null>(null);
+  const moveFrame = useRef<number | null>(null);
   const [state, setState] = useState<ViewerState>({ phase: "starting" });
   const [connected, setConnected] = useState(false);
   const [hasFrame, setHasFrame] = useState(false);
@@ -38,6 +42,7 @@ export function SimulatorViewer() {
       const url = new URL("/socket", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
       url.searchParams.set("token", bootstrap.token);
+      url.searchParams.set("frames", "ack");
       ws = new WebSocket(url);
       socket.current = ws;
       ws.onopen = () => {
@@ -73,6 +78,8 @@ export function SimulatorViewer() {
             if (!disposed) setError("Could not decode the simulator screen");
           }
           decoding = false;
+          if (!disposed && ws?.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: "frame-ack" }));
           return;
         }
         const textMessage = z.string().safeParse(event.data);
@@ -97,6 +104,10 @@ export function SimulatorViewer() {
     return () => {
       disposed = true;
       abort.abort();
+      if (moveFrame.current !== null) cancelAnimationFrame(moveFrame.current);
+      moveFrame.current = null;
+      pendingMove.current = null;
+      gesture.current = null;
       ws?.close();
       socket.current = null;
     };
@@ -117,6 +128,17 @@ export function SimulatorViewer() {
       width: state.width,
       height: state.height,
     });
+  }
+
+  function finishTouch(end?: { x: number; y: number } | null) {
+    const active = gesture.current;
+    if (!active) return;
+    gesture.current = null;
+    if (moveFrame.current !== null) cancelAnimationFrame(moveFrame.current);
+    moveFrame.current = null;
+    pendingMove.current = null;
+    const location = end ?? active;
+    send({ type: "touch", phase: "up", x: location.x, y: location.y });
   }
 
   return (
@@ -145,25 +167,43 @@ export function SimulatorViewer() {
           role="application"
           aria-label="Simulator screen. Click or swipe to interact. Type when focused."
           tabIndex={ready ? 0 : -1}
-          className="block h-full w-full touch-none object-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+          className="block h-full w-full touch-none object-contain outline-none focus-visible:outline-none"
           onPointerDown={(event) => {
             if (!ready || event.button !== 0 || !event.isPrimary) return;
             const start = point(event);
             if (!start) return;
             event.currentTarget.focus();
             event.currentTarget.setPointerCapture(event.pointerId);
-            gesture.current = { ...start, time: performance.now() };
+            gesture.current = { ...start, pointerId: event.pointerId };
+            send({ type: "touch", phase: "down", ...start });
+          }}
+          onPointerMove={(event) => {
+            const active = gesture.current;
+            if (!active || active.pointerId !== event.pointerId) return;
+            const location = point(event);
+            if (!location) return;
+            gesture.current = { ...location, pointerId: active.pointerId };
+            pendingMove.current = location;
+            if (moveFrame.current !== null) return;
+            moveFrame.current = requestAnimationFrame(() => {
+              moveFrame.current = null;
+              const next = pendingMove.current;
+              pendingMove.current = null;
+              if (next && gesture.current)
+                send({ type: "touch", phase: "move", ...next });
+            });
           }}
           onPointerUp={(event) => {
-            const start = gesture.current;
-            gesture.current = null;
-            const end = point(event);
-            if (start && end)
-              send(simulatorGesture(start, end, performance.now()));
+            if (gesture.current?.pointerId === event.pointerId)
+              finishTouch(point(event));
           }}
-          onPointerCancel={() => {
-            gesture.current = null;
+          onPointerCancel={(event) => {
+            if (gesture.current?.pointerId === event.pointerId) finishTouch();
           }}
+          onLostPointerCapture={(event) => {
+            if (gesture.current?.pointerId === event.pointerId) finishTouch();
+          }}
+          onBlur={() => finishTouch()}
           onKeyDown={(event) => {
             if (
               !ready ||

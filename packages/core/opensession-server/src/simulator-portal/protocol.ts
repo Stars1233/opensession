@@ -2,6 +2,14 @@ import { z } from "zod";
 
 const coordinate = z.number().finite().min(0).max(1);
 export const viewerInputSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("touch"),
+      phase: z.enum(["down", "move", "up"]),
+      x: coordinate,
+      y: coordinate,
+    })
+    .strict(),
   z.object({ type: z.literal("tap"), x: coordinate, y: coordinate }).strict(),
   z
     .object({
@@ -34,6 +42,11 @@ export const viewerInputSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 export type ViewerInput = z.infer<typeof viewerInputSchema>;
+
+export const viewerCommandSchema = z.union([
+  viewerInputSchema,
+  z.object({ type: z.literal("frame-ack") }).strict(),
+]);
 
 export const viewerStateSchema = z.discriminatedUnion("phase", [
   z.object({ phase: z.literal("starting") }),

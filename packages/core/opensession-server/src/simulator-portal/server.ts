@@ -3,12 +3,36 @@ import type { IdbSimulator, SimulatorInput } from "./idb";
 import { jpegFrames } from "./mjpeg";
 import {
   simulatorKeyCodes,
-  viewerInputSchema,
+  viewerCommandSchema,
   type ViewerInput,
   type ViewerState,
 } from "./protocol";
 
-type ViewerSocket = ServerWebSocket<{ pending: number }>;
+type ViewerSocket = ServerWebSocket<{
+  pending: number;
+  ackFrames: boolean;
+  awaitingFrameAck: boolean;
+  lastSentFrameVersion: number;
+}>;
+
+type QueuedInput = {
+  ws: ViewerSocket;
+  input: SimulatorInput;
+  gesture?: Gesture;
+  release: boolean;
+  counted: boolean;
+};
+
+type Gesture = {
+  owner: ViewerSocket;
+  lastX: number;
+  lastY: number;
+  downRunning: boolean;
+  downDelivered: boolean;
+  releaseRequested: boolean;
+  releaseQueued: boolean;
+  idleTimer?: ReturnType<typeof setTimeout>;
+};
 
 export function simulatorInput(
   input: ViewerInput,
@@ -25,6 +49,13 @@ export function simulatorInput(
       Math.max(0, Math.round(value * dimensions.height)),
     );
   switch (input.type) {
+    case "touch":
+      return {
+        kind: "touch",
+        phase: input.phase,
+        x: x(input.x),
+        y: y(input.y),
+      };
     case "tap":
       return { kind: "tap", x: x(input.x), y: y(input.y) };
     case "swipe":
@@ -54,6 +85,8 @@ export function startSimulatorViewer(options: {
   openSimulator: () => Promise<IdbSimulator>;
   /** Testable idle deadline. Production closes a device after ten minutes without a viewer. */
   idleMs?: number;
+  /** A lost pointer-up cannot hold touch ownership indefinitely. */
+  gestureIdleMs?: number;
 }) {
   const origin = new URL(options.origin).origin;
   const token = crypto.randomUUID();
@@ -62,10 +95,13 @@ export function startSimulatorViewer(options: {
   let simulator: IdbSimulator | undefined;
   let closing = false;
   let lastFrame: Uint8Array | undefined;
+  let lastFrameVersion = 0;
   let stopVideo: (() => Promise<void>) | undefined;
   let videoTransition = Promise.resolve();
-  let commands = Promise.resolve();
+  const inputQueue: QueuedInput[] = [];
+  let inputDrain: Promise<void> | undefined;
   let pending = 0;
+  const gestures: Gesture[] = [];
   let deviceClose: Promise<void> | undefined;
   function closeDevice(): Promise<void> {
     return simulator ? (deviceClose ??= simulator.close()) : Promise.resolve();
@@ -86,6 +122,21 @@ export function startSimulatorViewer(options: {
 
   function send(ws: ViewerSocket, value: unknown) {
     if (ws.readyState === 1) ws.send(JSON.stringify(value));
+  }
+  function sendFrame(ws: ViewerSocket) {
+    if (!lastFrame || ws.readyState !== 1) return;
+    if (ws.data.ackFrames) {
+      if (
+        ws.data.awaitingFrameAck ||
+        ws.data.lastSentFrameVersion >= lastFrameVersion
+      )
+        return;
+      ws.send(lastFrame);
+      ws.data.awaitingFrameAck = true;
+      ws.data.lastSentFrameVersion = lastFrameVersion;
+      return;
+    }
+    if (ws.getBufferedAmount() < 256 * 1024) ws.send(lastFrame);
   }
   function setState(next: ViewerState) {
     state = next;
@@ -114,11 +165,11 @@ export function startSimulatorViewer(options: {
         if (stopVideo) return;
         const frames = jpegFrames((frame) => {
           lastFrame = frame;
-          for (const ws of sockets) {
-            // A slow browser drops frames rather than buffering seconds of video.
-            if (ws.readyState === 1 && ws.getBufferedAmount() < 256 * 1024)
-              ws.send(frame);
-          }
+          lastFrameVersion++;
+          // Ack-capable viewers have at most one frame in flight and receive
+          // the newest global frame after acknowledging it. Legacy viewers
+          // retain the bounded Bun-buffer behavior.
+          for (const ws of sockets) sendFrame(ws);
         });
         stopVideo = await shouldStream.startVideo((chunk) => {
           try {
@@ -146,7 +197,168 @@ export function startSimulatorViewer(options: {
       });
   }
 
-  const server = Bun.serve<{ pending: number }>({
+  function busy(ws: ViewerSocket) {
+    send(ws, {
+      type: "input-error",
+      message: "Simulator is busy. Try again.",
+    });
+  }
+
+  function finishQueued(command: QueuedInput) {
+    if (!command.counted) return;
+    command.ws.data.pending--;
+    pending--;
+  }
+
+  function discardQueued(predicate: (command: QueuedInput) => boolean) {
+    for (let index = inputQueue.length - 1; index >= 0; index--) {
+      const command = inputQueue[index];
+      if (!command || !predicate(command)) continue;
+      inputQueue.splice(index, 1);
+      finishQueued(command);
+    }
+  }
+
+  function finishGesture(active: Gesture) {
+    const index = gestures.indexOf(active);
+    if (index === -1) return;
+    clearTimeout(active.idleTimer);
+    gestures.splice(index, 1);
+    const next = gestures[0];
+    if (index === 0 && next && !next.releaseRequested) armGestureIdle(next);
+  }
+
+  function enqueueInput(command: QueuedInput) {
+    if (command.counted) {
+      command.ws.data.pending++;
+      pending++;
+    }
+    inputQueue.push(command);
+    drainInputs();
+  }
+
+  function enqueueRelease(
+    active: Gesture,
+    input: SimulatorInput = {
+      kind: "touch",
+      phase: "up",
+      x: active.lastX,
+      y: active.lastY,
+    },
+    counted = false,
+  ) {
+    if (active.releaseQueued || !gestures.includes(active)) return;
+    active.releaseRequested = true;
+    active.releaseQueued = true;
+    clearTimeout(active.idleTimer);
+    enqueueInput({
+      ws: active.owner,
+      input,
+      gesture: active,
+      release: true,
+      counted,
+    });
+  }
+
+  function abandonGesture(active: Gesture) {
+    if (!gestures.includes(active)) return;
+    active.releaseRequested = true;
+    clearTimeout(active.idleTimer);
+    discardQueued((command) => command.gesture === active && !command.release);
+    if (!active.downDelivered && !active.downRunning) {
+      discardQueued((command) => command.gesture === active && command.release);
+      finishGesture(active);
+      return;
+    }
+    enqueueRelease(active);
+  }
+
+  function armGestureIdle(active: Gesture) {
+    clearTimeout(active.idleTimer);
+    active.idleTimer = setTimeout(() => {
+      if (gestures[0] !== active) return;
+      send(active.owner, {
+        type: "input-error",
+        message: "Touch gesture timed out.",
+      });
+      abandonGesture(active);
+    }, options.gestureIdleMs ?? 5_000);
+  }
+
+  function drainInputs() {
+    if (inputDrain) return;
+    inputDrain = (async () => {
+      while (inputQueue.length > 0) {
+        const command = inputQueue.shift();
+        if (!command) continue;
+        const active = command.gesture;
+        const isDown =
+          command.input.kind === "touch" && command.input.phase === "down";
+        const isMove =
+          command.input.kind === "touch" && command.input.phase === "move";
+        if (isDown && active?.owner === command.ws) active.downRunning = true;
+        try {
+          if (
+            !command.release &&
+            (closing || state.phase !== "ready" || command.ws.readyState !== 1)
+          ) {
+            if (isDown && active) finishGesture(active);
+            continue;
+          }
+          const target = simulator;
+          if (!target) {
+            if (isDown && active) finishGesture(active);
+            continue;
+          }
+          await target.input(command.input);
+          if (isDown && active && gestures.includes(active)) {
+            active.downDelivered = true;
+            if (active.releaseRequested && !active.releaseQueued)
+              enqueueRelease(active);
+          }
+        } catch (error) {
+          send(command.ws, {
+            type: "input-error",
+            message:
+              error instanceof Error ? error.message : "Simulator input failed",
+          });
+          if (command.release) {
+            // The native finger may still be down. Fail admission before
+            // dropping ownership; device cleanup now owns the final release.
+            fail(error);
+            discardQueued(() => true);
+            for (const gesture of gestures.toReversed()) finishGesture(gesture);
+          } else if (isDown && active) {
+            // A lost acknowledgement does not prove the finger stayed up.
+            // Discard pending movement, but still attempt a matching release.
+            discardQueued((queued) => queued.gesture === active);
+            active.releaseQueued = false;
+            enqueueRelease(active);
+          } else if (isMove && active && gestures.includes(active)) {
+            abandonGesture(active);
+          }
+        } finally {
+          if (isDown && active) {
+            active.downRunning = false;
+            if (
+              gestures.includes(active) &&
+              active.downDelivered &&
+              active.releaseRequested &&
+              !active.releaseQueued
+            )
+              enqueueRelease(active);
+          }
+          if (command.release && active) finishGesture(active);
+          finishQueued(command);
+        }
+      }
+    })().finally(() => {
+      inputDrain = undefined;
+      if (inputQueue.length > 0) drainInputs();
+    });
+  }
+
+  const server = Bun.serve<ViewerSocket["data"]>({
     hostname: "127.0.0.1",
     port: options.port,
     idleTimeout: 60,
@@ -167,7 +379,14 @@ export function startSimulatorViewer(options: {
           return new Response("Viewer authorization required", { status: 403 });
         if (sockets.size >= 4 || closing)
           return new Response("Viewer capacity reached", { status: 503 });
-        return server.upgrade(request, { data: { pending: 0 } })
+        return server.upgrade(request, {
+          data: {
+            pending: 0,
+            ackFrames: url.searchParams.get("frames") === "ack",
+            awaitingFrameAck: false,
+            lastSentFrameVersion: 0,
+          },
+        })
           ? undefined
           : new Response("WebSocket required", { status: 400 });
       }
@@ -197,7 +416,7 @@ export function startSimulatorViewer(options: {
         }
         sockets.add(ws);
         send(ws, { type: "state", state });
-        if (lastFrame) ws.send(lastFrame);
+        sendFrame(ws);
         syncVideo();
       },
       message(ws, message) {
@@ -209,43 +428,112 @@ export function startSimulatorViewer(options: {
         } catch {
           return ws.close(1008, "Invalid command");
         }
-        const parsed = viewerInputSchema.safeParse(json);
+        const parsed = viewerCommandSchema.safeParse(json);
         if (!parsed.success) return ws.close(1008, "Invalid command");
+        if (parsed.data.type === "frame-ack") {
+          if (!ws.data.ackFrames)
+            return ws.close(1008, "Frame acknowledgements not enabled");
+          ws.data.awaitingFrameAck = false;
+          sendFrame(ws);
+          return;
+        }
         const target = simulator;
         if (!target || state.phase !== "ready" || closing)
           return send(ws, {
             type: "input-error",
             message: "Simulator is not ready",
           });
-        if (ws.data.pending >= 4 || pending >= 16)
+
+        const input = parsed.data;
+        if (gestures[0] && gestures[0].owner !== ws)
           return send(ws, {
             type: "input-error",
-            message: "Simulator is busy. Try again.",
+            message: "Another viewer is controlling the simulator.",
           });
-        ws.data.pending++;
-        pending++;
-        commands = commands
-          .then(async () => {
-            if (closing || state.phase !== "ready" || ws.readyState !== 1)
-              return;
-            await target.input(simulatorInput(parsed.data, target.dimensions));
-          })
-          .catch((error) =>
-            send(ws, {
+
+        if (input.type === "touch") {
+          const mapped = simulatorInput(input, target.dimensions);
+          if (mapped.kind !== "touch") return;
+          if (input.phase === "down") {
+            const previous = gestures.at(-1);
+            if (previous && !previous.releaseRequested)
+              return send(ws, {
+                type: "input-error",
+                message: "A touch gesture is already active.",
+              });
+            if (ws.data.pending >= 4 || pending >= 16) return busy(ws);
+            const active: Gesture = {
+              owner: ws,
+              lastX: mapped.x,
+              lastY: mapped.y,
+              downRunning: false,
+              downDelivered: false,
+              releaseRequested: false,
+              releaseQueued: false,
+            };
+            gestures.push(active);
+            if (gestures[0] === active) armGestureIdle(active);
+            enqueueInput({
+              ws,
+              input: mapped,
+              gesture: active,
+              release: false,
+              counted: true,
+            });
+            return;
+          }
+          const active = gestures.at(-1);
+          if (!active || active.owner !== ws || active.releaseRequested)
+            return send(ws, {
               type: "input-error",
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "Simulator input failed",
-            }),
-          )
-          .finally(() => {
-            ws.data.pending--;
-            pending--;
+              message: "No active touch gesture.",
+            });
+          active.lastX = mapped.x;
+          active.lastY = mapped.y;
+          if (gestures[0] === active) armGestureIdle(active);
+          if (input.phase === "up") {
+            enqueueRelease(active, mapped, true);
+            return;
+          }
+          const queuedMove = inputQueue.findLast(
+            (command) =>
+              command.gesture === active &&
+              command.input.kind === "touch" &&
+              command.input.phase === "move",
+          );
+          if (queuedMove) {
+            queuedMove.input = mapped;
+            return;
+          }
+          if (ws.data.pending >= 4 || pending >= 16) return busy(ws);
+          enqueueInput({
+            ws,
+            input: mapped,
+            gesture: active,
+            release: false,
+            counted: true,
           });
+          return;
+        }
+
+        if (gestures.some((active) => !active.releaseRequested))
+          return send(ws, {
+            type: "input-error",
+            message: "Finish the touch gesture first.",
+          });
+        if (ws.data.pending >= 4 || pending >= 16) return busy(ws);
+        enqueueInput({
+          ws,
+          input: simulatorInput(input, target.dimensions),
+          release: false,
+          counted: true,
+        });
       },
       close(ws) {
         sockets.delete(ws);
+        for (const active of gestures.toReversed())
+          if (active.owner === ws) abandonGesture(active);
+        discardQueued((command) => command.ws === ws && !command.release);
         syncVideo();
         armIdle();
       },
@@ -269,13 +557,14 @@ export function startSimulatorViewer(options: {
     return (stopped ??= (async () => {
       closing = true;
       clearTimeout(idleTimer);
+      for (const active of gestures.toReversed()) abandonGesture(active);
       for (const ws of sockets) ws.close(1001, "Simulator Portal stopped");
       sockets.clear();
       await server.stop(true);
       await ready;
       syncVideo();
       await videoTransition;
-      await commands;
+      while (inputDrain) await inputDrain;
       await closeDevice();
     })());
   }

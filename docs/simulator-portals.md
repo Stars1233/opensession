@@ -3,8 +3,9 @@
 An interactive agent can start an iOS Simulator viewer with
 `opensession-portals.start_simulator_portal`. The app runs on the Open Session
 Mac, not in the browser. The Portal carries JPEG screen frames and input over
-an authenticated WebSocket. On desktop, use **Pin beside conversation** in the
-Portals side panel. Phones use the full-width Portal view.
+an authenticated WebSocket. On desktop, simulator Portals open beside the
+conversation by default. Expand opens the full-width view; closing or expanding
+does not immediately pin it again. Phones use the full-width Portal view.
 
 ## Host requirements
 
@@ -20,11 +21,19 @@ supported. It needs:
   without that route is not a shareable viewer.
 - The source installation's Bun dependencies, including the Tailwind compiler.
 
-The implementation follows idb's `--companion` Unix-socket interface,
-`video-stream --format mjpeg --fps 15 --scale-factor 0.5`, and `ui` commands.
-It requires `describe --json` to report logical screen dimensions. Pin a tested
-idb version to your Xcode/runtime combination: idb uses private Apple frameworks.
-Do not assume that every upstream release is interchangeable.
+The implementation uses `describe --json` for logical screen dimensions, then
+one persistent HTTP/2 gRPC connection to the private companion for input and
+capture. The HID and screenshot messages follow the idb 1.5.9 protocol. The
+companion must support JPEG screenshot options. Pin a tested idb version to your
+Xcode/runtime combination: idb uses private Apple frameworks. Do not assume that
+every upstream release is interchangeable.
+
+Capture targets 30 fps at half native resolution and JPEG quality 0.5. It uses
+software screenshot capture rather than idb's hardware-only MJPEG video encoder,
+so host-specific video CLI wrappers cannot silently cap the frame rate. Captures
+are serial and deadline-paced; a slow capture never creates a backlog. Pointer
+down, move and up stream immediately rather than replaying a swipe on release.
+No input launches a fresh Python CLI process.
 
 Neither Xcode nor idb is installed automatically. Verify operation after a Mac
 reboot and without a monitor before relying on unattended use. This integration
@@ -85,8 +94,13 @@ start arguments requires stopping it and starting it with the new arguments.
   its device after ten minutes without a viewer. Stop/restart and normal Portal
   cleanup also release the device. Restart creates a fresh simulator and loses
   installed app data. Forced termination can defer cleanup until the next start.
-- Up to four viewers share one screen stream and a bounded input queue. Slow
-  browsers drop frames rather than building an unbounded video buffer.
+- Up to four viewers share one screen stream and a bounded input queue. New
+  viewers acknowledge decoded frames, allowing at most one frame in flight per
+  viewer; the next delivery uses the newest capture, not queued old frames.
+- One viewer owns a touch gesture at a time. Pending moves coalesce to the newest
+  position. Release is preserved under queue pressure; disconnect, cancellation
+  and a five-second idle deadline release the touch. Other viewers cannot
+  interrupt a held gesture.
 - Portals retain the instance's authenticated team boundary. This is not a new
   per-person permission boundary. The helper additionally checks the WebSocket
   origin and a same-origin token; it binds only to loopback.
@@ -100,8 +114,10 @@ start arguments requires stopping it and starting it with the new arguments.
 ## Verification
 
 Unit tests replace the executable boundary to test device isolation, cleanup,
-capacity, paths and CLI arguments. Real HTTP/WebSocket tests exercise the viewer
-transport, origin/token checks and input validation.
+capacity, paths and setup CLI arguments. Unix-socket HTTP/2 tests exercise the
+persistent input and capture RPCs. Real HTTP/WebSocket tests exercise the viewer
+transport, origin/token checks, input ownership, movement coalescing, disconnect
+release and frame acknowledgements.
 
 For browser verification without Xcode, start a Portal with the command
 `bun scripts/verify-simulator-portal.ts`. It serves the production viewer against

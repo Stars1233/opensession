@@ -76,7 +76,7 @@ interface PortalContent {
   onStartPortal: PortalsProps["onStartPortal"];
   onPortalAction: PortalsProps["onPortalAction"];
   pinnedPortal: PortalsProps["activePortal"];
-  onPinPortal: PortalsProps["onPinPortal"];
+  onPinPortal?: PortalsProps["onPinPortal"];
   onClosePinnedPortal: () => void;
   onExpandPinnedPortal: () => void;
 }
