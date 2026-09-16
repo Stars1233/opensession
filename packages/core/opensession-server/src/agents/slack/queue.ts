@@ -18,6 +18,8 @@ const QUEUE_FILE = `${SESSION_DIR}/message-queue.json`;
 // ---------------------------------------------------------------------------
 
 export interface QueuedMessage {
+  /** Frozen native admission request, retained across ingress retries. */
+  nativeCreate?: import("../../server/session-control").CreateSessionOpts;
   prompt: string;
   /** User-facing Slack text for the progress card, before prompt enrichment. */
   cardTitle?: string;

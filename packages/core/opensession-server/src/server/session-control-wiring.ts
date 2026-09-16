@@ -718,6 +718,7 @@ registerSessionControl({
       forkFrom,
       accountId: accountIdInput,
       plainDiscussionId,
+      slackOrigin,
     } = ownedInput;
     const bksId = requestedId;
     const createIdentity = new Bun.CryptoHasher("sha256")
@@ -1304,6 +1305,7 @@ ${createMentionsNote}`;
       // same rule as the web tab strip's "+".
       plainThreadId: joinedWorkspace?.plainThreadId,
       plainDiscussionId,
+      slackOrigin,
       // Persist the MCP scoping so follow-up prompts keep it.
       persistMcpServers: effectiveMcpServers,
       // Unscoped creates leave this undefined (read as "all" downstream,

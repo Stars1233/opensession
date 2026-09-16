@@ -19,15 +19,19 @@ afterEach(() => {
 });
 
 describe("splitSlackMedia", () => {
-  test("leaves a reply without markers exactly as it was", () => {
+  test("leaves a reply without markers exactly as it was", async () => {
     const text = "Fixed it in `NewSession.tsx`.\n\nNo screenshots this time.";
-    expect(splitSlackMedia(text)).toEqual({ text, media: [], skipped: [] });
+    expect(await splitSlackMedia(text)).toEqual({
+      text,
+      media: [],
+      skipped: [],
+    });
   });
 
-  test("takes the marked files out of the text, in the order written", () => {
+  test("takes the marked files out of the text, in the order written", async () => {
     const shot = write("after.png");
     const clip = write("demo.mp4");
-    const split = splitSlackMedia(
+    const split = await splitSlackMedia(
       `Here is the fix.\n\nOPENSESSION_IMAGE: ${shot}\n\nAnd it moving:\n\nOPENSESSION_VIDEO: ${clip}\n`,
     );
     expect(split.media).toEqual([
@@ -38,27 +42,27 @@ describe("splitSlackMedia", () => {
     expect(split.skipped).toEqual([]);
   });
 
-  test("reads a marker an agent dressed up, and drops the whole line", () => {
+  test("reads a marker an agent dressed up, and drops the whole line", async () => {
     const shot = write("my_final_shot.png");
-    const split = splitSlackMedia(
+    const split = await splitSlackMedia(
       `Done.\n\n**OPENSESSION_IMAGE: ${shot}**\n\nTop is now.`,
     );
     expect(split.media).toEqual([{ path: shot, kind: "image" }]);
     expect(split.text).toBe("Done.\n\nTop is now.");
   });
 
-  test("uploads a file marked twice once", () => {
+  test("uploads a file marked twice once", async () => {
     const shot = write("pair.png");
-    const split = splitSlackMedia(
+    const split = await splitSlackMedia(
       `OPENSESSION_IMAGE: ${shot}\nOPENSESSION_IMAGE: ${shot}`,
     );
     expect(split.media).toEqual([{ path: shot, kind: "image" }]);
   });
 
-  test("names what it couldn't send rather than dropping it", () => {
+  test("names what it couldn't send rather than dropping it", async () => {
     const missing = join(root, "gone.png");
     const empty = write("empty.png", 0);
-    const split = splitSlackMedia(
+    const split = await splitSlackMedia(
       `OPENSESSION_IMAGE: ${missing}\nOPENSESSION_IMAGE: ${empty}`,
     );
     expect(split.media).toEqual([]);
@@ -71,19 +75,19 @@ describe("splitSlackMedia", () => {
     );
   });
 
-  test("skips a file over Slack's upload limit, with its size", () => {
+  test("skips a file over Slack's upload limit, with its size", async () => {
     const big = write("huge.mp4", 1);
     truncateSync(big, 21 * 1024 * 1024);
-    const split = splitSlackMedia(`OPENSESSION_VIDEO: ${big}`);
+    const split = await splitSlackMedia(`OPENSESSION_VIDEO: ${big}`);
     expect(split.media).toEqual([]);
     expect(split.skipped[0]?.reason).toBe(
       "21.0 MB, over Slack's 20.0 MB upload limit",
     );
   });
 
-  test("caps one reply at ten files", () => {
+  test("caps one reply at ten files", async () => {
     const paths = Array.from({ length: 12 }, (_, i) => write(`shot-${i}.png`));
-    const split = splitSlackMedia(
+    const split = await splitSlackMedia(
       paths.map((path) => `OPENSESSION_IMAGE: ${path}`).join("\n"),
     );
     expect(split.media).toHaveLength(10);
@@ -91,9 +95,9 @@ describe("splitSlackMedia", () => {
     expect(split.skipped[0]?.reason).toBe("over 10 files in one reply");
   });
 
-  test("leaves a reply that was nothing but a marker with no text", () => {
+  test("leaves a reply that was nothing but a marker with no text", async () => {
     const shot = write("only.png");
-    const split = splitSlackMedia(`OPENSESSION_IMAGE: ${shot}\n`);
+    const split = await splitSlackMedia(`OPENSESSION_IMAGE: ${shot}\n`);
     expect(split.text).toBe("");
     expect(split.media).toHaveLength(1);
   });

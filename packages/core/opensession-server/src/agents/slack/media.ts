@@ -13,7 +13,7 @@
  * Slack upload is a message everyone in the channel gets.
  */
 
-import { statSync } from "fs";
+import { stat } from "node:fs/promises";
 import { basename } from "path";
 import {
   extractMediaMarkers,
@@ -52,7 +52,7 @@ const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
  * as italics, and a marker past the 3000-character cut would be dropped
  * silently or, worse, truncated into a path that points at nothing.
  */
-export function splitSlackMedia(text: string): SlackMediaSplit {
+export async function splitSlackMedia(text: string): Promise<SlackMediaSplit> {
   const markers = extractMediaMarkers(text);
   if (markers.length === 0) return { text, media: [], skipped: [] };
 
@@ -73,9 +73,9 @@ export function splitSlackMedia(text: string): SlackMediaSplit {
     }
     let size: number;
     try {
-      const stat = statSync(marker.path);
-      if (!stat.isFile()) throw new Error("not a regular file");
-      size = stat.size;
+      const info = await stat(marker.path);
+      if (!info.isFile()) throw new Error("not a regular file");
+      size = info.size;
     } catch {
       skipped.push({ path: marker.path, reason: "no such file on this host" });
       continue;

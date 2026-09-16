@@ -9,7 +9,7 @@ import { MAX_PROMPT_IMAGES } from "@tellahq/opensession-protocol/session";
 import { fetchWithTimeout } from "../../server/shared/fetch-with-timeout";
 import { personaName } from "../../server/config";
 import type { ImageInput } from "../../server/run-events";
-import { readFileSync, statSync } from "fs";
+import { readFile, stat } from "node:fs/promises";
 import { basename } from "path";
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
@@ -425,10 +425,10 @@ export async function postSlackFiles(
   const files: Array<{ id: string; title: string }> = [];
   for (const [index, path] of paths.entries()) {
     const filename = basename(path);
-    const stat = statSync(path);
-    if (!stat.isFile())
+    const info = await stat(path);
+    if (!info.isFile())
       throw new Error(`Slack upload path is not a regular file: ${path}`);
-    const length = stat.size;
+    const length = info.size;
     if (!length || length > MAX_SLACK_UPLOAD_BYTES) {
       throw new Error(`Slack upload must be between 1 byte and 20 MB: ${path}`);
     }
@@ -452,7 +452,7 @@ export async function postSlackFiles(
     const uploaded = await fetchWithTimeout(reserved.upload_url, {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
-      body: readFileSync(path),
+      body: await readFile(path),
     });
     if (!uploaded.ok) {
       throw new Error(`Slack file upload failed: HTTP ${uploaded.status}`);

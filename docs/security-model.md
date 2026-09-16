@@ -337,39 +337,33 @@ locks out a whole instance at once.
 
 ## Self-management tools (Slack + interactive Open Session sessions)
 
-The `opensession-admin` in-process MCP server
-(packages/core/opensession-server/src/agents/slack/admin-tools.ts) lets the agent manage its own setup from
-Slack: channel memory (remember/list_memory/forget) and — gated to the trusted
-user (`isAdmin` = no `ALLOWED_SLACK_USER_ID` set, or sender matches it) —
-automations (list/create/update/delete/run) and MCP connections
-(list/add/remove). It is wired ONLY into interactive Slack runs (handlers.ts
-`processMessage`); automation runs never go through there, so they never
-receive these tools. Do not add `opensession-admin` to automation/`runAgent`
-paths — that would let untrusted ticket text reconfigure the agent. Channel
-memory is scoped in packages/core/opensession-server/src/agents/slack/memory.ts (public channel → shared
-`workspace` store; private channel/DM → isolated, with read-only workspace
-view) and auto-injected into the system prompt each run.
+Slack is an ingress to regular native Open Session sessions, not a separate
+agent runner. After the existing DM/channel admission checks, `processMessage`
+uses `SessionControl.createSession` or `deliverToSession`. Questions also get a
+session-owned code workspace (their prompt forbids unsolicited edits), so runtime
+verification can use the same Sandboxes and Portals as a web-created session.
+Repository and personal Sandbox defaults apply normally. Legacy threads carry
+forward a transcript handoff; an existing owned worktree stays on its host so
+uncommitted work is not lost. Slack records and old transcripts remain intact.
 
-Both `opensession-admin` and `opensession-sessions` are ALSO available inside
-**interactive Open Session sessions** (web UI + loops), not just Slack:
-`interactiveMcpServers(user, sessionId)` (packages/core/opensession-server/src/server/interactive-mcp.ts)
-builds them and they are passed as `inProcessMcp` from the interactive run
-paths (`runSessionPrompt`, both `create_session` paths). This unrestricted
-interactive set is withheld from automation runs **and** from interactive
-resumes of automation-owned sessions (gated on `!isAutomationSession`, the same
-gate as `deniedTools`). Automation-owned runs instead receive only the explicit
-set documented below; a person's own turn in one of those sessions adds the
-spawn-only `humanResume` shape of `opensession-sessions` described there.
-Untrusted ticket text must never reach the interactive set. Open Session is network- and team-gated and already exposes all of this
-through its UI, so interactive
-users are treated as `isAdmin: true` there. The in-process servers are built
-with `packages/core/opensession-server/src/server/inprocess-mcp.ts` (a thin @modelcontextprotocol/sdk wrapper)
-and reach pi runs as stdio MCP proxies that forward to the in-process
-tools through the run-RPC socket; the Slack loop registers its own
-slack-context server set per run via `registerSessionMcpServers` (run-rpc.ts)
-so those proxies execute the right context. The runner adds a short "Managing
-<persona.name>" context block when these tools are present so the session
-knows they exist.
+The shared `interactiveMcpServers(user, sessionId)` builder supplies the entire
+interactive tool set, including `opensession-admin`, `opensession-sessions`,
+Portals, Repositories, Assets and Workflows. Admitted interactive teammates have
+the same tool authority as web users (`isAdmin: true`); there is no second Slack
+MCP allowlist or per-run override. Verified Slack-to-GitHub identity is stamped
+at creation, not accepted from model input. Per-user connector grants still
+apply to the normal session runner. Channel-scoped memory is included in the
+opening context; subsequent turns use the regular session's memory machinery.
+
+Replies in automation-owned or Plain discussion threads continue through their
+existing session and its restricted run-input policy. They never create a new
+unrestricted session. Automation descendants retain their inherited restrictions.
+Do not mount the interactive builder on automation paths: untrusted ticket text
+must never receive session-control or configuration tools. The in-process MCPs
+reach detached/remote runners through the same run-RPC proxies as web sessions.
+Slack-specific code handles admission, attachments, thread links and reply
+presentation only. Native session admission, cancellation, recovery and tool
+selection remain the authority after a message has been accepted.
 
 The `opensession-sessions` in-process MCP (packages/core/opensession-server/src/agents/slack/sessions-tools.ts)
 is a sibling, wired in its unrestricted shape only to interactive runs. The

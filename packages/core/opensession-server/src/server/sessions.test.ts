@@ -155,8 +155,20 @@ describe("nativeSessionRow", () => {
       createdAt: "2026-09-16T00:00:00.000Z",
       sandboxCheckpoint: checkpoint,
       portalSandbox: { provider: "daytona", sandboxId: "sb-portals" },
+      slackOrigin: {
+        sessionKey: "C1-123.1",
+        channel: "C1",
+        threadTs: "123.1",
+        messageTs: "123.1",
+      },
     } as never);
     expect(row.sandboxCheckpoint).toEqual(checkpoint);
+    expect(row.slackOrigin).toEqual({
+      sessionKey: "C1-123.1",
+      channel: "C1",
+      threadTs: "123.1",
+      messageTs: "123.1",
+    });
     expect(row.portalSandbox).toEqual({
       provider: "daytona",
       sandboxId: "sb-portals",

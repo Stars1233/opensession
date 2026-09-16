@@ -14,6 +14,7 @@
 
 const g = globalThis as unknown as {
   __slackLinkThreadToSess?: Map<string, string>;
+  __slackNativeConversations?: Map<string, string>;
   __slackLinkSessToThreads?: Map<string, Set<string>>;
 };
 // `${channel}:${threadTs}` → session id.
@@ -21,6 +22,24 @@ const threadToSess: Map<string, string> = (g.__slackLinkThreadToSess ??=
   new Map());
 const sessToThreads: Map<string, Set<string>> = (g.__slackLinkSessToThreads ??=
   new Map());
+
+const nativeConversations = (g.__slackNativeConversations ??= new Map<
+  string,
+  string
+>());
+
+export function sessionForSlackConversation(
+  sessionKey: string,
+): string | undefined {
+  return nativeConversations.get(sessionKey);
+}
+
+export function linkSlackConversation(
+  sessionId: string,
+  sessionKey: string,
+): void {
+  nativeConversations.set(sessionKey, sessionId);
+}
 
 const threadKey = (channel: string, threadTs: string) =>
   `${channel}:${threadTs}`;
@@ -123,18 +142,23 @@ export function unlinkThreadsInIndex(sessionId: string): void {
   for (const key of sessToThreads.get(sessionId) || [])
     threadToSess.delete(key);
   sessToThreads.delete(sessionId);
+  for (const [key, owner] of nativeConversations)
+    if (owner === sessionId) nativeConversations.delete(key);
 }
 
 /** Rebuild the whole index from the session store (called at startup). */
 export function rebuildIndex(
   sessions: Array<{
     id: string;
+    slackOrigin?: { sessionKey: string };
     slackThreads?: Array<{ channel: string; threadTs: string }>;
   }>,
 ): void {
+  nativeConversations.clear();
   threadToSess.clear();
   sessToThreads.clear();
   for (const s of sessions) {
+    if (s.slackOrigin) linkSlackConversation(s.id, s.slackOrigin.sessionKey);
     for (const t of s.slackThreads || []) {
       if (t?.channel && t?.threadTs)
         linkThreadInIndex(s.id, t.channel, t.threadTs);

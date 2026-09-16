@@ -78,6 +78,8 @@ export type SandboxRequest = boolean | "local" | "daytona" | "box";
 
 export interface CreateSessionOpts {
   prompt: string;
+  /** Trusted Slack ingress only, never accepted from model-authored create arguments. */
+  slackOrigin?: import("./types").SlackSessionOrigin;
   /** Stable server-chosen id for an idempotent client create request. */
   id?: string;
   /** Stable caller request id used for durable create receipts. */

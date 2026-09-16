@@ -8,6 +8,11 @@
  * cache in session-cache.ts.
  */
 
+import {
+  mirrorSlackSessionReply,
+  SLACK_SESSION_NOTE,
+} from "../agents/slack/session-reply";
+
 import { deskTextNavigation } from "./desk-text-navigation";
 import type { McpScope } from "./runner-shared";
 import { randomUUIDv7 } from "bun";
@@ -147,7 +152,6 @@ import {
   worktreeHeadBranch,
 } from "./worktree";
 import { createGoalSelfMcpServer } from "../agents/slack/goal-tools";
-import { sendSlackMessage } from "../agents/slack/slack-api";
 import { runHostsDir, type RunHostSpec } from "../runner-host/protocol";
 import { maybeLaunchRunnerRun } from "./runner-session";
 import type { StagedAttachment } from "./prompt-attachments";
@@ -3042,6 +3046,7 @@ async function runSessionPromptInner(
   // every MCP server and drop the customer/identity write denials. The whole
   // decision lives in session-run-inputs.ts so the effective-config endpoint
   // reads the same answer this turn runs with.
+  if (slackReplyTo) prompt += "\n\n" + SLACK_SESSION_NOTE;
   const runInputs = await resolveSessionRunInputs(session, { user });
   const isAutomationSession = runInputs.isAutomationSession;
   const mcpServers = runInputs.mcpServers;
@@ -3861,13 +3866,16 @@ async function runSessionPromptInner(
   // Mirror the agent's reply back to Slack: a turn that came from a Slack thread
   // (a reply under a message this session posted — see slackReplyTo plumbing)
   // answers in that thread.
-  if (!endedWithError && assistantText.trim() && slackReplyTo) {
-    void sendSlackMessage(
-      slackReplyTo.channel,
-      assistantText.trim().slice(0, 38000),
-      slackReplyTo.threadTs,
-    ).catch(() => {});
-  }
+  await mirrorSlackSessionReply(slackReplyTo, {
+    sessionId,
+    localMedia:
+      !isAutomationSession &&
+      !session.plainDiscussionId &&
+      !session.sandbox?.provider &&
+      !session.runner,
+    assistantText,
+    error: endedWithError ? runFailure || "Run failed" : null,
+  });
 
   // A session answering a Plain discussion posts the turn there and reports
   // itself idle, whoever started the turn.
