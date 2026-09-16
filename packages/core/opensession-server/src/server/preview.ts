@@ -135,6 +135,19 @@ export interface PreviewStatus {
     | "sleeping"
     | "waking"
     | "needs_attention";
+  /** Set for a session on this machine whose Portals run in a Sandbox of
+   * their own (portal-sandbox.ts): which provider, and how that machine is
+   * doing. */
+  portalSandbox?: {
+    provider: string;
+    lifecycle?:
+      | "preparing"
+      | "awake"
+      | "sleeping"
+      | "waking"
+      | "needs_attention";
+    error?: string;
+  };
 }
 
 /** The declared Portal a repository considers its main app: the one keyed

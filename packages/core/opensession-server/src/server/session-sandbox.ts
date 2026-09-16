@@ -34,38 +34,52 @@ import { revokeWorkloadIdentityForSandbox } from "./workload-identity";
 import type { UnifiedSession } from "./types";
 
 /**
- * Tear down a session's sandbox, including its workspace disk (documented
- * data loss: push your work). Best-effort and detached so a provider hiccup
- * never blocks the caller
- * (session delete, archive sweep). `clearSandboxId` drops the stale id from
- * the session file so later sweeps don't re-destroy — only for sessions that
- * keep existing (the archive sweep); a deleted session has no file to touch.
+ * Tear down a session's Sandboxes, including their workspace disks
+ * (documented data loss: push your work): the workspace Sandbox and, for a
+ * host session, the Portal Sandbox that ran its dev server. Best-effort and
+ * detached so a provider hiccup never blocks the caller (session delete,
+ * archive sweep). `clearSandboxId` drops the stale ids from the session file
+ * so later sweeps don't re-destroy — only for sessions that keep existing
+ * (the archive sweep); a deleted session has no file to touch.
  */
 export function destroySessionSandbox(
   session: UnifiedSession,
   why: string,
   clearSandboxId = false,
 ): void {
+  const retire = (
+    record: { provider: string; sandboxId?: string },
+    label: string,
+    clear: () => void,
+  ) => {
+    if (!record.sandboxId || !isRemoteSandboxProvider(record.provider)) return;
+    void (async () => {
+      try {
+        await teardownSandbox(record.provider, record.sandboxId!);
+        console.log(
+          `[sandbox] destroyed ${record.sandboxId} for ${session.id} (${label})`,
+        );
+        if (clearSandboxId && session.source === "opensession") clear();
+      } catch (e) {
+        console.warn(
+          `[sandbox] destroy ${record.sandboxId} for ${session.id} (${label}) failed:`,
+          e,
+        );
+      }
+    })();
+  };
   const sb = session.sandbox;
-  if (!sb?.sandboxId) return;
-  if (!isRemoteSandboxProvider(sb.provider)) return;
-  void (async () => {
-    try {
-      await teardownSandbox(sb.provider, sb.sandboxId!);
-      console.log(
-        `[sandbox] destroyed ${sb.sandboxId} for ${session.id} (${why})`,
-      );
-      if (clearSandboxId && session.source === "opensession")
-        touchNativeSession(session.id, {
-          sandbox: { ...sb, sandboxId: undefined },
-        });
-    } catch (e) {
-      console.warn(
-        `[sandbox] destroy ${sb.sandboxId} for ${session.id} (${why}) failed:`,
-        e,
-      );
-    }
-  })();
+  if (sb)
+    retire(sb, why, () =>
+      touchNativeSession(session.id, {
+        sandbox: { ...sb, sandboxId: undefined },
+      }),
+    );
+  const portal = session.portalSandbox;
+  if (portal)
+    retire(portal, `${why}, Portal Sandbox`, () =>
+      touchNativeSession(session.id, { portalSandbox: undefined }),
+    );
 }
 
 /**
@@ -98,63 +112,103 @@ export async function activeSandboxFor(
 ): Promise<Sandbox | null> {
   const sb = session.sandbox;
   if (!sb?.provider || !sb.sandboxId) return null;
+  return liveSandbox(
+    session,
+    { ...sb, sandboxId: sb.sandboxId },
+    options,
+    (patch) => {
+      if (session.source === "opensession")
+        touchNativeSession(session.id, { sandbox: { ...sb, ...patch } });
+    },
+  );
+}
+
+/**
+ * The same for a host session's Portal Sandbox (portal-sandbox.ts): the
+ * machine that runs its dev server. Its lifecycle is recorded on
+ * `portalSandbox`, never on `sandbox`, which stays the session's own.
+ */
+export async function activePortalSandboxFor(
+  session: UnifiedSession,
+  options: { wake?: boolean } = {},
+): Promise<Sandbox | null> {
+  const record = session.portalSandbox;
+  if (!record?.provider || !record.sandboxId) return null;
+  return liveSandbox(
+    session,
+    { ...record, sandboxId: record.sandboxId },
+    options,
+    (patch) =>
+      touchNativeSession(session.id, {
+        portalSandbox: { ...record, ...patch },
+      }),
+  );
+}
+
+type LifecyclePatch = {
+  lifecycle: "waking" | "awake" | "needs_attention";
+  lastLifecycleError: string | undefined;
+};
+
+async function liveSandbox(
+  session: UnifiedSession,
+  record: { provider: string; sandboxId: string },
+  options: { wake?: boolean },
+  persist: (patch: LifecyclePatch) => void,
+): Promise<Sandbox | null> {
   if (!sandboxesEnabled()) return null;
-  if (isRemoteSandboxProvider(sb.provider)) {
-    if (!sandboxProviderConfigured(sb.provider)) return null;
-    try {
-      const provider = getSandboxProvider(sb.provider);
-      let sandbox = await provider.get(sb.sandboxId);
-      let woke = false;
-      if (
-        sandbox &&
-        (await sandbox.status()) === "stopped" &&
-        options.wake &&
-        provider.resume
-      ) {
-        if (session.source === "opensession")
-          touchNativeSession(session.id, {
-            sandbox: {
-              ...sb,
-              lifecycle: "waking",
-              lastLifecycleError: undefined,
-            },
-          });
-        sandbox = await provider.resume(sb.sandboxId);
-        woke = true;
-        if (
-          sandbox &&
-          (await sandbox.status()) === "running" &&
-          session.source === "opensession"
-        )
-          touchNativeSession(session.id, {
-            sandbox: {
-              ...sb,
-              lifecycle: "awake",
-              lastLifecycleError: undefined,
-            },
-          });
-      }
-      if (sandbox && (await sandbox.status()) === "running") {
-        if (woke) await restoreSandboxPortals(session, sandbox);
-        return sandbox;
-      }
-      return null;
-    } catch (error) {
-      if (options.wake && session.source === "opensession")
-        touchNativeSession(session.id, {
-          sandbox: {
-            ...sb,
-            lifecycle: "needs_attention",
-            lastLifecycleError:
-              error instanceof Error
-                ? error.message.slice(0, 240)
-                : String(error).slice(0, 240),
-          },
-        });
-      return null;
+  if (!isRemoteSandboxProvider(record.provider)) return null;
+  if (!sandboxProviderConfigured(record.provider)) return null;
+  try {
+    const provider = getSandboxProvider(record.provider);
+    let sandbox = await provider.get(record.sandboxId);
+    let woke = false;
+    if (
+      sandbox &&
+      (await sandbox.status()) === "stopped" &&
+      options.wake &&
+      provider.resume
+    ) {
+      persist({ lifecycle: "waking", lastLifecycleError: undefined });
+      sandbox = await provider.resume(record.sandboxId);
+      woke = true;
+      if (sandbox && (await sandbox.status()) === "running")
+        persist({ lifecycle: "awake", lastLifecycleError: undefined });
     }
+    if (sandbox && (await sandbox.status()) === "running") {
+      if (woke) await restoreSandboxPortals(session, sandbox);
+      return sandbox;
+    }
+    return null;
+  } catch (error) {
+    if (options.wake)
+      persist({
+        lifecycle: "needs_attention",
+        lastLifecycleError:
+          error instanceof Error
+            ? error.message.slice(0, 240)
+            : String(error).slice(0, 240),
+      });
+    return null;
   }
-  return null;
+}
+
+/** Whether a recorded Sandbox no longer exists at the provider, as opposed
+ * to sleeping or unreachable. A provider error reads as "still there". */
+export async function recordedSandboxGone(record: {
+  provider: string;
+  sandboxId: string;
+}): Promise<boolean> {
+  if (!isRemoteSandboxProvider(record.provider)) return false;
+  if (!sandboxProviderConfigured(record.provider)) return false;
+  try {
+    const sandbox = await getSandboxProvider(record.provider).get(
+      record.sandboxId,
+    );
+    return !sandbox || (await sandbox.status()) === "gone";
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -34,6 +34,32 @@ function statusLabel(
   return service.state === "failed" ? "Failed" : `Port ${service.port}`;
 }
 
+function providerName(id: string): string {
+  if (id === "daytona") return "Daytona";
+  if (id === "box") return "Box";
+  return id;
+}
+
+/** One line on where a host session's Portals run when the project sends
+ * them to a Sandbox of their own, and how that machine is doing. */
+function portalSandboxNote(
+  portalSandbox: NonNullable<PreviewStatus["portalSandbox"]>,
+): string {
+  const name = providerName(portalSandbox.provider);
+  switch (portalSandbox.lifecycle) {
+    case "preparing":
+      return `Preparing a ${name} Sandbox for this project's Portals…`;
+    case "waking":
+      return `Waking the ${name} Sandbox that runs this project's Portals…`;
+    case "sleeping":
+      return `Portals run in a ${name} Sandbox, asleep now. Starting one wakes it.`;
+    case "needs_attention":
+      return `The ${name} Sandbox for this project's Portals needs attention${portalSandbox.error ? `: ${portalSandbox.error}` : "."} Start a Portal to try again.`;
+    default:
+      return `Portals run in a ${name} Sandbox, refreshed after every turn.`;
+  }
+}
+
 function DiscoveringRow() {
   return (
     <div className="flex items-center gap-2 px-2 py-1 text-supporting text-dim">
@@ -107,6 +133,11 @@ export function PortalsPage({
           <DiscoveringRow />
         ) : (
           <>
+            {status.portalSandbox ? (
+              <div className="px-2 text-label text-dim">
+                {portalSandboxNote(status.portalSandbox)}
+              </div>
+            ) : null}
             {recipes.length ? (
               <div className={INFO_SECTION_CLASS}>
                 <div className={INFO_LABEL_CLASS}>Start a portal</div>

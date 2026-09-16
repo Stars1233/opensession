@@ -346,6 +346,10 @@ export interface UnifiedSession {
    * (sandbox/checkpoint.ts). Kept beside `sandbox` rather than inside it so
    * lifecycle writers that replace the whole `sandbox` object cannot drop it. */
   sandboxCheckpoint?: SandboxCheckpointRecord;
+  /** The Sandbox that runs this session's Portals while the session itself
+   * stays on this machine (portal-sandbox.ts). Never set beside a workspace
+   * Sandbox, whose Portals run in it. */
+  portalSandbox?: PortalSandboxRecord;
   /** Persistent, explicitly trusted machine selected for this session. Unlike
    * a Sandbox, a Runner is not an isolation boundary. */
   runner?: {
@@ -686,6 +690,8 @@ export interface NativeSessionFile {
   };
   /** See UnifiedSession.sandboxCheckpoint. */
   sandboxCheckpoint?: SandboxCheckpointRecord;
+  /** See UnifiedSession.portalSandbox. */
+  portalSandbox?: PortalSandboxRecord;
   runner?: {
     id: string;
     name: string;
@@ -705,6 +711,18 @@ export interface SandboxCheckpointRecord {
   tree: string;
   branch: string;
   at: string;
+}
+
+/** A Sandbox provisioned only to run a host session's Portals: its workspace
+ * is a clone of the session branch landed on the session's checkpoints, never
+ * the agent's checkout. `syncedCommit` is the checkpoint commit its checkout
+ * last landed on. */
+export interface PortalSandboxRecord {
+  provider: string;
+  sandboxId?: string;
+  lifecycle?: "preparing" | "awake" | "sleeping" | "waking" | "needs_attention";
+  lastLifecycleError?: string;
+  syncedCommit?: string;
 }
 
 // Moved to the protocol package; re-exported for existing import sites.

@@ -34,6 +34,7 @@ import {
 } from "../session-cache";
 import { resolveWorktreeTarget } from "../session-repos";
 import { activeSandboxFor, teardownSandbox } from "../session-sandbox";
+import { releasePortalSandbox } from "../portal-sandbox";
 import { sessionTouchedPaths } from "../session-touched";
 import type { SandboxCheckpointRecord } from "../types";
 import {
@@ -443,6 +444,9 @@ async function attachSandbox(
         worktreeDir: target.dir,
       });
     }
+    // A Portal Sandbox served this machine's worktree; the workspace Sandbox
+    // runs the Portals from now on.
+    await releasePortalSandbox(session, `moving to ${provider}`);
   }
   await touchNativeSessionStrict(session.id, {
     sandbox: {

@@ -39,7 +39,9 @@ import {
   sandboxProviderConfigured,
   sandboxProviderUsability,
   sandboxesEnabled,
+  repoPortalSandbox,
   setKeepReadyTarget,
+  setRepoPortalSandbox,
   setRepoSandboxDefault,
   setWorkspaceSandboxDefault,
 } from "./config";
@@ -140,6 +142,33 @@ describe("sandboxCapabilityStatus (the /api/sandbox/status payload)", () => {
     expect(() => setRepoSandboxDefault("tella", "box")).toThrow(
       /not currently available/,
     );
+  });
+
+  test("a repo's Portal Sandbox persists beside its other overrides and is removable", () => {
+    write({
+      provider: "daytona",
+      perRepo: { tella: { sessionDefault: "none" } },
+    });
+    ready("daytona");
+    expect(setRepoPortalSandbox("tella", "daytona")).toBe("daytona");
+    expect(JSON.parse(readFileSync(cfgPath(), "utf-8")).perRepo).toEqual({
+      tella: { sessionDefault: "none", portalSandbox: "daytona" },
+    });
+    expect(repoPortalSandbox("tella")).toBe("daytona");
+    expect(repoPortalSandbox("other")).toBeNull();
+    expect(setRepoPortalSandbox("tella", "none")).toBeNull();
+    expect(JSON.parse(readFileSync(cfgPath(), "utf-8")).perRepo).toEqual({
+      tella: { sessionDefault: "none" },
+    });
+    expect(() => setRepoPortalSandbox("tella", "box")).toThrow(
+      /not currently available/,
+    );
+    // An unknown value in the file is ignored rather than trusted.
+    write({
+      provider: "daytona",
+      perRepo: { tella: { portalSandbox: "nope" } },
+    });
+    expect(sandboxConfig().perRepo).toBeUndefined();
   });
 
   test("keep-ready targets toggle without touching the rest of prewarm", () => {

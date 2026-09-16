@@ -159,6 +159,70 @@ export function checkpointScript(excluded: string[]): string {
     .join("\n");
 }
 
+/**
+ * Shell that lands a checkout on a checkpoint whatever branch it is on: for
+ * a Portal Sandbox (portal-sandbox.ts), whose checkout is nobody's work and
+ * only ever mirrors the session's checkpoints. Fetch the hidden ref, verify
+ * it is the recorded commit, reset the tree to the checkpoint outright,
+ * drop untracked files the previous checkpoint left behind (`keep` names the
+ * paths a checkpoint leaves out and the checkout must keep, such as the
+ * Portal registry), put `branch` on it, and leave the checkpointed tree as
+ * uncommitted changes on the checkpoint's parent, exactly as the restore
+ * script does. Unlike the restore script it refuses nothing: a renamed or
+ * switched branch simply lands here too.
+ */
+export function checkpointLandScript(
+  ref: string,
+  commit: string,
+  branch: string,
+  keep: string[] = [],
+): string {
+  const exclude = keep.map((path) => `-e ${shellQuoteWord(path)}`).join(" ");
+  return [
+    `git fetch --no-tags --quiet origin ${shellQuoteWord(`+${ref}:refs/opensession/checkpoint`)}`,
+    `test "$(git rev-parse --verify 'refs/opensession/checkpoint^{commit}')" = ${shellQuoteWord(commit)}`,
+    "git -c advice.detachedHead=false reset --hard --quiet refs/opensession/checkpoint",
+    `git clean -fdq ${exclude}`.trimEnd(),
+    `git checkout --quiet -B ${shellQuoteWord(branch)}`,
+    "git reset --mixed --quiet 'refs/opensession/checkpoint^'",
+    "git update-ref -d refs/opensession/checkpoint",
+  ].join(" && ");
+}
+
+/**
+ * Land a checkpoint in a Sandbox whose checkout mirrors the session (a
+ * Portal Sandbox). The token rides in the command's environment as for a
+ * push; the Sandbox's origin stays credential-free. Throws when the
+ * workspace has no credential or git refuses.
+ */
+export async function landCheckpointInSandbox(
+  repoId: string | undefined,
+  sandbox: Sandbox,
+  checkpoint: Pick<SandboxCheckpointRecord, "ref" | "commit" | "branch">,
+): Promise<void> {
+  const repo = getRepo(repoId);
+  const env = await checkpointGitEnv(repo);
+  if (!env) throw new Error("the workspace has no GitHub credential");
+  const result = await sandbox.exec(
+    [
+      "bash",
+      "-c",
+      checkpointLandScript(
+        checkpoint.ref,
+        checkpoint.commit,
+        checkpoint.branch,
+        excludedPaths(repo),
+      ),
+    ],
+    { env, timeoutMs: CHECKPOINT_TIMEOUT_MS },
+  );
+  if (result.exitCode !== 0)
+    throw new Error(
+      `could not land checkpoint ${checkpoint.commit.slice(0, 12)} in ${sandbox.id}: ` +
+        `${(result.stderr || result.stdout).trim().slice(0, 300)}`,
+    );
+}
+
 export type CheckpointOutcome =
   | { state: "pushed" | "unchanged"; checkpoint: SandboxCheckpointRecord }
   | { state: "skipped"; reason: string };

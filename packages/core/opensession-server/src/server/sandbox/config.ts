@@ -44,6 +44,10 @@ export interface SandboxRepoOverride {
    *  Beats the workspace and personal defaults; an explicit per-session
    *  choice still wins. */
   sessionDefault?: RunnableSandboxProviderId | "none";
+  /** Where this repo's Portals run for a session that lives on this machine:
+   *  a Sandbox provisioned on demand for the dev server alone
+   *  (portal-sandbox.ts). Absent = the Portal runs beside the session. */
+  portalSandbox?: RunnableSandboxProviderId;
 }
 
 /** How remote providers authenticate `git clone` inside the sandbox (they
@@ -187,10 +191,14 @@ export function sandboxConfig(): SandboxConfig {
               : isRunnableSandboxProvider(o?.sessionDefault)
                 ? o.sessionDefault
                 : undefined;
-          if (provider || sessionDefault)
+          const portalSandbox = isRunnableSandboxProvider(o?.portalSandbox)
+            ? o.portalSandbox
+            : undefined;
+          if (provider || sessionDefault || portalSandbox)
             perRepo[repoId] = {
               ...(provider ? { provider } : {}),
               ...(sessionDefault ? { sessionDefault } : {}),
+              ...(portalSandbox ? { portalSandbox } : {}),
             };
         }
       }
@@ -521,6 +529,55 @@ export function setRepoSandboxDefault(
   return normalized === "workspace"
     ? null
     : (normalized as RunnableSandboxProviderId | "none");
+}
+
+/** Run `repoId`'s Portals for host sessions in a Sandbox on `provider`, or
+ * stop doing so (`null`). Persists `perRepo[repoId].portalSandbox`. */
+export function setRepoPortalSandbox(
+  repoId: string,
+  value: string | null,
+): RunnableSandboxProviderId | null {
+  const normalized = value?.trim().toLowerCase() || "none";
+  if (normalized !== "none" && !isRunnableSandboxProvider(normalized))
+    throw new Error(`Unknown sandbox provider "${value}"`);
+  if (
+    normalized !== "none" &&
+    sandboxProviderUsability(normalized).state !== "usable"
+  )
+    throw new Error(
+      `Sandbox provider "${normalized}" is not currently available`,
+    );
+  if (normalized === "none" && !existsSync(configPath())) return null;
+  updateSandboxConfigFile((raw) => {
+    const perRepo =
+      raw.perRepo &&
+      typeof raw.perRepo === "object" &&
+      !Array.isArray(raw.perRepo)
+        ? (raw.perRepo as Record<string, Record<string, unknown>>)
+        : {};
+    const entry =
+      perRepo[repoId] && typeof perRepo[repoId] === "object"
+        ? { ...perRepo[repoId] }
+        : {};
+    if (normalized === "none") delete entry.portalSandbox;
+    else entry.portalSandbox = normalized;
+    if (Object.keys(entry).length) perRepo[repoId] = entry;
+    else delete perRepo[repoId];
+    if (Object.keys(perRepo).length) raw.perRepo = perRepo;
+    else delete raw.perRepo;
+  });
+  return normalized === "none"
+    ? null
+    : (normalized as RunnableSandboxProviderId);
+}
+
+/** The provider that runs `repoId`'s Portals for sessions on this machine,
+ * or null when they run beside the session. */
+export function repoPortalSandbox(
+  repoId: string | undefined,
+): RunnableSandboxProviderId | null {
+  if (!repoId) return null;
+  return sandboxConfig().perRepo?.[repoId]?.portalSandbox ?? null;
 }
 
 /** Where new sessions on `repoId` run when nobody chose, or null when the

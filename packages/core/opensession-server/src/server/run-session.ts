@@ -63,6 +63,10 @@ import { activeSandboxFor, restoreSandboxPortals } from "./session-sandbox";
 import { checkpointSessionWorkspace } from "./sandbox/checkpoint";
 import { settleSessionLifecycle } from "./sandbox/lifecycle-lane";
 import {
+  portalSandboxProvider,
+  syncPortalSandboxAfterTurn,
+} from "./portal-sandbox";
+import {
   wrapContext,
   stripContext,
   isContextOnly,
@@ -3707,6 +3711,24 @@ async function runSessionPromptInner(
           error instanceof Error ? error.message : String(error),
         );
       });
+  } else if (
+    !endedWithError &&
+    !runnerRun &&
+    !sandboxRun &&
+    session.source === "opensession" &&
+    session.worktreeDir &&
+    (session.portalSandbox || portalSandboxProvider(session))
+  ) {
+    // The same capture for a session on this machine whose dev server runs
+    // in a Portal Sandbox (portal-sandbox.ts): the turn's edits are
+    // checkpointed and landed there, so the running app shows them. Same
+    // lane, same timing; a sleeping Portal Sandbox catches up when it wakes.
+    void syncPortalSandboxAfterTurn(session).catch((error) => {
+      console.warn(
+        `[sandbox] ${sessionId}: Portal Sandbox not refreshed:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    });
   }
 
   // A terminal failure keeps the session in the "Needs input" bucket until a

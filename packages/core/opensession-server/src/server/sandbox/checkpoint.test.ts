@@ -6,12 +6,19 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { $ } from "bun";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { checkpointRestoreScript } from "./adapters/bootstrap";
 import {
   checkpointCapable,
+  checkpointLandScript,
   checkpointRef,
   checkpointScript,
   restorableCheckpoint,
@@ -82,6 +89,50 @@ describe("checkpointCapable", () => {
     expect(
       checkpointCapable({ ghRepo: "tellahq/x", host: "codestorage" }),
     ).toBe(false);
+  });
+});
+
+describe("checkpointLandScript", () => {
+  test("puts a mirror checkout on the checkpoint whatever branch it is on, keeping only the excluded paths", async () => {
+    writeFileSync(join(work, "README.md"), "hello\nfeature\nlanded\n");
+    writeFileSync(join(work, "new.txt"), "untracked\n");
+    const pushed = await runCheckpoint({});
+    expect(pushed.exitCode).toBe(0);
+    const [, commit] = pushed.stdout.toString().trim().split(/\s+/);
+    const tip = (await git(work)`git rev-parse HEAD`.text()).trim();
+
+    const mirror = join(scratch, "mirror");
+    await git(scratch)`git clone -q ${origin} mirror`;
+    // A Portal Sandbox's checkout: on the default branch, with the Portal
+    // registry and a leftover from an earlier landing lying around.
+    writeFileSync(join(mirror, ".ports.conf"), "WEBAPP_PORT=3300\n");
+    writeFileSync(join(mirror, "stale.txt"), "from last time\n");
+    const land = await git(
+      mirror,
+    )`bash -c ${checkpointLandScript(ref, commit!, "feature", [".ports.conf"])}`
+      .quiet()
+      .nothrow();
+    expect(land.stderr.toString()).toBe("");
+    expect(land.exitCode).toBe(0);
+    expect((await git(mirror)`git branch --show-current`.text()).trim()).toBe(
+      "feature",
+    );
+    expect((await git(mirror)`git rev-parse HEAD`.text()).trim()).toBe(tip);
+    expect(readFileSync(join(mirror, "README.md"), "utf-8")).toBe(
+      "hello\nfeature\nlanded\n",
+    );
+    expect(readFileSync(join(mirror, "new.txt"), "utf-8")).toBe("untracked\n");
+    expect(readFileSync(join(mirror, ".ports.conf"), "utf-8")).toBe(
+      "WEBAPP_PORT=3300\n",
+    );
+    expect(existsSync(join(mirror, "stale.txt"))).toBe(false);
+    // The wrong commit for the ref is refused before anything moves.
+    const wrong = await git(
+      mirror,
+    )`bash -c ${checkpointLandScript(ref, tip, "feature")}`
+      .quiet()
+      .nothrow();
+    expect(wrong.exitCode).not.toBe(0);
   });
 });
 

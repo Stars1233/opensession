@@ -10,6 +10,7 @@ import {
   sandboxConfig,
   sandboxProviderCertified,
   sandboxProviderConfigured,
+  setRepoPortalSandbox,
   setRepoSandboxDefault,
   setWorkspaceSandboxDefault,
 } from "./config";
@@ -29,6 +30,10 @@ export interface SandboxDefaultsStatus {
   effective: WorkspaceSandboxDefault;
   /** Per-repo overrides; a repo absent here follows workspace and personal. */
   repos: Record<string, WorkspaceSandboxDefault>;
+  /** Repos whose Portals run in a Sandbox of their own for sessions on this
+   * machine (repo id → provider); a repo absent here runs them beside the
+   * session. */
+  portals: Record<string, RunnableSandboxProviderId>;
 }
 
 const PERSONAL_PREF_KEY = "sandbox-default";
@@ -62,6 +67,19 @@ export function repoSandboxDefaults(): Record<string, WorkspaceSandboxDefault> {
   return out;
 }
 
+export function repoPortalSandboxes(): Record<
+  string,
+  RunnableSandboxProviderId
+> {
+  const out: Record<string, RunnableSandboxProviderId> = {};
+  for (const [repoId, override] of Object.entries(
+    sandboxConfig().perRepo || {},
+  )) {
+    if (override.portalSandbox) out[repoId] = override.portalSandbox;
+  }
+  return out;
+}
+
 export function sandboxDefaultsStatus(
   user: string,
   repoId?: string,
@@ -77,6 +95,7 @@ export function sandboxDefaultsStatus(
       repoSandboxDefault(repoId),
     ),
     repos: repoSandboxDefaults(),
+    portals: repoPortalSandboxes(),
   };
 }
 
@@ -125,6 +144,17 @@ export function saveRepoSandboxDefault(
   if (normalized !== "workspace" && normalized !== "none")
     assertAvailable(normalized);
   setRepoSandboxDefault(repoId, normalized);
+  return sandboxDefaultsStatus("Anonymous", repoId);
+}
+
+/** `none` runs the repo's Portals beside the session again. */
+export function saveRepoPortalSandbox(
+  repoId: string,
+  value: string,
+): SandboxDefaultsStatus {
+  const normalized = value.trim().toLowerCase();
+  if (normalized !== "none") assertAvailable(normalized);
+  setRepoPortalSandbox(repoId, normalized);
   return sandboxDefaultsStatus("Anonymous", repoId);
 }
 

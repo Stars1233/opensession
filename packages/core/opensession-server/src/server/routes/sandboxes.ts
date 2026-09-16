@@ -10,6 +10,7 @@ import { sandboxIngressStatus } from "../sandbox/caddy-ingress";
 import {
   sandboxDefaultsStatus,
   savePersonalSandboxDefault,
+  saveRepoPortalSandbox,
   saveRepoSandboxDefault,
   saveWorkspaceSandboxDefault,
 } from "../sandbox/defaults";
@@ -158,8 +159,16 @@ export async function handleSandboxesRoutes(
         if (typeof body.repo !== "string" || !(body.repo in REPOS))
           return errorResponse("repo must name a registered repository");
         saveRepoSandboxDefault(body.repo, body.value);
+      } else if (body.scope === "repo-portals") {
+        const forbidden = requireWorkspaceAdmin(ctx);
+        if (forbidden) return forbidden;
+        if (typeof body.repo !== "string" || !(body.repo in REPOS))
+          return errorResponse("repo must name a registered repository");
+        saveRepoPortalSandbox(body.repo, body.value);
       } else {
-        return errorResponse("scope must be workspace, personal, or repo");
+        return errorResponse(
+          "scope must be workspace, personal, repo, or repo-portals",
+        );
       }
       return Response.json({
         defaults: sandboxDefaultsStatus(

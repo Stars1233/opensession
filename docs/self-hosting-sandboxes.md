@@ -174,6 +174,38 @@ A move that failed shows Needs attention and can be attempted again.
 
 Terminal tabs land inside the Sandbox (Daytona's native PTY, Box's SSH).
 
+## The app in a Sandbox, the session on this machine
+
+A project can keep its sessions on this machine and still run its dev
+server remotely. Set the project's **app** to a provider under Settings →
+Sandboxes → Projects (`perRepo.<repo>.portalSandbox` in the runtime config).
+Nothing changes for the session itself: the worktree and the agent stay on
+this machine, and the Sandbox badge stays off. The first time a Portal is
+started, by the person from the Portals panel or by the agent through
+`start_declared_portal` or `start_portal`, Open Session:
+
+- checkpoints the worktree, so uncommitted work travels too;
+- provisions a **Portal Sandbox** for the session (the provider names it
+  `<session id>--portals`) and materializes the branch on that checkpoint,
+  exactly as a rebuild would;
+- starts the Portal there and relays it as usual. The Portals panel says so,
+  with the machine's state while it prepares, sleeps, or needs attention.
+
+After every clean turn the worktree is checkpointed again and the Portal
+Sandbox's checkout is landed on it (whatever branch it was on), so the app
+shows what the agent just did at turn granularity; the dev server's own file
+watcher does the rest. A sleeping Portal Sandbox catches up when a Portal
+wakes it, and a start or restart lands the latest checkpoint first. The
+checkout there is nobody's work: nothing in it is ever pushed or restored
+back, and its origin stays credential-free.
+
+The Portal Sandbox is torn down with the session, and when the session moves
+into a workspace Sandbox (whose Portals run there). A session that already
+runs in a workspace Sandbox, or on a Runner, runs its Portals there and never
+gets one. A Portal Sandbox the provider has lost is replaced on the next
+start; a failed provisioning shows its reason in the Portals panel and is
+retried by starting the Portal again.
+
 ## Desktop
 
 Both providers can show a person the Sandbox's screen. The Sandbox popover in a

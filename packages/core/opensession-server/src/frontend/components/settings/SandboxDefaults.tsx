@@ -176,9 +176,13 @@ function ProjectSandboxDefaults({ canManage }: { canManage: boolean }) {
         .map((provider) => provider.id);
   if (!providers.length) return null;
 
-  async function save(repo: string, next: string) {
-    setSaving(repo);
-    await saveSandboxDefault({ scope: "repo", value: next, user, repo })
+  async function save(
+    repo: string,
+    scope: "repo" | "repo-portals",
+    next: string,
+  ) {
+    setSaving(`${repo}:${scope}`);
+    await saveSandboxDefault({ scope, value: next, user, repo })
       .then((response) =>
         setStatus((current) =>
           current ? { ...current, defaults: response.defaults } : current,
@@ -202,56 +206,104 @@ function ProjectSandboxDefaults({ canManage }: { canManage: boolean }) {
             value !== "workspace" &&
             value !== "none" &&
             !providers.includes(value);
+          const portals = defaults.portals?.[repo.id] ?? "none";
+          const portalsUnavailable =
+            portals !== "none" && !providers.includes(portals);
+          const label = repo.label || repo.id;
           return (
-            <SettingRow
-              key={repo.id}
-              title={repo.label || repo.id}
-              desc={
-                value === "workspace"
-                  ? `Follows the workspace default (${providerLabel(defaults.workspace || "none")}).`
-                  : "Every new session on this project starts here."
-              }
-              control={
-                <div
-                  className={
-                    saving === repo.id
-                      ? "pointer-events-none opacity-60"
-                      : undefined
-                  }
-                >
-                  <Select
-                    label={`${repo.label || repo.id} default environment`}
-                    value={value}
-                    options={[
-                      { value: "workspace", label: "Workspace default" },
-                      { value: "none", label: "This machine" },
-                      ...(unavailable
-                        ? [
-                            {
-                              value,
-                              label: `${providerLabel(value)} · unavailable`,
-                              disabled: true,
-                            },
-                          ]
-                        : []),
-                      ...providers.map((id) => ({
-                        value: id,
-                        label: providerLabel(id),
-                      })),
-                    ]}
-                    onChange={(next) => void save(repo.id, next)}
-                    disabled={!canManage}
-                  />
-                </div>
-              }
-            />
+            <div key={repo.id}>
+              <SettingRow
+                title={label}
+                desc={
+                  value === "workspace"
+                    ? `Follows the workspace default (${providerLabel(defaults.workspace || "none")}).`
+                    : "Every new session on this project starts here."
+                }
+                control={
+                  <div
+                    className={
+                      saving === `${repo.id}:repo`
+                        ? "pointer-events-none opacity-60"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      label={`${label} default environment`}
+                      value={value}
+                      options={[
+                        { value: "workspace", label: "Workspace default" },
+                        { value: "none", label: "This machine" },
+                        ...(unavailable
+                          ? [
+                              {
+                                value,
+                                label: `${providerLabel(value)} · unavailable`,
+                                disabled: true,
+                              },
+                            ]
+                          : []),
+                        ...providers.map((id) => ({
+                          value: id,
+                          label: providerLabel(id),
+                        })),
+                      ]}
+                      onChange={(next) => void save(repo.id, "repo", next)}
+                      disabled={!canManage}
+                    />
+                  </div>
+                }
+              />
+              <SettingRow
+                title={`${label} app`}
+                desc={
+                  portals === "none"
+                    ? "Portals start beside the session: on this machine, or in its Sandbox."
+                    : "Sessions on this machine run their Portals in a Sandbox of their own, started with the first Portal and refreshed after every turn."
+                }
+                control={
+                  <div
+                    className={
+                      saving === `${repo.id}:repo-portals`
+                        ? "pointer-events-none opacity-60"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      label={`${label} Portal environment`}
+                      value={portals}
+                      options={[
+                        { value: "none", label: "With the session" },
+                        ...(portalsUnavailable
+                          ? [
+                              {
+                                value: portals,
+                                label: `${providerLabel(portals)} · unavailable`,
+                                disabled: true,
+                              },
+                            ]
+                          : []),
+                        ...providers.map((id) => ({
+                          value: id,
+                          label: providerLabel(id),
+                        })),
+                      ]}
+                      onChange={(next) =>
+                        void save(repo.id, "repo-portals", next)
+                      }
+                      disabled={!canManage}
+                    />
+                  </div>
+                }
+              />
+            </div>
           );
         })}
       </SettingCard>
       <SettingsHint>
         A project set to a Sandbox always starts there, so its app runs in a
         Sandbox Portal instead of on this server. The per-session choice in the
-        new session menu still wins.
+        new session menu still wins. A project whose app is set to a Sandbox
+        keeps its sessions on this machine and runs only the app remotely.
       </SettingsHint>
     </>
   );

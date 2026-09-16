@@ -360,6 +360,9 @@ export interface SandboxStatusInfo {
     /** Per-repo overrides (repo id → provider id or "none"); absent on a
      *  pre-upgrade server. */
     repos?: Record<string, string>;
+    /** Repos whose Portals run in a Sandbox of their own for sessions on
+     *  this machine (repo id → provider id); absent on a pre-upgrade server. */
+    portals?: Record<string, string>;
   };
   connections?: SandboxConnectionInfo[];
   operations?: SandboxOperationInfo[];
@@ -439,10 +442,12 @@ export async function fetchSandboxStatus(
 }
 
 export async function saveSandboxDefault(input: {
-  scope: "workspace" | "personal" | "repo";
+  /** "repo-portals" sets where a repo's Portals run for sessions on this
+   *  machine ("none" = beside the session). */
+  scope: "workspace" | "personal" | "repo" | "repo-portals";
   value: string;
   user: string;
-  /** Required for scope "repo". */
+  /** Required for scope "repo" and "repo-portals". */
   repo?: string;
 }): Promise<{ defaults: NonNullable<SandboxStatusInfo["defaults"]> }> {
   return request("/sandbox/defaults", { method: "PUT", body: input });

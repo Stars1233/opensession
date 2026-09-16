@@ -22,7 +22,8 @@ import {
   cachedSandboxPortalService,
 } from "./sandbox-portals";
 import { findSessionAsync } from "./session-cache";
-import { activeSandboxFor, restoreSandboxPortals } from "./session-sandbox";
+import { restoreSandboxPortals } from "./session-sandbox";
+import { sandboxForPortals } from "./portal-sandbox";
 
 type RecoveryOptions = {
   /** Resume a sleeping Sandbox. Only a person's navigation asks for this;
@@ -139,10 +140,16 @@ async function recoverSandboxPortalRouteInner(
   );
   if (!sessionId) return false;
   const session = await findSessionAsync(sessionId);
-  if (!session?.sandbox || session.sandbox.sandboxId !== allocation.sandboxId)
+  // The route belongs to the session's workspace Sandbox or, for a session
+  // on this machine, to the Portal Sandbox that runs its dev server.
+  if (
+    !session ||
+    (session.sandbox?.sandboxId !== allocation.sandboxId &&
+      session.portalSandbox?.sandboxId !== allocation.sandboxId)
+  )
     return false;
-  const sandbox = await activeSandboxFor(session, { wake });
-  if (!sandbox) return false;
+  const sandbox = await sandboxForPortals(session, { wake });
+  if (!sandbox || sandbox.id !== allocation.sandboxId) return false;
   // A missing relay can also mean the provider restarted the Sandbox on its
   // own (an idle stop), which took every Portal process with it while the
   // session's lifecycle never saw a wake. Relaunch the dead ones now, before
