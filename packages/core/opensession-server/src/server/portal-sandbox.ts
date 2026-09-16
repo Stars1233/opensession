@@ -128,12 +128,12 @@ export async function sandboxForPortals(
       // checkpoint first, or they would come back public on the older tree
       // even though the start itself then fails.
       beforeRestore: async (woken) => {
-        await syncPortalSandbox(session, woken);
+        await landForWake(session, woken);
         synced = true;
       },
     });
     if (sandbox) {
-      if (options.wake && !synced) await syncPortalSandbox(session, sandbox);
+      if (options.wake && !synced) await landForWake(session, sandbox);
       return sandbox;
     }
     if (
@@ -149,6 +149,20 @@ export async function sandboxForPortals(
   const provider = portalSandboxProvider(session);
   if (!provider) return null;
   return provisionPortalSandbox(session, provider);
+}
+
+/**
+ * The landing a wake requires. `skipped` means the session's record no
+ * longer names this machine (a move or a release took it away while the
+ * wake was under way): the machine is nobody's to start an app on, so
+ * that is the wake's failure too, not a Sandbox to hand back.
+ */
+async function landForWake(
+  session: UnifiedSession,
+  sandbox: Sandbox,
+): Promise<void> {
+  if ((await syncPortalSandbox(session, sandbox)) === "skipped")
+    throw new Error("the session no longer runs its Portals on this machine");
 }
 
 /**
@@ -234,7 +248,7 @@ async function provisionPortalSandbox(
         // start waiting on this machine never sees the older tree. A failure
         // here fails the start, with the machine kept and recorded: the next
         // wake retries the landing.
-        await syncPortalSandbox(owner, sandbox);
+        await landForWake(owner, sandbox);
       });
     } catch (error) {
       if (phase === "recorded") throw error;
