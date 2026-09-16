@@ -877,11 +877,13 @@ function AddRepoPicker({
     });
   }
 
-  async function createRepo(name: string) {
+  async function createRepo(name: string, owner: string | undefined) {
+    const label = owner ? `${owner}/${name}` : name;
     await registerRepo({
-      pending: { label: name, action: "create" },
-      json: { source: "new", name },
-      successMessage: `${name} created`,
+      pending: { label, action: "create" },
+      // An empty owner means "this server only".
+      json: { source: "new", name, owner: owner ?? "" },
+      successMessage: `${label} created`,
     });
   }
 

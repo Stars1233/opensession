@@ -18,6 +18,15 @@
  * permission cap. An installation an operator has capped at contents:read is
  * handled at mint time by falling back to the read set for contents, so
  * reviews and comments keep working while pushes fail loudly.
+ *
+ * administration:write is in the grant for exactly one call: creating a
+ * private repository in an organization from Settings → Repositories or the
+ * New session palette. Only the create mint below asks for it. The read,
+ * write and code sets never do, so those installation tokens cannot edit
+ * repository settings or rulesets. Connected-user tokens still inherit the
+ * App grant intersected with the person's access. An installation that has not yet
+ * approved the added permission keeps every other mint working: creation is
+ * the one thing that fails, with a message naming the approval.
  */
 
 /** The full set the App is granted at creation — the create-URL permission
@@ -27,6 +36,7 @@ export const GITHUB_APP_GRANT_PERMISSIONS: Record<string, string> = {
   checks: "read", // CI check runs
   statuses: "read", // commit statuses, the other half of the status rollup
   contents: "write", // clone; pushes only while git transport rides App tokens
+  administration: "write", // create private repositories; create mint only
   pull_requests: "write", // reviews, comments, open/merge
   issues: "write", // issue and PR comments
   members: "read", // team roster / attribution
@@ -76,6 +86,16 @@ export const GITHUB_APP_CODE_PERMISSIONS: Record<string, string> = {
   actions: "read",
   checks: "read",
   statuses: "read",
+};
+
+/** The mint behind "New repository" on GitHub: create one private repository
+ *  in an organization, then confirm its first commit exists before cloning.
+ *  Minted for that request and dropped; never cached, never handed to a run.
+ *  This is the only set that carries `administration`. */
+export const GITHUB_APP_REPO_CREATE_PERMISSIONS: Record<string, string> = {
+  administration: "write",
+  contents: "read",
+  metadata: "read",
 };
 
 /** The same set with `contents` narrowed to read: the fallback a mint

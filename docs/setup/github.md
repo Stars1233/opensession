@@ -58,6 +58,7 @@ canonical permission set used when tokens are minted:
 | Scope                  | Access         | Why                                     |
 | ---------------------- | -------------- | --------------------------------------- |
 | Actions                | Read           | failing workflow logs for trusted fixes |
+| Administration         | Read and write | create private repositories (see below) |
 | Checks                 | Read           | check runs                              |
 | Commit statuses        | Read           | status rollups                          |
 | Contents               | Read and write | clone and push                          |
@@ -66,6 +67,29 @@ canonical permission set used when tokens are minted:
 | Metadata               | Read           | GitHub baseline                         |
 | Pull requests          | Read and write | reviews, PRs, merges                    |
 | Members (organization) | Read           | roster and attribution                  |
+
+**Administration** is minted for exactly one call: creating a private
+repository in an organization from Settings → Repositories → Add repository →
+New, or from "New repository" in the New session palette. That token lives
+only in the request and is never cached or handed to a run. The server
+revokes it before cloning (best-effort, with GitHub expiry as the fallback). The read, write and
+code installation-token sets never include it, so those tokens cannot edit
+repository settings or rulesets. Connected-user tokens are not narrowed by
+these mint sets: they inherit the App grant intersected with the person's
+access, including Administration for repository administrators. Interactive
+code runs using those tokens gain that authority too; see
+[GitHub authority](../github-authority.md).
+
+For an existing App, its owner must first set **Repository permissions →
+Administration → Read and write** in the App's GitHub settings, then each
+installation owner must approve the updated permissions. Changing Open
+Session's grant definition does not update an existing App on GitHub.
+An installation that has not yet approved the added permission keeps working
+for everything else; only creation fails, with
+a message naming the approval page. GitHub lets an installation create
+repositories only in an organization, so a personal account is not offered as
+a location; the repository is always private and there is no visibility
+toggle.
 
 Enable **Device Flow**, generate a client secret and private key, then install
 the App only on the accounts and repositories Open Session should reach. One
@@ -242,8 +266,8 @@ Keep public PR creation restricted until every item below is complete:
    write-capable command.
 3. In GitHub repository settings, have a human repository administrator change
    the pull-request creation policy from **Collaborators only** to **All**. The
-   GitHub App does not need Administration permission for normal operation, and
-   should not receive it just for this one-time setting.
+   ordinary App installation tokens exclude Administration. This one-time
+   setting stays a human's job on github.com.
 4. In **Settings → Actions → General**, keep workflows from fork PRs disabled or
    require maintainer approval before they run. This is separate from Open
    Session review and complements the same-repository job gates in the shipped
@@ -254,9 +278,9 @@ Keep public PR creation restricted until every item below is complete:
    path, contains no private session URL, and leaves autofix, commands, pushes,
    handoffs and GitHub Actions unavailable.
 
-Changing the PR creation policy is the only step above that requires repository
-Administration authority. Runtime checkout, review and result posting continue
-to use the narrower App permissions documented in this guide.
+Changing the PR creation policy is the only step above that requires a human
+with repository Administration authority. Runtime checkout, review and result
+posting continue to use the narrower token sets documented in this guide.
 
 **Multi-repo**: the App webhook covers every repository on which the App is
 installed. A repo joins the PR agent when it is also in the config registry

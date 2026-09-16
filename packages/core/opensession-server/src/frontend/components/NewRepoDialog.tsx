@@ -8,8 +8,9 @@ import { NewRepoForm } from "./NewRepoForm";
 /**
  * "New repository" from the New session palette's Project picker: the same
  * form Settings offers, in a dialog of its own so the palette can hand the
- * new repo straight back to the picker. Creation is a few git commands on
- * the server, so unlike a clone it finishes while the dialog is still up.
+ * new repo straight back to the picker. A server-only create is a few git
+ * commands; a GitHub one is a create call and a clone of a one-commit
+ * repository. Both finish while the dialog is still up.
  */
 export function NewRepoDialog({
   open,
@@ -28,13 +29,13 @@ export function NewRepoDialog({
     if (open) setError(null);
   }, [open]);
 
-  async function create(name: string) {
+  async function create(name: string, owner: string | undefined) {
     if (busy) return;
     setBusy(true);
     setError(null);
     // A promise chain rather than try/finally: the React Compiler skips a
     // component whose function carries a `finally` clause.
-    await createRepoApi({ name })
+    await createRepoApi({ name, owner })
       .then((repo) => {
         onOpenChange(false);
         onCreated(repo);
