@@ -379,6 +379,7 @@ type PortalOps = {
   writeRegistry: (records: PortalRecord[]) => Promise<void>;
   probePort: (port: number) => Promise<boolean>;
   pidAlive: (pid?: number) => Promise<boolean>;
+  groupAlive: (pid: number) => Promise<boolean>;
   signalGroup: (pid: number, signal: "SIGTERM" | "SIGKILL") => Promise<void>;
   scopeAlive?: (unit: string) => Promise<boolean>;
   stopScope?: (unit: string) => Promise<void>;
@@ -400,6 +401,14 @@ function hostPortalOps(worktreeDir: string): PortalOps {
     },
     probePort: portListening,
     pidAlive,
+    groupAlive: async (pid) => {
+      try {
+        process.kill(-pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     scopeAlive: userScopeActive,
     stopScope: stopUserScopeAndWait,
     // Signal the whole setsid group even if its original leader has already
@@ -525,11 +534,12 @@ async function listPortals(ops: PortalOps): Promise<PortalRecord[]> {
   let changed = false;
   const checked = await Promise.all(
     records.map(async (record) => {
-      if (
-        record.state === "stopped" ||
-        record.state === "failed" ||
-        record.state === "sleeping"
-      )
+      if (record.state === "stopped" || record.state === "sleeping")
+        return record;
+      // A remote probe can fail transiently while the same app still runs.
+      // Recheck failed records only while their original owner is alive;
+      // never adopt an unrelated listener after that process has exited.
+      if (record.state === "failed" && !(await portalProcessAlive(ops, record)))
         return record;
       const listening = await ops.probePort(record.port);
       const alive = await portalProcessAlive(ops, record);
@@ -547,7 +557,10 @@ async function listPortals(ops: PortalOps): Promise<PortalRecord[]> {
         record.state === "starting" && startedMs > MAX_PORTAL_READY_MS;
       const state: PortalState = listening
         ? "awake"
-        : alive && record.state !== "awake" && !stuckStarting
+        : alive &&
+            record.state !== "awake" &&
+            record.state !== "failed" &&
+            !stuckStarting
           ? "starting"
           : "failed";
       if (state === record.state) return record;
@@ -555,9 +568,10 @@ async function listPortals(ops: PortalOps): Promise<PortalRecord[]> {
       return {
         ...record,
         state,
-        ...(state === "failed"
-          ? { lastError: "The service is no longer listening." }
-          : {}),
+        lastError:
+          state === "failed"
+            ? "The service is no longer listening."
+            : undefined,
       };
     }),
   );
@@ -709,12 +723,14 @@ async function terminatePortalProcess(
   ops: PortalOps,
   processRef: PortalProcess,
 ): Promise<void> {
-  if (processRef.scopeUnit && ops.stopScope) {
+  if (processRef.scopeUnit && ops.stopScope)
     await ops.stopScope(processRef.scopeUnit);
-    if (!(await portalProcessAlive(ops, processRef))) return;
-  }
   const pid = processRef.pid;
-  if (!pid || pid < 2 || !(await ops.pidAlive(pid))) return;
+  if (!pid || pid < 2) return;
+  // Readiness follows the leader, but shutdown must follow its whole group:
+  // a wrapper can exit while compiler watchers still hold workspace locks.
+  const alive = async () => (await ops.groupAlive(pid)) || ops.pidAlive(pid);
+  if (!(await alive())) return;
   await ops.signalGroup(pid, "SIGTERM");
   const grace = Math.min(
     30_000,
@@ -723,7 +739,7 @@ async function terminatePortalProcess(
   const deadline = Date.now() + grace;
   do {
     await Bun.sleep(Math.min(250, Math.max(0, deadline - Date.now())));
-    if (!(await ops.pidAlive(pid))) return;
+    if (!(await alive())) return;
   } while (Date.now() < deadline);
   await ops.signalGroup(pid, "SIGKILL");
 }
@@ -1702,6 +1718,9 @@ function sandboxPortalOps(sandbox: Sandbox, sessionId?: string): PortalOps {
       if (!pid || pid < 2) return false;
       return (await sandbox.exec(["kill", "-0", String(pid)])).exitCode === 0;
     },
+    groupAlive: async (pid) =>
+      (await sandbox.exec(["bash", "-c", `kill -0 -- -${pid} 2>/dev/null`]))
+        .exitCode === 0,
     signalGroup: async (pid, signal) => {
       const flag = signal === "SIGKILL" ? "-KILL" : "-TERM";
       await sandbox.exec([
