@@ -187,7 +187,7 @@ where your disk goes:
 [docs/worktrees.md](docs/worktrees.md).
 
 **Sandboxes** are optional per-session machines used instead of the host: a
-Daytona or Box VM with the repository checked out and a durable disk that
+Daytona or Boat VM with the repository checked out and a durable disk that
 sleeps between turns, wakes with files and Portals intact, and has a desktop
 the agent can drive and you can watch in a Desktop tab:
 [docs/self-hosting-sandboxes.md](docs/self-hosting-sandboxes.md).

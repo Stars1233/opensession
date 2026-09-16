@@ -51,9 +51,9 @@ const PROVIDERS: Array<{
   },
   {
     id: "box",
-    label: "Box",
+    label: "Boat",
     description:
-      "Persistent Linux VMs in your Box account with fast snapshot restores and private Portals.",
+      "Persistent Linux VMs in your Boat account with fast snapshot restores and private Portals.",
   },
 ];
 
@@ -276,14 +276,14 @@ function ConnectDialog({
           title={`${exists ? "Configure" : "Connect"} ${provider.label}`}
           description={
             connection.provider === "box"
-              ? "Credentials stay on this server. Open Session tests ingress, creates a disposable Box, verifies archive/resume and snapshot restore, then archives it."
+              ? "Credentials stay on this server. Open Session tests ingress, creates a disposable Boat sandbox, verifies archive/resume and snapshot restore, then archives it."
               : "Credentials stay on this server. Open Session tests ingress, creates a disposable sandbox, restores a snapshot, and cleans up."
           }
         />
 
         <Field
           label={
-            connection.provider === "box" ? "Box API key" : "Daytona API key"
+            connection.provider === "box" ? "Boat API key" : "Daytona API key"
           }
         >
           <Input
@@ -293,7 +293,7 @@ function ConnectDialog({
             placeholder={
               connection.hasCredentials
                 ? "Leave blank to keep current key"
-                : `Enter ${connection.provider === "box" ? "box_…" : "API key"}`
+                : `Enter ${connection.provider === "box" ? "boat_…" : "API key"}`
             }
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
@@ -737,7 +737,7 @@ function ProjectEnvironmentDialog({
           {provider === "daytona" &&
             "Daytona supports custom resource combinations, but these documented sizes avoid invalid or undersized setups."}
           {provider === "box" &&
-            "Box exposes three fixed machine types. Stop and resume retain the disk, and new sandboxes restore from this project's named snapshot."}
+            "Boat exposes three fixed machine types. Stop and resume retain the disk, and new sandboxes restore from this project's named snapshot."}
         </div>
 
         <Modal.Footer>

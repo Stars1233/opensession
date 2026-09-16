@@ -754,7 +754,7 @@ export async function handleSandboxRoutes(
   if (isRetiredSandboxProvider(recorded.provider))
     return Response.json(
       {
-        error: `The ${recorded.provider} Sandbox provider has been retired; start a new session on Daytona or Box.`,
+        error: `The ${recorded.provider} Sandbox provider has been retired; start a new session on Daytona or Boat.`,
       },
       { status: 410 },
     );

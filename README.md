@@ -131,7 +131,7 @@ requires Bun and git.
 - [docs/security-model.md](docs/security-model.md) — least-privilege
   automations, per-user MCP/GitHub scoping, self-management boundaries
 - [docs/self-hosting-sandboxes.md](docs/self-hosting-sandboxes.md) — per-session
-  Sandboxes on Daytona or Box: sleep/wake, project snapshots, Portals
+  Sandboxes on Daytona or Boat: sleep/wake, project snapshots, Portals
 - [docs/instance-configuration.md](docs/instance-configuration.md) — repos,
   identity, branding, integrations, deployment policy
 

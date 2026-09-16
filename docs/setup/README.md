@@ -96,7 +96,7 @@ separate app listener on 3850 serves the private UI and API.
   installer can add it with `--tailscale`; on macOS install the Tailscale app.
   The default install binds loopback, and joining a tailnet is a separate step
   that needs your account or an auth key.
-- Optional: a **Daytona or Box account** (Sandbox sessions —
+- Optional: a **Daytona or Boat account** (Sandbox sessions —
   [self-hosting-sandboxes](../self-hosting-sandboxes.md)), **Caddy** (direct
   HTTPS for public callbacks and TLS for live previews), **cloudflared**
   (custom-domain public callbacks, or an externally configured Access-protected
@@ -178,7 +178,7 @@ that touches them.
 | [integrations-misc.md](integrations-misc.md)                 | Stripe, WorkOS, Grafana/Sentry/Tinybird, web push, voice                                           |
 | [apple-mobile.md](apple-mobile.md)                           | SwiftPM/xtool development builds and user-restricted Xcode release tools                           |
 | [engines.md](engines.md)                                     | the Pi engine, account pools, provider keys, run isolation                                         |
-| [../self-hosting-sandboxes.md](../self-hosting-sandboxes.md) | per-session Sandboxes on Daytona or Box: sleep/wake, project snapshots, Portals                    |
+| [../self-hosting-sandboxes.md](../self-hosting-sandboxes.md) | per-session Sandboxes on Daytona or Boat: sleep/wake, project snapshots, Portals                   |
 | [../runners.md](../runners.md)                               | attaching a Mac/Linux/Windows box as a Runner                                                      |
 | [../worktrees.md](../worktrees.md)                           | how sessions map to git worktrees, and where the disk goes                                         |
 | [../../CLIENTS.md](../../CLIENTS.md)                         | web UI, PWA, Electron shell, Swift app, Chrome extension                                           |

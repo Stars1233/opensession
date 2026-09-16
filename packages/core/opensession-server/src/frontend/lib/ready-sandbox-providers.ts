@@ -27,7 +27,7 @@ export function readySandboxProviders(
 
 const PROVIDER_LABELS = new Map([
   ["daytona", "Daytona"],
-  ["box", "Box"],
+  ["box", "Boat"],
 ]);
 
 export function sandboxProviderLabel(id: string): string {

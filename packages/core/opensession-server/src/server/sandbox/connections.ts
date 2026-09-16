@@ -286,7 +286,7 @@ export function connectSandboxProvider(
   }
   if (!credentialRef) {
     throw new Error(
-      `${provider === "box" ? "Box" : "Daytona"} API key is required`,
+      `${provider === "box" ? "Boat" : "Daytona"} API key is required`,
     );
   }
   const now = new Date().toISOString();

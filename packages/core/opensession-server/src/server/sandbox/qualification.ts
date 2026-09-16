@@ -51,7 +51,7 @@ function safeFailureDetail(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message
     .replace(/([?&]_token=)[^&\s)]+/gi, "$1[redacted]")
-    .replace(/\bbox_[A-Za-z0-9_-]+\b/g, "Box")
+    .replace(/\b(?:boat|box)_[A-Za-z0-9_-]+\b/g, "Boat")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 400);

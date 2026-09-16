@@ -49,7 +49,7 @@ struct SandboxMoveMenuItems: View {
 /// the same thing about the same move.
 enum SandboxMoveCopy {
     static let checking = "Checking Sandboxes…"
-    static let noneReady = "No Sandbox is ready. Connect Daytona or Box in Settings > Sandboxes."
+    static let noneReady = "No Sandbox is ready. Connect Daytona or Boat in Settings > Sandboxes."
     static let waitForAgent = "Available once the agent finishes."
     static let explanation =
         "The Sandbox starts now, clones this branch from origin, and takes over on the next message. Portals on this machine stop."

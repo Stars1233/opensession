@@ -145,7 +145,7 @@ export const SETTINGS_KEYWORDS = {
   ],
   runners: ["run hosts", "machines", "workers", "capacity", "detached runs"],
   library: ["templates", "prompts", "skills", "starters", "commands"],
-  sandboxes: ["daytona", "box", "ascii", "isolation", "compute"],
+  sandboxes: ["daytona", "boat", "box", "isolation", "compute"],
   integrations: [
     "tools",
     "webhooks",

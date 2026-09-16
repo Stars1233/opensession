@@ -53,6 +53,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
 
 const { getSandboxProvider } =
   await import("../../packages/core/opensession-server/src/server/sandbox/index");
+const { boxApiBaseUrl } =
+  await import("../../packages/core/opensession-server/src/server/sandbox/adapters/box");
 const runWs =
   await import("../../packages/core/opensession-server/src/server/run-ws");
 const { hostRunBusy } =
@@ -150,8 +152,9 @@ const daytonaKey: string =
   "";
 const boxKey: string =
   liveWorkspaceSecret(liveConnection("box")?.credentialRef) || "";
-const boxApiUrl: string =
-  liveConnection("box")?.settings?.apiUrl || "https://ascii.dev/api/box/v1";
+const boxApiUrl: string = boxApiBaseUrl(
+  liveConnection("box")?.settings?.apiUrl,
+);
 
 // ── account pool gate (real model runs) ───────────────────────────────────────
 
@@ -415,7 +418,9 @@ const entries: Entry[] = [
   {
     name: "box",
     providerId: "box",
-    skip: boxKey ? null : "SKIPPED: connect Box in Workspace → Sandboxes first",
+    skip: boxKey
+      ? null
+      : "SKIPPED: connect Boat in Workspace → Sandboxes first",
     config: {
       provider: "box",
       callbackBaseUrl: remoteBase,
@@ -1088,11 +1093,11 @@ async function auditBoxLeftovers(): Promise<void> {
     // boxes with their session id, so suite leftovers are exactly the ones
     // named sbxtest-*. Archived boxes release compute and are expected to stay
     // visible in the Box account; only a still-active test box is a leak.
-    const res = await fetch(`${boxApiUrl}/boxes?limit=100`, {
+    const res = await fetch(`${boxApiUrl}/sandboxes?limit=100`, {
       headers: { Authorization: `Bearer ${boxKey}` },
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok) throw new Error(`list boxes: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`list sandboxes: HTTP ${res.status}`);
     const listActive = (
       boxes: Array<{ id: string; name?: string; state?: string }>,
     ) =>
@@ -1101,7 +1106,7 @@ async function auditBoxLeftovers(): Promise<void> {
           String(box.name || "").startsWith("sbxtest-") &&
           String(box.state || "") !== "archived",
       );
-    let leftovers = listActive(((await res.json()) as any).boxes);
+    let leftovers = listActive(((await res.json()) as any).sandboxes);
     if (leftovers.length) {
       // Archival is asynchronous and routinely takes 30-90s for a prepared
       // repo disk. Poll the provider state instead of misreporting a leak
@@ -1109,12 +1114,12 @@ async function auditBoxLeftovers(): Promise<void> {
       const deadline = Date.now() + 90_000;
       while (leftovers.length && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 5_000));
-        const again = await fetch(`${boxApiUrl}/boxes?limit=100`, {
+        const again = await fetch(`${boxApiUrl}/sandboxes?limit=100`, {
           headers: { Authorization: `Bearer ${boxKey}` },
           signal: AbortSignal.timeout(30_000),
         });
         if (again.ok)
-          leftovers = listActive(((await again.json()) as any).boxes);
+          leftovers = listActive(((await again.json()) as any).sandboxes);
       }
     }
     ok(
@@ -1125,7 +1130,7 @@ async function auditBoxLeftovers(): Promise<void> {
     for (const { id } of leftovers) {
       console.warn(`  archiving leftover box ${id}`);
       try {
-        await fetch(`${boxApiUrl}/boxes/${id}/stop`, {
+        await fetch(`${boxApiUrl}/sandboxes/${id}/stop`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${boxKey}`,

@@ -36,7 +36,7 @@ describe("readySandboxProviders", () => {
 
 describe("sandboxProviderLabel", () => {
   test("names the known providers and passes unknown ids through", () => {
-    expect(sandboxProviderLabel("box")).toBe("Box");
+    expect(sandboxProviderLabel("box")).toBe("Boat");
     expect(sandboxProviderLabel("daytona")).toBe("Daytona");
     expect(sandboxProviderLabel("orb")).toBe("orb");
   });

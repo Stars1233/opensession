@@ -20,7 +20,7 @@ type Scope = "workspace" | "personal";
 function providerLabel(id: string): string {
   if (id === "none") return "This machine";
   if (id === "daytona") return "Sandbox · Daytona";
-  if (id === "box") return "Sandbox · Box";
+  if (id === "box") return "Sandbox · Boat";
   return id;
 }
 

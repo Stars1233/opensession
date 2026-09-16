@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  boxApiBaseUrl,
   boxDesktopUrl,
+  BOX_PREVIEW_URL_PATTERN,
   BOX_RUNTIME_HOME_COMMAND,
   BOX_RUNTIME_HOME_LAZY_MARKER,
   boxCommandPlaneUnavailable,
@@ -13,6 +15,35 @@ import {
   boxSnapshotSaveIsRecoverable,
   parseBoxSshEndpoint,
 } from "./box";
+
+describe("Box API base", () => {
+  test("defaults to the Boat API", () => {
+    expect(boxApiBaseUrl()).toBe("https://boat.dev/api/v1");
+    expect(boxApiBaseUrl("")).toBe("https://boat.dev/api/v1");
+    expect(boxApiBaseUrl("https://boat.dev/api/v1/")).toBe(
+      "https://boat.dev/api/v1",
+    );
+  });
+
+  test("maps the retired ascii.dev base, which lacks /sandboxes, to boat.dev", () => {
+    expect(boxApiBaseUrl("https://ascii.dev/api/box/v1")).toBe(
+      "https://boat.dev/api/v1",
+    );
+    expect(boxApiBaseUrl("https://boat.dev/api/box/v1/")).toBe(
+      "https://boat.dev/api/v1",
+    );
+    expect(boxApiBaseUrl("https://ascii.dev/api/v1")).toBe(
+      "https://boat.dev/api/v1",
+    );
+  });
+
+  test("leaves other bases alone", () => {
+    expect(boxApiBaseUrl("https://boat.example.test/api/v1/")).toBe(
+      "https://boat.example.test/api/v1",
+    );
+    expect(boxApiBaseUrl("not a url")).toBe("not a url");
+  });
+});
 
 describe("Box machine profiles", () => {
   test("maps the three provider-supported resource combinations", () => {
@@ -31,7 +62,7 @@ describe("Box machine profiles", () => {
     expect(boxMachineType()).toBe("default");
     expect(() =>
       boxMachineType({ cpu: 4, memoryMb: 4_096, diskGb: 80 }),
-    ).toThrow("Choose one of Box's Small, Default, or Large machine sizes");
+    ).toThrow("Choose one of Boat's Small, Default, or Large machine sizes");
   });
 });
 
@@ -144,10 +175,19 @@ describe("Box command readiness", () => {
       boxCommandPlaneUnavailable({ status: 409, code: "machine_not_running" }),
     ).toBe(true);
     expect(
+      boxCommandPlaneUnavailable({ status: 409, code: "boat_starting" }),
+    ).toBe(true);
+    expect(
+      boxCommandPlaneUnavailable({ status: 409, code: "boat_restoring" }),
+    ).toBe(true);
+    expect(
       boxCommandPlaneUnavailable({ status: 409, code: "box_starting" }),
     ).toBe(true);
     expect(
-      boxCommandPlaneUnavailable({ status: 502, code: "box_direct_failed" }),
+      boxCommandPlaneUnavailable({ status: 502, code: "boat_direct_failed" }),
+    ).toBe(false);
+    expect(
+      boxCommandPlaneUnavailable({ status: 400, code: "machine_not_running" }),
     ).toBe(false);
     expect(boxCommandPlaneUnavailable({ status: 409, code: "other" })).toBe(
       false,
@@ -155,14 +195,32 @@ describe("Box command readiness", () => {
   });
 });
 
+describe("Box preview routes", () => {
+  test("reads the URL the in-sandbox host CLI prints on either domain", () => {
+    expect(
+      "registered https://swift-otter-9021-3000.on.boat.dev?_token=abc\n".match(
+        BOX_PREVIEW_URL_PATTERN,
+      )?.[0],
+    ).toBe("https://swift-otter-9021-3000.on.boat.dev?_token=abc");
+    expect(
+      "https://swift-otter-9021-3000.on.ascii.dev?_token=abc".match(
+        BOX_PREVIEW_URL_PATTERN,
+      )?.[0],
+    ).toBe("https://swift-otter-9021-3000.on.ascii.dev?_token=abc");
+    expect(
+      BOX_PREVIEW_URL_PATTERN.test("https://example.com/on.boat.dev"),
+    ).toBe(false);
+  });
+});
+
 describe("Box desktop", () => {
-  test("returns the tokenized stream page Box mints", () => {
+  test("returns the tokenized stream page Boat mints", () => {
     expect(
       boxDesktopUrl({
         desktopUrl:
-          "https://name-desktop.on.ascii.dev/stream.html?fps=60#token=abc",
+          "https://name-desktop.on.boat.dev/stream.html?fps=60#token=abc",
       }),
-    ).toBe("https://name-desktop.on.ascii.dev/stream.html?fps=60#token=abc");
+    ).toBe("https://name-desktop.on.boat.dev/stream.html?fps=60#token=abc");
   });
 
   test("refuses a missing or non-https desktop URL", () => {

@@ -42,7 +42,7 @@ async function qualifyRemoteThroughServer(
   } catch {
     fail(
       "Open Session is not reachable on its local port",
-      "start the service before testing Daytona or Box",
+      "start the service before testing Daytona or Boat",
     );
     return 1;
   }

@@ -1,20 +1,23 @@
 /**
- * BoxProvider — remote sandbox adapter over the ascii.dev Box API
- * (https://docs.ascii.dev/box/api/v1). Boxes are persistent Ubuntu VMs with
+ * BoxProvider — remote sandbox adapter over the Boat API
+ * (https://docs.boat.dev/api/v1). Boat is the product formerly called Box at
+ * ascii.dev; the provider id stays `box` so stored connections, session state
+ * and repo templates keep working. Sandboxes are persistent Ubuntu VMs with
  * small/default/large machine profiles, Docker inside,
  * per-second billing, EU) with archive/resume snapshots — archival is
  * recoverable, so the idle contract is gentler than E2B's kill-on-countdown.
  *
  * No SDK dependency: the public API is plain JSON, and a small typed fetch
  * client keeps provider failures and request ids visible. Endpoints (base
- * https://ascii.dev/api/box/v1, Bearer `box_…` key):
- *   POST /boxes {ttlSeconds,noEnv}    create (returns provisioning; poll GET)
- *   GET  /boxes, GET /boxes/{id}      list (cursor-paginated) / get
- *   PATCH /boxes/{id} {name,ttlSeconds}  rename + reset the auto-stop timer
- *   POST /boxes/{id}/commands         sync/detached shell exec (600s sync cap)
- *   GET  /boxes/{id}/commands/{pid}   detached process status + log tails
- *   PUT  /boxes/{id}/files            write file (base64)
- *   POST /boxes/{id}/stop|resume      persistent pause/resume
+ * https://boat.dev/api/v1, Bearer `boat_…` key; legacy `box_…` keys still
+ * authenticate, and boxApiBaseUrl maps the retired ascii.dev base):
+ *   POST /sandboxes {ttlSeconds,noEnv}    create (returns provisioning; poll GET)
+ *   GET  /sandboxes, GET /sandboxes/{id}      list (cursor-paginated) / get
+ *   PATCH /sandboxes/{id} {name,ttlSeconds}  rename + reset the auto-stop timer
+ *   POST /sandboxes/{id}/commands         sync/detached shell exec (600s sync cap)
+ *   GET  /sandboxes/{id}/commands/{pid}   detached process status + log tails
+ *   PUT  /sandboxes/{id}/files            write file (base64)
+ *   POST /sandboxes/{id}/stop|resume      persistent pause/resume
  *   POST /named-snapshots             reusable repo templates
  *
  * Shape (shared machinery in ./bootstrap.ts):
@@ -29,7 +32,7 @@
  *  - exec(): uses the 600-second synchronous command surface and Box's native
  *    detached-process API for longer calls. execBackground() is native too.
  *  - ports(): the in-box `host <port>` CLI registers a public HTTPS route
- *    (https://<subdomain>-<port>.on.ascii.dev, `_token`-protected by default)
+ *    (https://<subdomain>-<port>.on.boat.dev, `_token`-protected by default)
  *    and prints the URL — parsed into PortMap `{url}` entries.
  *  - prewarm/templates: opt-in project setup is sealed into a named snapshot;
  *    new sessions restore it in seconds and warm-on-typing boxes are adopted.
@@ -91,7 +94,32 @@ import {
   writeRemoteRepoTemplate,
 } from "../remote-repo-template";
 
-const DEFAULT_API_URL = "https://ascii.dev/api/box/v1";
+const DEFAULT_API_URL = "https://boat.dev/api/v1";
+
+/** The Box API moved from https://ascii.dev/api/box/v1 to Boat's
+ *  https://boat.dev/api/v1, where `/sandboxes` replaced `/boxes`. The retired
+ *  base still answers, but only for the old paths, so a stored legacy base is
+ *  mapped to the new one instead of 404ing every call. */
+export function boxApiBaseUrl(configured?: string | null): string {
+  const value = (configured || "").trim().replace(/\/+$/, "");
+  if (!value) return DEFAULT_API_URL;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (url.hostname === "ascii.dev") url.hostname = "boat.dev";
+  if (url.hostname === "boat.dev" && url.pathname === "/api/box/v1") {
+    url.pathname = "/api/v1";
+  }
+  return url.toString().replace(/\/+$/, "");
+}
+
+/** Public routes the in-sandbox `host` CLI prints. Machine images built
+ *  before the rename still print the ascii.dev domain. */
+export const BOX_PREVIEW_URL_PATTERN =
+  /https:\/\/[^\s"']+\.on\.(?:boat|ascii)\.dev[^\s"']*/;
 const DEFAULT_IDLE_STOP_MINUTES = 30;
 const POLL_INTERVAL_MS = 2_500;
 const COMMAND_TAIL_BYTES = 524_288;
@@ -101,7 +129,7 @@ const TEMPLATE_WAIT_MS = 15 * 60_000;
  *  "agent busy" state — still a live VM. */
 const LIVE_STATES = new Set(["ready", "idle", "running"]);
 
-/** `POST /boxes/{id}/desktop` answers with a tokenized 60fps stream page.
+/** `POST /sandboxes/{id}/desktop` answers with a tokenized 60fps stream page.
  * The token rides in the URL fragment, so the URL itself is the secret. */
 export function boxDesktopUrl(response: { desktopUrl?: unknown }): string {
   const url =
@@ -142,7 +170,7 @@ interface BoxCommandStatusResponse extends BoxCommandResponse {
 }
 
 interface BoxListPage {
-  boxes: BoxRecord[];
+  sandboxes: BoxRecord[];
   pageInfo?: { nextCursor: string | null; hasMore: boolean };
 }
 
@@ -161,7 +189,7 @@ function boxClientConfig(): BoxClientConfig {
   }
   return {
     apiKey,
-    apiUrl: (settings.apiUrl || DEFAULT_API_URL).replace(/\/+$/, ""),
+    apiUrl: boxApiBaseUrl(settings.apiUrl),
   };
 }
 
@@ -211,13 +239,23 @@ function isNotFound(e: unknown): boolean {
   return (e as { status?: number })?.status === 404;
 }
 
-/** A 409 here means Box has not accepted the command — retrying after a
+/** 409 codes that mean the command plane has not accepted the request yet:
+ *  `boat_starting` while provisioning, `boat_restoring` in the first seconds
+ *  of a resume, plus the pre-rename `box_starting` spelling. */
+const COMMAND_PLANE_UNAVAILABLE_CODES = new Set([
+  "machine_not_running",
+  "boat_starting",
+  "boat_restoring",
+  "box_starting",
+]);
+
+/** A 409 here means Boat has not accepted the command — retrying after a
  * resume is safe. It is distinct from a 502, where the command may have run. */
 export function boxCommandPlaneUnavailable(error: unknown): boolean {
   const detail = error as { status?: number; code?: string };
   return (
     detail?.status === 409 &&
-    (detail.code === "machine_not_running" || detail.code === "box_starting")
+    COMMAND_PLANE_UNAVAILABLE_CODES.has(String(detail.code || ""))
   );
 }
 
@@ -226,12 +264,12 @@ async function getBox(
   boxId: string,
 ): Promise<BoxRecord | null> {
   try {
-    const res = await boxApi<{ box?: BoxRecord } & BoxRecord>(
+    const res = await boxApi<{ sandbox?: BoxRecord } & BoxRecord>(
       cfg,
       "GET",
-      `/boxes/${boxId}`,
+      `/sandboxes/${boxId}`,
     );
-    return res.box || res;
+    return res.sandbox || res;
   } catch (e) {
     if (isNotFound(e)) return null;
     throw e;
@@ -279,7 +317,7 @@ export function boxMachineType(
   );
   if (!match) {
     throw Object.assign(
-      new Error("Choose one of Box's Small, Default, or Large machine sizes"),
+      new Error("Choose one of Boat's Small, Default, or Large machine sizes"),
       {
         code: "MACHINE_SETTINGS_INVALID",
       },
@@ -309,7 +347,7 @@ async function waitForLive(
     if (last === "archived" && !resumeRequested) {
       resumeRequested = true;
       try {
-        await boxApi(cfg, "POST", `/boxes/${boxId}/resume`, {
+        await boxApi(cfg, "POST", `/sandboxes/${boxId}/resume`, {
           noEnv: true,
           ttlSeconds: idleTtlSeconds(),
         });
@@ -584,7 +622,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
     boxApi<BoxCommandStartedResponse>(
       cfg,
       "POST",
-      `/boxes/${boxId}/commands`,
+      `/sandboxes/${boxId}/commands`,
       { command: shell, detached: true },
       60_000,
     );
@@ -598,7 +636,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
       await boxApi<BoxCommandResponse>(
         cfg,
         "POST",
-        `/boxes/${boxId}/commands`,
+        `/sandboxes/${boxId}/commands`,
         { command: BOX_RUNTIME_HOME_COMMAND, timeoutSeconds: 60 },
         90_000,
       ),
@@ -626,7 +664,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
         const probe = await boxApi<BoxCommandResponse>(
           cfg,
           "POST",
-          `/boxes/${boxId}/commands`,
+          `/sandboxes/${boxId}/commands`,
           { command: "true", timeoutSeconds: 15 },
           30_000,
         );
@@ -652,7 +690,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
             await boxApi(
               cfg,
               "POST",
-              `/boxes/${boxId}/resume`,
+              `/sandboxes/${boxId}/resume`,
               { noEnv: true },
               30_000,
             );
@@ -674,7 +712,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
     boxApi<BoxCommandResponse>(
       cfg,
       "POST",
-      `/boxes/${boxId}/commands`,
+      `/sandboxes/${boxId}/commands`,
       {
         command: shell,
         timeoutSeconds: Math.max(1, Math.min(600, Math.ceil(timeoutMs / 1000))),
@@ -712,7 +750,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
           last = await boxApi<BoxCommandStatusResponse>(
             cfg,
             "GET",
-            `/boxes/${boxId}/commands/${started.processId}?tailBytes=${COMMAND_TAIL_BYTES}`,
+            `/sandboxes/${boxId}/commands/${started.processId}?tailBytes=${COMMAND_TAIL_BYTES}`,
             undefined,
             30_000,
           );
@@ -821,7 +859,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
         boxApi(
           cfg,
           "PUT",
-          `/boxes/${boxId}/files`,
+          `/sandboxes/${boxId}/files`,
           { path: nativePath, content, encoding: "utf8" },
           60_000,
         ),
@@ -841,7 +879,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
       }
 
       // Box recommends a customer daemon/SSH lane for high-frequency control.
-      // Its per-command HTTP proxy can report box_direct_failed while the VM
+      // Its per-command HTTP proxy can report boat_direct_failed while the VM
       // and durable disk are healthy. Reuse the installed key and the current
       // IPv4 endpoint after coordinator restarts and archive/resume rotations.
       const existingSsh =
@@ -964,7 +1002,7 @@ async function installBoxSshTarget(
   const response = await boxApi<BoxSshKeyResponse>(
     cfg,
     "POST",
-    `/boxes/${box.id}/sshkey`,
+    `/sandboxes/${box.id}/sshkey`,
     { key: key.publicKey },
     60_000,
   );
@@ -1053,7 +1091,7 @@ export class BoxProvider implements SandboxProvider {
         try {
           const candidate = await getBox(cfg, claim.sandboxId);
           if (candidate && stateOf(candidate) !== "gone") {
-            await boxApi(cfg, "PATCH", `/boxes/${candidate.id}`, {
+            await boxApi(cfg, "PATCH", `/sandboxes/${candidate.id}`, {
               name: spec.sessionId,
               ttlSeconds: idleTtlSeconds(),
             });
@@ -1081,13 +1119,13 @@ export class BoxProvider implements SandboxProvider {
       const machineType = boxMachineType(
         sandboxEnvironmentSettings(repo.id, "box"),
       );
-      // noEnv: never inject the ascii account's dashboard secrets — every
+      // noEnv: never inject the Boat account's dashboard secrets — every
       // credential a run needs is uploaded scoped per launch (bootstrap.ts).
       const create = (from?: string) =>
-        boxApi<{ box: BoxRecord }>(
+        boxApi<{ sandbox: BoxRecord }>(
           cfg,
           "POST",
-          `/boxes`,
+          `/sandboxes`,
           {
             type: machineType,
             ttlSeconds: idleTtlSeconds(),
@@ -1096,7 +1134,7 @@ export class BoxProvider implements SandboxProvider {
           },
           60_000,
         );
-      let created: { box: BoxRecord };
+      let created: { sandbox: BoxRecord };
       try {
         created = await create(template?.artifactId);
       } catch (error) {
@@ -1107,14 +1145,14 @@ export class BoxProvider implements SandboxProvider {
         );
         created = await create();
       }
-      box = created.box;
+      box = created.sandbox;
       mark("box created");
       // The session name is the provider-side recovery index. The durable
       // local id written below is the hot path; the name remains useful for
       // operator recovery when local state is lost. A
       // rename failure is non-fatal — the local state file still maps it.
       try {
-        await boxApi(cfg, "PATCH", `/boxes/${box.id}`, {
+        await boxApi(cfg, "PATCH", `/sandboxes/${box.id}`, {
           name: spec.sessionId,
         });
       } catch (e) {
@@ -1127,7 +1165,7 @@ export class BoxProvider implements SandboxProvider {
       // Reused an existing box. Adoption already refreshed this countdown in
       // the rename request above, so avoid a duplicate provider round trip.
       try {
-        await boxApi(cfg, "PATCH", `/boxes/${box.id}`, {
+        await boxApi(cfg, "PATCH", `/sandboxes/${box.id}`, {
           ttlSeconds: idleTtlSeconds(),
         });
       } catch {}
@@ -1232,9 +1270,7 @@ export class BoxProvider implements SandboxProvider {
             const r = await driver.exec(`host ${port} --private`, {
               timeoutMs: 45_000,
             });
-            const m = `${r.stdout} ${r.stderr}`.match(
-              /https:\/\/[^\s"']+\.on\.ascii\.dev[^\s"']*/,
-            );
+            const m = `${r.stdout} ${r.stderr}`.match(BOX_PREVIEW_URL_PATTERN);
             if (m) map[port] = { url: m[0] };
             else {
               console.warn(
@@ -1259,7 +1295,7 @@ export class BoxProvider implements SandboxProvider {
         touchRemoteState(providerId, boxId);
         // Reset the archival countdown (their TTL is a hard deadline, not an
         // idle timer) — same keepalive shape as E2B's setTimeout extension.
-        void boxApi(cfg, "PATCH", `/boxes/${boxId}`, {
+        void boxApi(cfg, "PATCH", `/sandboxes/${boxId}`, {
           ttlSeconds: idleTtlSeconds(),
         }).catch((e) =>
           console.warn(`[sandbox:box] ttl refresh(${boxId}) failed:`, e),
@@ -1290,7 +1326,7 @@ export class BoxProvider implements SandboxProvider {
     const response = await boxApi<{ desktopUrl?: unknown }>(
       cfg,
       "POST",
-      `/boxes/${sandboxId}/desktop`,
+      `/sandboxes/${sandboxId}/desktop`,
       undefined,
       60_000,
     );
@@ -1315,7 +1351,7 @@ export class BoxProvider implements SandboxProvider {
     await boxApi(
       cfg,
       "POST",
-      `/boxes/${sandboxId}/stop`,
+      `/sandboxes/${sandboxId}/stop`,
       { force: false },
       60_000,
     );
@@ -1331,7 +1367,7 @@ export class BoxProvider implements SandboxProvider {
     const resumed = !LIVE_STATES.has(String(box.state || ""));
     if (resumed) {
       if (String(box.state || "") === "archived") {
-        await boxApi(cfg, "POST", `/boxes/${sandboxId}/resume`, {
+        await boxApi(cfg, "POST", `/sandboxes/${sandboxId}/resume`, {
           noEnv: true,
           ttlSeconds: idleTtlSeconds(),
         });
@@ -1507,7 +1543,13 @@ async function stopBox(
 ): Promise<void> {
   const box = await getBox(cfg, boxId);
   if (!box || String(box.state || "") === "archived") return;
-  await boxApi(cfg, "POST", `/boxes/${boxId}/stop`, { force: false }, 60_000);
+  await boxApi(
+    cfg,
+    "POST",
+    `/sandboxes/${boxId}/stop`,
+    { force: false },
+    60_000,
+  );
   await waitForState(cfg, boxId, new Set(["archived"]), timeoutMs);
 }
 
@@ -1524,7 +1566,7 @@ async function archiveAndForgetBox(
   // Keep the non-billing archived resource visible in Box, but remove session
   // and prewarm identity so it cannot be rediscovered or reaped repeatedly.
   try {
-    await boxApi(cfg, "PATCH", `/boxes/${boxId}`, {
+    await boxApi(cfg, "PATCH", `/sandboxes/${boxId}`, {
       name: `opensession-archived-${boxId}`,
     });
   } catch (error) {
@@ -1547,10 +1589,10 @@ export const boxPrewarmAdapter: PrewarmAdapter = {
     const template = await recoverBoxRepoTemplate(cfg, repoId);
     const type = boxMachineType(opts.resources);
     const create = (from?: string) =>
-      boxApi<{ box: BoxRecord }>(
+      boxApi<{ sandbox: BoxRecord }>(
         cfg,
         "POST",
-        "/boxes",
+        "/sandboxes",
         {
           type,
           noEnv: true,
@@ -1559,7 +1601,7 @@ export const boxPrewarmAdapter: PrewarmAdapter = {
         },
         60_000,
       );
-    let response: { box: BoxRecord };
+    let response: { sandbox: BoxRecord };
     let restoredFromTemplate = Boolean(template);
     try {
       response = await create(template?.artifactId);
@@ -1577,12 +1619,12 @@ export const boxPrewarmAdapter: PrewarmAdapter = {
         0,
         120,
       );
-    await boxApi(cfg, "PATCH", `/boxes/${response.box.id}`, { name });
-    await waitForLive(cfg, response.box.id, 300_000);
-    const driver = boxDriver(cfg, response.box.id);
+    await boxApi(cfg, "PATCH", `/sandboxes/${response.sandbox.id}`, { name });
+    await waitForLive(cfg, response.sandbox.id, 300_000);
+    const driver = boxDriver(cfg, response.sandbox.id);
     await driver.ensureStarted();
     return {
-      sandboxId: response.box.id,
+      sandboxId: response.sandbox.id,
       driver,
       restoredFromTemplate,
     };
@@ -1616,13 +1658,7 @@ export const boxPrewarmAdapter: PrewarmAdapter = {
       await deleteNamedSnapshot(cfg, name);
       await waitForNamedSnapshotGone(cfg, name);
     }
-    await boxApi(
-      cfg,
-      "POST",
-      "/named-snapshots",
-      { boxId: sandboxId, name },
-      60_000,
-    );
+    await boxApi(cfg, "POST", "/named-snapshots", { sandboxId, name }, 60_000);
     await waitForNamedSnapshot(cfg, name);
     await recordBoxRepoTemplate(cfg, repo.id, name);
     console.log(`[sandbox:box] published post-setup repo template ${name}`);
@@ -1642,7 +1678,7 @@ export const boxPrewarmAdapter: PrewarmAdapter = {
   },
 
   async keepAlive(sandboxId, opts) {
-    await boxApi(boxClientConfig(), "PATCH", `/boxes/${sandboxId}`, {
+    await boxApi(boxClientConfig(), "PATCH", `/sandboxes/${sandboxId}`, {
       ttlSeconds: Math.min(30 * 24 * 60 * 60, opts.autoStopMinutes * 60),
     });
   },
@@ -1656,9 +1692,9 @@ export const boxPrewarmAdapter: PrewarmAdapter = {
       const response: BoxListPage = await boxApi<BoxListPage>(
         cfg,
         "GET",
-        `/boxes?${query}`,
+        `/sandboxes?${query}`,
       );
-      for (const box of response.boxes || []) {
+      for (const box of response.sandboxes || []) {
         const prefix = "opensession-prewarm-";
         if (box.name?.startsWith(prefix)) {
           try {
@@ -1701,7 +1737,7 @@ export async function qualifyBoxConnection(
   progress: (stage: string, value: number) => void = () => undefined,
 ): Promise<void> {
   const cfg = boxClientConfig();
-  progress("Checking Box account", 25);
+  progress("Checking Boat account", 25);
   await boxApi(cfg, "GET", "/me");
   const limits = await boxApi<{
     canStart?: boolean;
@@ -1709,7 +1745,7 @@ export async function qualifyBoxConnection(
   }>(cfg, "GET", "/limits");
   if (limits.canStart === false) {
     throw Object.assign(
-      new Error(limits.blockedReason || "Box account cannot start a sandbox"),
+      new Error(limits.blockedReason || "Boat account cannot start a sandbox"),
       {
         code: "PROVIDER_QUOTA",
       },
@@ -1721,10 +1757,10 @@ export async function qualifyBoxConnection(
   const boxIds: string[] = [];
   try {
     progress("Creating qualification Box", 35);
-    const created = await boxApi<{ box: BoxRecord }>(
+    const created = await boxApi<{ sandbox: BoxRecord }>(
       cfg,
       "POST",
-      "/boxes",
+      "/sandboxes",
       {
         type: "small",
         ttlSeconds: 600,
@@ -1732,12 +1768,12 @@ export async function qualifyBoxConnection(
       },
       60_000,
     );
-    boxIds.push(created.box.id);
-    await boxApi(cfg, "PATCH", `/boxes/${created.box.id}`, {
+    boxIds.push(created.sandbox.id);
+    await boxApi(cfg, "PATCH", `/sandboxes/${created.sandbox.id}`, {
       name: `opensession-qualification-${suffix}`,
     });
-    await waitForLive(cfg, created.box.id, 300_000);
-    let driver = boxDriver(cfg, created.box.id);
+    await waitForLive(cfg, created.sandbox.id, 300_000);
+    let driver = boxDriver(cfg, created.sandbox.id);
     await driver.ensureStarted();
     await assertBoxRuntimeHome(driver);
     progress("Checking commands and private ingress", 45);
@@ -1761,23 +1797,19 @@ export async function qualifyBoxConnection(
     const preview = await driver.exec("host 8765 --private", {
       timeoutMs: 60_000,
     });
-    if (
-      !/https:\/\/[^\s"']+\.on\.ascii\.dev[^\s"']*/.test(
-        `${preview.stdout} ${preview.stderr}`,
-      )
-    ) {
+    if (!BOX_PREVIEW_URL_PATTERN.test(`${preview.stdout} ${preview.stderr}`)) {
       throw new Error("Box private preview URL check failed");
     }
 
     progress("Checking archive and resume", 60);
-    await stopBox(cfg, created.box.id);
-    await boxApi(cfg, "POST", `/boxes/${created.box.id}/resume`, {
+    await stopBox(cfg, created.sandbox.id);
+    await boxApi(cfg, "POST", `/sandboxes/${created.sandbox.id}/resume`, {
       type: "small",
       noEnv: true,
       ttlSeconds: 600,
     });
-    await waitForLive(cfg, created.box.id, 300_000);
-    driver = boxDriver(cfg, created.box.id);
+    await waitForLive(cfg, created.sandbox.id, 300_000);
+    driver = boxDriver(cfg, created.sandbox.id);
     await driver.ensureStarted();
     await assertBoxRuntimeHome(driver);
     const persisted = await driver.exec(
@@ -1792,17 +1824,17 @@ export async function qualifyBoxConnection(
       "POST",
       "/named-snapshots",
       {
-        boxId: created.box.id,
+        sandboxId: created.sandbox.id,
         name: snapshotName,
       },
       60_000,
     );
     await waitForNamedSnapshot(cfg, snapshotName);
     progress("Restoring qualification snapshot", 84);
-    const restored = await boxApi<{ box: BoxRecord }>(
+    const restored = await boxApi<{ sandbox: BoxRecord }>(
       cfg,
       "POST",
-      "/boxes",
+      "/sandboxes",
       {
         from: snapshotName,
         type: "small",
@@ -1811,15 +1843,15 @@ export async function qualifyBoxConnection(
       },
       60_000,
     );
-    boxIds.push(restored.box.id);
-    if (restored.box.id === created.box.id) {
+    boxIds.push(restored.sandbox.id);
+    if (restored.sandbox.id === created.sandbox.id) {
       throw new Error("Box named-snapshot restore was not distinct");
     }
-    await boxApi(cfg, "PATCH", `/boxes/${restored.box.id}`, {
+    await boxApi(cfg, "PATCH", `/sandboxes/${restored.sandbox.id}`, {
       name: `opensession-qualification-${suffix}-restore`,
     });
-    await waitForLive(cfg, restored.box.id, 300_000);
-    const restoredDriver = boxDriver(cfg, restored.box.id);
+    await waitForLive(cfg, restored.sandbox.id, 300_000);
+    const restoredDriver = boxDriver(cfg, restored.sandbox.id);
     await restoredDriver.ensureStarted();
     await assertBoxRuntimeHome(restoredDriver);
     const restoredProbe = await restoredDriver.exec(

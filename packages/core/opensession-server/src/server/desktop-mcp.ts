@@ -34,7 +34,7 @@ function failure(cause: unknown, fallback: string) {
 }
 
 const NO_DESKTOP =
-  "This session has no Sandbox desktop. Only sandboxed sessions on Box or Daytona can be driven this way.";
+  "This session has no Sandbox desktop. Only sandboxed sessions on Boat or Daytona can be driven this way.";
 
 const point = {
   x: z.number().describe("Desktop pixel from the left edge"),

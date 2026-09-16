@@ -155,7 +155,9 @@ function normalizeMachineSettings(
     );
     if (!supported) {
       throw Object.assign(
-        new Error("Choose one of Box's Small, Default, or Large machine sizes"),
+        new Error(
+          "Choose one of Boat's Small, Default, or Large machine sizes",
+        ),
         {
           code: "MACHINE_SETTINGS_INVALID",
         },

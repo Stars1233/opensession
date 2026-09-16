@@ -464,7 +464,7 @@ describe("resolveRequestedSandbox (create-path validation)", () => {
     if (!r.ok) expect(r.error).toContain("Daytona");
     const b = resolveRequestedSandbox("box");
     expect(b.ok).toBe(false);
-    if (!b.ok) expect(b.error).toContain("Box");
+    if (!b.ok) expect(b.error).toContain("Boat");
   });
 
   test("failed qualification stays configured but cannot be selected by either create path", () => {

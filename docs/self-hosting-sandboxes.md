@@ -1,7 +1,7 @@
 # Self-hosting sandboxes
 
 How to run Open Session sessions inside their own machines. A **Sandbox** is a
-Linux VM in your Daytona or Box account with the repository checked out, its
+Linux VM in your Daytona or Boat account with the repository checked out, its
 `.agents/setup` already run, and a durable disk. It sleeps between turns,
 wakes when the next message arrives, and comes back with files, running
 Portals, and the conversation intact. Companion to
@@ -32,7 +32,7 @@ for GPT in a Sandbox.
    webhooks, Sandbox callbacks, and workload identity; the private app on
    `:3850` is never part of it.
 2. **Connect a provider.** In **Workspace → Sandboxes**, connect Daytona or
-   Box with an API key. Credentials are written once to the server-side
+   Boat with an API key. Credentials are written once to the server-side
    workspace secret store and never returned to the browser or placed in a
    Sandbox. Connecting runs a qualification: ingress is verified, a disposable
    sandbox is created, a snapshot restore is proven, and everything is cleaned
@@ -177,7 +177,7 @@ that can still exchange for credentials.
 
 A move that failed shows Needs attention and can be attempted again.
 
-Terminal tabs land inside the Sandbox (Daytona's native PTY, Box's SSH).
+Terminal tabs land inside the Sandbox (Daytona's native PTY, Boat's SSH).
 
 ## The app in a Sandbox, the session on this machine
 
@@ -238,11 +238,11 @@ only into sandboxed sessions: `screenshot`, `click`, `move`, `drag`, `scroll`,
 `type`, `key` and `windows`, all in desktop pixels. Daytona serves it from its
 computer-use API, except `windows`, which reads real geometry from the X
 server with `xprop` and `xwininfo` because Daytona's own list puts every
-window at 0x0. Box has no control API, so Open Session drives the box's own X
-display (`:0`) with `xdotool` and ImageMagick over the command channel. A call
-on a sleeping Sandbox wakes it first.
+window at 0x0. Boat has no control API, so Open Session drives the sandbox's
+own X display (`:0`) with `xdotool` and ImageMagick over the command channel.
+A call on a sleeping Sandbox wakes it first.
 
-- **Box** mints a 60fps stream page (`POST /boxes/{id}/desktop`).
+- **Boat** mints a 60fps stream page (`POST /sandboxes/{id}/desktop`).
 - **Daytona** starts its computer-use stack (Xvfb, xfce4, x11vnc, noVNC) on
   first use and hands out a signed preview URL for noVNC; it stops working
   after an hour, so click again for a fresh one.
@@ -276,7 +276,7 @@ ready unless a project is switched on here.
 
 Each project snapshot carries a **machine size** (Small, Medium, Large),
 mapped to the provider's shapes. Daytona sizes require a base snapshot created
-with those resources; Box exposes three fixed machine types.
+with those resources; Boat exposes three fixed machine types.
 
 ## Repo lifecycle hooks
 
@@ -340,8 +340,8 @@ fails clearly rather than silently running on the host.
 
 ## Certification
 
-Both providers passed the live conformance matrix (Daytona 2026-08-11, Box
-2026-08-13): engine round trip, exec semantics, in-sandbox workspace git,
+Both providers passed the live conformance matrix (Daytona 2026-08-11, Boat
+2026-08-13, then called Box): engine round trip, exec semantics, in-sandbox workspace git,
 Portal relay, sleep/wake, snapshot restore with credential scrub, and cleanup.
 Re-run it with `bun run deploy/sandbox/conformance.ts [daytona] [box]`; it
 uses scratch state and never touches live sessions. The certification dates in
@@ -370,13 +370,20 @@ deletions retain the mapping for retry; a move does not forget its source when
 retirement fails. Automations use Daytona's per-sandbox domain allowlist.
 Self-hostable.
 
-### Box (ascii.dev)
+### Boat (boat.dev)
 
-Boxes are named after the session. Sleep is `stop` (archive, disk retained);
-wake is `resume`, after which the workspace is re-hydrated in the background.
-Project snapshots are named snapshots. Box serializes command admission per
-VM, so concurrent control-plane calls queue. Destroy archives the Box; your
-dashboard retains it.
+Boat is the provider formerly called Box at ascii.dev. Its id stays `box` in
+configuration, session state, and the conformance runner, so existing
+connections and repo templates carry over; the API base is
+`https://boat.dev/api/v1`, and a stored legacy `https://ascii.dev/api/box/v1`
+base is mapped to it automatically. Existing `box_…` keys keep authenticating
+next to new `boat_…` keys.
+
+Sandboxes are named after the session. Sleep is `stop` (archive, disk
+retained); wake is `resume`, after which the workspace is re-hydrated in the
+background. Project snapshots are named snapshots. Boat serializes command
+admission per VM, so concurrent control-plane calls queue. Destroy archives
+the sandbox; your dashboard retains it.
 
 ## Security posture
 

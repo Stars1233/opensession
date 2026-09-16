@@ -68,7 +68,7 @@ export function getSandboxProvider(
     default:
       if (isRetiredSandboxProvider(id))
         throw new Error(
-          `Sandbox provider "${id}" has been retired; this session's Sandbox can no longer be reached. Start a new session on Daytona or Box.`,
+          `Sandbox provider "${id}" has been retired; this session's Sandbox can no longer be reached. Start a new session on Daytona or Boat.`,
         );
       throw new Error(`unknown sandbox provider "${id}"`);
   }

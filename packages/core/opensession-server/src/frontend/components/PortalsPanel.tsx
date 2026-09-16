@@ -36,7 +36,7 @@ function statusLabel(
 
 function providerName(id: string): string {
   if (id === "daytona") return "Daytona";
-  if (id === "box") return "Box";
+  if (id === "box") return "Boat";
   return id;
 }
 

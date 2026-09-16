@@ -838,7 +838,7 @@ function sandboxProviderSelectionError(
     }
     return `Sandbox provider "${id}" is not currently available.`;
   }
-  return `Sandbox provider "${id}" is not configured: connect ${id === "box" ? "Box" : "Daytona"} in Workspace > Sandboxes.`;
+  return `Sandbox provider "${id}" is not configured: connect ${id === "box" ? "Boat" : "Daytona"} in Workspace > Sandboxes.`;
 }
 
 /** Whether the provider has enabled connection configuration. */
@@ -967,7 +967,7 @@ export function resolveRequestedSandbox(
       return {
         ok: false,
         error:
-          "No Sandbox provider is ready. Connect Daytona or Box in Workspace > Sandboxes.",
+          "No Sandbox provider is ready. Connect Daytona or Boat in Workspace > Sandboxes.",
       };
     return withModelCheck(provider);
   }
