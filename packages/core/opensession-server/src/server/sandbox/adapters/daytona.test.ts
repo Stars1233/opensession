@@ -10,6 +10,26 @@ import {
 } from "./daytona";
 
 describe("Daytona create source", () => {
+  test("cold repos without settings receive enough memory and disk for the runner", () => {
+    const resources = daytonaCreateResources({} as any);
+    expect(resources).toEqual({ cpu: 2, memory: 4, disk: 10 });
+    expect(daytonaCreateSource(undefined, resources)).toEqual({
+      image: "daytonaio/sandbox:0.8.0",
+      resources: { cpu: 2, memory: 4, disk: 10 },
+    });
+  });
+
+  test("keeps explicit provider sizing and snapshot precedence", () => {
+    const resources = daytonaCreateResources({
+      cpus: 4,
+      memory: "8192m",
+    } as any);
+    expect(resources).toEqual({ cpu: 4, memory: 8, disk: 10 });
+    expect(daytonaCreateSource("operator-snapshot", resources)).toEqual({
+      snapshot: "operator-snapshot",
+    });
+  });
+
   test("uses the per-project machine profile for cold session fallbacks", () => {
     expect(
       daytonaCreateResources({} as any, {
@@ -69,6 +89,15 @@ describe("Daytona create source", () => {
 });
 
 describe("Daytona exec transport", () => {
+  test("preserves the OOM-killed compiler exit even with empty output", () => {
+    expect(
+      parseDaytonaExecResult({
+        exitCode: 0,
+        result: "__OS_STDERR_7f3a____OS_EXIT_91c2__137",
+      }),
+    ).toEqual({ exitCode: 137, stdout: "", stderr: "" });
+  });
+
   test("recovers separate streams and a non-zero command exit code", () => {
     expect(
       parseDaytonaExecResult({

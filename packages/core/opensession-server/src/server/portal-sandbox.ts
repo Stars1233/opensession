@@ -39,6 +39,7 @@ import {
   activePortalSandboxFor,
   activeSandboxFor,
   recordedSandboxGone,
+  teardownRecordedSandbox,
   teardownSandbox,
   workspaceSandboxClaimed,
 } from "./session-sandbox";
@@ -418,25 +419,16 @@ export function syncPortalSandboxAfterTurn(
 }
 
 /** Retire a session's Portal Sandbox (a move into a workspace Sandbox, whose
- * Portals run there). Best-effort on the machine; the record always goes. */
+ * Portals run there). Preserve the record if retirement fails so it can retry. */
 export async function releasePortalSandbox(
   session: UnifiedSession,
   why: string,
 ): Promise<void> {
   const record = session.portalSandbox;
   if (!record) return;
-  if (record.sandboxId && isRemoteSandboxProvider(record.provider)) {
-    try {
-      await teardownSandbox(record.provider, record.sandboxId);
-      console.log(
-        `[sandbox] ${session.id}: Portal Sandbox ${record.sandboxId} destroyed (${why})`,
-      );
-    } catch (error) {
-      console.warn(
-        `[sandbox] ${session.id}: Portal Sandbox ${record.sandboxId} not destroyed (${why}):`,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
+  const id = await teardownRecordedSandbox(`${session.id}--portals`, record);
+  console.log(
+    `[sandbox] ${session.id}: Portal Sandbox ${id || "unmaterialized"} retired (${why})`,
+  );
   await touchNativeSessionStrict(session.id, { portalSandbox: undefined });
 }

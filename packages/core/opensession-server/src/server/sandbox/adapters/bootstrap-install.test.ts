@@ -57,6 +57,22 @@ describe("remote runner bootstrap", () => {
     expect(commands[1]).toContain(REMOTE_RUNNER_BINARY);
   });
 
+  test("reports a killed compiler even when it produced no output", async () => {
+    const driver: RemoteDriver = {
+      async exec(command) {
+        if (command.startsWith("cat "))
+          return { exitCode: 0, stdout: bootstrapSignature(), stderr: "" };
+        return { exitCode: 137, stdout: "", stderr: "" };
+      },
+      async execBackground() {},
+      async writeFile() {},
+      async ensureStarted() {},
+    };
+    await expect(bootstrapRemoteSandbox(driver, "test")).rejects.toThrow(
+      "exit 137): no command output",
+    );
+  });
+
   test("prefers the compiled runner host with a source fallback", () => {
     const command = remoteRunnerHostCommand("/runs/rh-test/spec.json");
     expect(command).toContain(
