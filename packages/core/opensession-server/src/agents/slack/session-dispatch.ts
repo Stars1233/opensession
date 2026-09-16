@@ -40,7 +40,7 @@ export async function dispatchSlackSessionMessage(
   const deliver = async (target: string): Promise<string> => {
     // A crash between native acceptance and removing the Slack queue head
     // must not turn an already accepted opening prompt into a second turn.
-    const origin = control.getSession(target)?.slackOrigin;
+    const origin = (await control.getSession(target))?.slackOrigin;
     if (
       origin?.messageTs === message.messageTs &&
       origin.channel === message.channel

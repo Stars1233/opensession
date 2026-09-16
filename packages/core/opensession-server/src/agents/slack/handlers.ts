@@ -120,7 +120,7 @@ async function activateLinkedSession(
     );
     return { status: "handled", message: "Stop handled." };
   }
-  const origin = control.getSession(sessionId)?.slackOrigin;
+  const origin = (await control.getSession(sessionId))?.slackOrigin;
   if (origin?.channel === channel && origin.messageTs === messageTs)
     return { status: "handled", message: "Opening message already accepted." };
   const attachments = files?.length

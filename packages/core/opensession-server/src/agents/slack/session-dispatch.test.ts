@@ -20,7 +20,7 @@ let cancelledSessions: string[] = [];
 const sessions = new Map<string, Record<string, unknown>>();
 mock.module("../../server/session-control", () => ({
   getSessionControl: () => ({
-    getSession: (id: string) => sessions.get(id),
+    getSession: async (id: string) => sessions.get(id),
     createSession: async (opts: CreateSessionOpts) => {
       expect(saved).toBeGreaterThan(0);
       created.push(opts);
