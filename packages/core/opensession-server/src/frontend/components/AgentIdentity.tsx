@@ -19,9 +19,12 @@ export function AgentIdentity({
 }) {
   const name = useAgentName(sessionId);
   const title = useAgentSessionTitle(sessionId);
-  const tooltip = [current ? "Current agent" : name, title]
-    .filter(Boolean)
-    .join("\n");
+  const tooltip = (
+    <AgentTooltipLabel
+      name={current ? "Current agent" : name}
+      sessionTitle={title}
+    />
+  );
   const content = (
     <>
       {sessionId && (
@@ -82,4 +85,24 @@ export function AgentIdentity({
 /** Plain text for compact session references, using the same reactive identity. */
 export function AgentName({ sessionId }: { sessionId: string }) {
   return useAgentName(sessionId);
+}
+
+/** Shared hover hierarchy for message identities and the avatar-only top bar. */
+export function AgentTooltipLabel({
+  name,
+  sessionTitle,
+}: {
+  name: string;
+  sessionTitle?: string;
+}) {
+  return (
+    <>
+      <span className="block">{name}</span>
+      {sessionTitle && (
+        <span className="mt-0.5 block text-meta font-normal text-tooltip-fg/70">
+          {sessionTitle}
+        </span>
+      )}
+    </>
+  );
 }

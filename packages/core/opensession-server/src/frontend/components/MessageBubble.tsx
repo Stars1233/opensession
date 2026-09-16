@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useId, useLayoutEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { TranscriptEntry } from "../lib/types";
 import { markdownAffordable, renderMarkdown } from "../lib/markdown";
@@ -91,6 +91,7 @@ export function ClampedBody({
   entry,
   sessionId,
   transformContent,
+  compact = false,
 }: {
   content: string;
   className: string;
@@ -98,6 +99,8 @@ export function ClampedBody({
   sessionId?: string;
   /** Display-only repair applied again after a clamped entry hydrates. */
   transformContent?: (content: string) => string;
+  /** Agent correspondence starts with three visual lines and one disclosure. */
+  compact?: boolean;
 }) {
   const wireClamped = !!entry?.contentClamped;
   const fullLength = entry?.contentLength ?? content.length;
@@ -105,6 +108,23 @@ export function ClampedBody({
   const [showAll, setShowAll] = useState(false);
   const [fetched, setFetched] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const bodyId = useId();
+
+  useLayoutEffect(() => {
+    if (!compact || showAll) return;
+    const preview = previewRef.current;
+    if (!preview) return;
+    const measure = () =>
+      setOverflows(preview.scrollHeight > preview.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(preview);
+    // Rich content (code highlighting, images, fences) can settle after paint.
+    if (preview.firstElementChild) observer.observe(preview.firstElementChild);
+    return () => observer.disconnect();
+  }, [compact, showAll, content]);
 
   // Cut the eager head at a line boundary so we don't render half a line of
   // a diff/log as its own paragraph.
@@ -147,39 +167,60 @@ export function ClampedBody({
     setShowAll(true);
   };
 
+  const body = asMarkdown ? (
+    <MarkdownBody className={className} html={html || ""} markdown={markdown} />
+  ) : (
+    // Huge expanded blobs retain the existing affordable plain-text fallback.
+    <pre className="my-1 max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface p-3 font-sans text-label leading-relaxed text-fg">
+      {shown}
+    </pre>
+  );
+
   return (
     <>
-      {asMarkdown ? (
-        <MarkdownBody
-          className={className}
-          html={html || ""}
-          markdown={markdown}
-        />
-      ) : (
-        // A <pre> only for the preserved whitespace: this branch renders a
-        // message the markdown pass cannot afford, which may still be prose.
-        // `font-sans` is load-bearing — the app ships no Tailwind Preflight,
-        // so the UA's `pre { font-family: monospace }` applies otherwise.
-        <pre
-          className={
-            "my-1 max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface p-3 font-sans text-label leading-relaxed text-fg"
-          }
+      {compact ? (
+        <div
+          id={bodyId}
+          ref={previewRef}
+          className={cn(
+            "text-body leading-6",
+            !showAll && "max-h-[3lh] overflow-hidden",
+          )}
+          onFocusCapture={() => {
+            // Keyboard navigation must never leave focus in clipped markdown.
+            if (!showAll && overflows) {
+              setShowAll(true);
+              void expand();
+            }
+          }}
         >
-          {shown}
-        </pre>
+          {body}
+        </div>
+      ) : (
+        body
       )}
-      {isLong && (
+      {(isLong || (compact && overflows)) && (
         <Button
           variant="ghost"
           size="sm"
+          disabled={fetching}
+          aria-expanded={showAll}
+          aria-controls={compact ? bodyId : undefined}
           onClick={showAll ? () => setShowAll(false) : expand}
-          className="mt-1 min-h-0 justify-start whitespace-normal rounded-md border-0 px-2 py-1 text-left font-sans text-label font-medium leading-normal hover:bg-hover/40"
+          className={cn(
+            "mt-1 min-h-0 justify-start whitespace-normal rounded-md border-0 px-2 py-1 text-left font-sans text-label font-medium leading-normal hover:bg-hover/40",
+            compact && "self-start text-dim phone:min-h-11",
+          )}
         >
           {fetching
             ? "Loading…"
-            : showAll
-              ? "Collapse"
-              : `Show full message · ${sizeLabel(fullLength)}`}
+            : compact
+              ? showAll
+                ? "Show less"
+                : "Show more"
+              : showAll
+                ? "Collapse"
+                : `Show full message · ${sizeLabel(fullLength)}`}
         </Button>
       )}
     </>
@@ -795,15 +836,22 @@ export const MessageBubble = function MessageBubble({
         {e.notice?.kind === "worker-report" && (
           <span className="mb-1 text-meta text-faint">Worker report</span>
         )}
-        <ClampedBody
-          className={cn(
-            msgBody,
-            "markdown rounded-lg bg-panel px-3.5 py-2.5 text-fg",
-          )}
-          content={outgoing?.content ?? displayContent}
-          entry={outgoing ? undefined : e}
-          sessionId={sessionId}
-        />
+        <div className="flex flex-col rounded-lg bg-panel px-3.5 py-2.5">
+          <ClampedBody
+            compact
+            className={cn(msgBody, "markdown text-fg")}
+            content={outgoing?.content ?? displayContent}
+            entry={outgoing ? undefined : e}
+            sessionId={sessionId}
+            transformContent={
+              outgoing
+                ? undefined
+                : (content) =>
+                    classifyEntry({ ...entry, notice: undefined, content })
+                      .content
+            }
+          />
+        </div>
         {outgoing && toolResult && (
           <Collapsible.Root className="mt-1">
             <Collapsible.Trigger className="rounded-control py-1 text-meta text-faint hover:text-fg phone:min-h-11">

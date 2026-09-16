@@ -23,6 +23,7 @@ import { OverflowFadeText } from "../../ui/overflow-fade-text";
 import { Tooltip } from "../../ui/tooltip";
 import { TopBar, TopBarActions, TopBarLeading } from "../../ui/top-bar";
 import { BrandMark } from "../BrandMark";
+import { AgentTooltipLabel } from "../AgentIdentity";
 import { AgentAvatar } from "../../ui/agent-avatar";
 import { useAgentName } from "../../hooks/useAgentName";
 import {
@@ -218,7 +219,12 @@ export function SessionHeader({
           </OverflowFadeText>
         )}
         <Tooltip
-          label={`Current agent: ${agentName}\n${session.title}`}
+          label={
+            <AgentTooltipLabel
+              name={`Current agent: ${agentName}`}
+              sessionTitle={session.title}
+            />
+          }
           multiline
           side="bottom"
         >
