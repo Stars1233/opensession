@@ -1,5 +1,79 @@
+diff --git a/context-menu/trigger/ContextMenuTrigger.d.mts b/context-menu/trigger/ContextMenuTrigger.d.mts
+index c00bc8a898c4226add19a199b371e2805303d97c..6dfa3855a68a398780d0f494aaed0bd0b53e9979 100644
+--- a/context-menu/trigger/ContextMenuTrigger.d.mts
++++ b/context-menu/trigger/ContextMenuTrigger.d.mts
+@@ -13,7 +13,10 @@ export interface ContextMenuTriggerState {
+    */
+   open: boolean;
+ }
+-export interface ContextMenuTriggerProps extends BaseUIComponentProps<'div', ContextMenuTriggerState> {}
++export interface ContextMenuTriggerProps extends BaseUIComponentProps<'div', ContextMenuTriggerState> {
++  /** Open Session: touch hold duration in milliseconds. Defaults to 500. */
++  longPressDelay?: number;
++}
+ export declare namespace ContextMenuTrigger {
+   type State = ContextMenuTriggerState;
+   type Props = ContextMenuTriggerProps;
+diff --git a/context-menu/trigger/ContextMenuTrigger.d.ts b/context-menu/trigger/ContextMenuTrigger.d.ts
+index 52ae344fa8435cba82be7dbccf2529837b54fd68..d85f1adc0296281011dced8b4fb68480a16e8edf 100644
+--- a/context-menu/trigger/ContextMenuTrigger.d.ts
++++ b/context-menu/trigger/ContextMenuTrigger.d.ts
+@@ -13,7 +13,10 @@ export interface ContextMenuTriggerState {
+    */
+   open: boolean;
+ }
+-export interface ContextMenuTriggerProps extends BaseUIComponentProps<'div', ContextMenuTriggerState> {}
++export interface ContextMenuTriggerProps extends BaseUIComponentProps<'div', ContextMenuTriggerState> {
++  /** Open Session: touch hold duration in milliseconds. Defaults to 500. */
++  longPressDelay?: number;
++}
+ export declare namespace ContextMenuTrigger {
+   type State = ContextMenuTriggerState;
+   type Props = ContextMenuTriggerProps;
+diff --git a/context-menu/trigger/ContextMenuTrigger.js b/context-menu/trigger/ContextMenuTrigger.js
+index 1c7109ad4c00c645196592fbbaac48396c38986a..db7d98ec9a10023d6a16e9decbacd874ca7513c1 100644
+--- a/context-menu/trigger/ContextMenuTrigger.js
++++ b/context-menu/trigger/ContextMenuTrigger.js
+@@ -31,6 +31,7 @@ const ContextMenuTrigger = exports.ContextMenuTrigger = /*#__PURE__*/React.forwa
+     render,
+     className,
+     style,
++    longPressDelay = LONG_PRESS_DELAY,
+     ...elementProps
+   } = componentProps;
+   const {
+@@ -114,7 +115,7 @@ const ContextMenuTrigger = exports.ContextMenuTrigger = /*#__PURE__*/React.forwa
+         x: touch.clientX,
+         y: touch.clientY
+       };
+-      longPressTimeout.start(LONG_PRESS_DELAY, () => {
++      longPressTimeout.start(longPressDelay, () => {
+         if (touchPositionRef.current) {
+           handleLongPress(touchPositionRef.current.x, touchPositionRef.current.y, event.nativeEvent);
+         }
+diff --git a/context-menu/trigger/ContextMenuTrigger.mjs b/context-menu/trigger/ContextMenuTrigger.mjs
+index d888fd625b3569430f348e4f2d2842143ea91901..da3275b7e45036edb77ce0383e1553be968d3518 100644
+--- a/context-menu/trigger/ContextMenuTrigger.mjs
++++ b/context-menu/trigger/ContextMenuTrigger.mjs
+@@ -25,6 +25,7 @@ export const ContextMenuTrigger = /*#__PURE__*/React.forwardRef(function Context
+     render,
+     className,
+     style,
++    longPressDelay = LONG_PRESS_DELAY,
+     ...elementProps
+   } = componentProps;
+   const {
+@@ -108,7 +109,7 @@ export const ContextMenuTrigger = /*#__PURE__*/React.forwardRef(function Context
+         x: touch.clientX,
+         y: touch.clientY
+       };
+-      longPressTimeout.start(LONG_PRESS_DELAY, () => {
++      longPressTimeout.start(longPressDelay, () => {
+         if (touchPositionRef.current) {
+           handleLongPress(touchPositionRef.current.x, touchPositionRef.current.y, event.nativeEvent);
+         }
 diff --git a/floating-ui-react/safePolygon.js b/floating-ui-react/safePolygon.js
-index 63dc8e8..dd6c849 100644
+index 63dc8e8d079f4c73fced260f07a6f08f1a04558f..dd6c84952b425bae12cfb26b38f6fe5e1028f0d8 100644
 --- a/floating-ui-react/safePolygon.js
 +++ b/floating-ui-react/safePolygon.js
 @@ -238,7 +238,12 @@ function safePolygon(options = {}) {
@@ -17,7 +91,7 @@ index 63dc8e8..dd6c849 100644
        return undefined;
      };
 diff --git a/floating-ui-react/safePolygon.mjs b/floating-ui-react/safePolygon.mjs
-index 5dffb4f..09ec1a5 100644
+index 5dffb4f687465eba180c3375d9314d4b358b27c9..09ec1a55629bf75dfebe92f056b206a8750f0d6a 100644
 --- a/floating-ui-react/safePolygon.mjs
 +++ b/floating-ui-react/safePolygon.mjs
 @@ -233,7 +233,12 @@ export function safePolygon(options = {}) {

@@ -1896,6 +1896,7 @@ export function Composer({
                   }
                 >
                   <ContextMenu.Trigger
+                    longPressDelay={800}
                     render={
                       <ComposerPressButton
                         className={cn(

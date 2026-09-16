@@ -37,3 +37,22 @@ test("Base UI's safe-polygon grace period survives our pointer-event cadence", (
     `safe-polygon grace period is ${graceMs}ms; below ${GRACE_MS_MIN}ms a dropped frame closes the submenu the pointer is aiming at. Re-apply patches/@base-ui%2Freact@1.6.0.patch for the installed Base UI version.`,
   ).toBeGreaterThanOrEqual(GRACE_MS_MIN);
 });
+
+// Only the composer's send menu opts into a longer hold. Keep both module
+// formats patched, and leave desktop right-click's mouse-up grace unchanged.
+test("Base UI supports a per-trigger touch hold delay", () => {
+  const packageRoot = dirname(dirname(require.resolve("@base-ui/react/menu")));
+  for (const extension of ["js", "mjs"]) {
+    const source = readFileSync(
+      join(
+        packageRoot,
+        "context-menu/trigger",
+        `ContextMenuTrigger.${extension}`,
+      ),
+      "utf8",
+    );
+    expect(source).toContain("longPressDelay = LONG_PRESS_DELAY");
+    expect(source).toContain("longPressTimeout.start(longPressDelay,");
+    expect(source).toContain("allowMouseUpTimeout.start(LONG_PRESS_DELAY,");
+  }
+});

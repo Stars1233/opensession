@@ -35,27 +35,44 @@ import {
 
 export type ComposerMenu = null | "add" | "goal";
 
-type ComposerPressButtonProps = Omit<
-  ComponentPropsWithoutRef<"button">,
-  "onClick" | "onTouchEnd"
-> & { onPress: () => void };
+type ComposerPressButtonProps = ComponentPropsWithoutRef<"button"> & {
+  onPress: () => void;
+};
 
 export const ComposerPressButton = forwardRef<
   HTMLButtonElement,
   ComposerPressButtonProps
->(function ComposerPressButton({ onPress, ...props }, ref) {
+>(function ComposerPressButton(
+  { onPress, onTouchEnd, onClick, ...props },
+  ref,
+) {
   const touchFiredAt = useRef(0);
   return (
     <button
       {...props}
       ref={ref}
       onTouchEnd={(event) => {
+        // A rendered Base UI trigger must receive the release to cancel its
+        // long-press timer. Otherwise even a quick tap opens the menu later.
+        onTouchEnd?.(event);
+        const cancelled = event.defaultPrevented;
         event.preventDefault();
         touchFiredAt.current = Date.now();
+        // Holding for the menu must not also send the draft on release.
+        if (
+          cancelled ||
+          props.disabled ||
+          event.currentTarget.hasAttribute("data-popup-open")
+        ) {
+          return;
+        }
         onPress();
       }}
-      onClick={() => {
-        if (Date.now() - touchFiredAt.current < 700) return;
+      onClick={(event) => {
+        onClick?.(event);
+        if (event.defaultPrevented || Date.now() - touchFiredAt.current < 700) {
+          return;
+        }
         onPress();
       }}
     />
