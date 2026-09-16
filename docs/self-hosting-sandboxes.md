@@ -11,7 +11,11 @@ Portals, and the conversation intact. Companion to
 **Default = This machine.** The new-session menu offers one choice, **Run in:
 This machine or Sandbox**. Which provider backs "Sandbox" is the workspace's
 decision (Workspace → Sandboxes), never the person creating the session. A
-workspace or personal default can make Sandbox the norm; a per-session choice
+workspace or personal default can make Sandbox the norm, and a project can be
+pinned under **Workspace → Sandboxes → Projects** so every new session on it
+starts in a Sandbox whatever the workspace or person chose; that is how a
+repository's app always runs in a Sandbox Portal rather than on this server.
+Precedence is project, then personal, then workspace; a per-session choice
 always wins.
 
 Claude and Pi-family models run in a Sandbox. Native Codex cannot: its
@@ -52,7 +56,9 @@ Every Sandbox session gets its own machine. Open Session:
 
 - creates the VM (from the project's snapshot when one exists, else from the
   provider's base image), installs the runner payload, and clones the
-  repository inside it. Workspaces exist only in the Sandbox: push your work;
+  repository inside it. The workspace lives in the Sandbox; after every clean
+  turn its state is checkpointed to origin (see below), so a lost or replaced
+  machine continues from the last checkpoint;
 - runs the repository's `.agents/setup` once per disk, and `.agents/resume`
   on every wake;
 - runs the agent inside the VM. The engine dials back to this server over the
@@ -65,24 +71,158 @@ Every Sandbox session gets its own machine. Open Session:
   Portals that were awake are restarted, and only then does the queue drain.
 
 The session's **Sandbox** badge shows Preparing, Awake, Sleeping, Waking, or
-Needs attention, with manual sleep, wake, and recreate, plus the `setup` and
-`resume` logs.
+Needs attention, with manual sleep, wake, checkpoint, and rebuild, plus the
+`setup` and `resume` logs and the age of the last checkpoint.
 
-A session that started on this machine can move into a Sandbox later. The
-session's ⋯ menu offers _Move to Sandbox_ with the ready providers, Daytona
-or Box (`POST /api/sessions/<id>/sandbox/attach`). The session records the
-provider as Preparing, its Portals on this machine stop, and the Sandbox is
-provisioned in the background; the badge turns Awake when it is up. The next
-message takes the same path as a Sandbox session's first turn and adopts that
-Sandbox, waiting on the provider's per-session lock if it is still booting. A
-move that failed shows Needs attention and can be attached again to retry.
-The Sandbox clones the session's branch from origin and
-a fresh engine is seeded from the stored transcript, so the conversation
-carries over. Uncommitted files and unpushed commits do not; when the worktree
-has any, the move answers 428 and the badge asks before moving anyway. The
-move needs the agent to be idle, and the reverse move is not offered.
+## Checkpoints
+
+A Sandbox's disk is the only copy of the session's uncommitted work, and a
+provider can lose or replace that disk. After every clean turn, and before a
+manual sleep, rebuild, or move, Open Session pushes a **checkpoint** to
+origin: one synthetic commit whose parent is the branch tip and whose tree is
+the working tree, reachable from `refs/opensession/checkpoints/<session id>`.
+The ref is hidden (GitHub shows it nowhere and `git fetch` never pulls it),
+costs no host storage, and is removed when the session is deleted; an archived
+session keeps it. Ignored files, the repository's private seed files, and
+`.ports.conf` never enter a checkpoint. The push uses the workspace's GitHub
+App credential in the command's environment only; the Sandbox's origin stays
+credential-free. Repositories that are not on GitHub have no checkpoints.
+
+A checkpoint is restored whenever a fresh workspace is materialized for a
+session that has one: a **Rebuild sandbox** from the badge, a replacement
+machine after the provider lost the old one, or a move. The branch lands on
+the checkpoint's tip with the checkpointed changes uncommitted, exactly as the
+agent left them. A restore that fails is loud (the badge shows Needs
+attention with the reason) rather than silently starting from origin, and the
+clone credential is scrubbed from the workspace's origin either way.
+`POST /api/sessions/<id>/sandbox/checkpoint` takes one on demand.
+
+Checkpoints, moves, rebuilds, and manual sleep all run on one per-session
+lifecycle lane: one at a time, in order. A turn does not start while an
+operation is in flight, and an operation refuses (409) while a turn is
+admitted, so a capture never reads a tree the agent is editing, no turn
+starts against a Sandbox that is about to be destroyed, and the recorded
+commit is always the one the ref points at.
+
+Deleting a session is a lifecycle operation too: it runs on the same lane,
+removes the hidden ref while it holds the lane, and any checkpoint or move
+still queued behind it finds no session and refuses (410) rather than acting
+on the deleted record or pushing the ref back.
+
+A checkpoint is labeled with the branch the checkout is actually on, read
+inside the Sandbox by the checkpoint script itself. When the agent renamed
+or switched branches during a turn, the session record follows the checkout
+in the same write, so the checkpoint restores onto, and later publication
+targets, the branch the work is really on; a detached HEAD takes no
+checkpoint. A checkpoint is restored only onto the branch it was taken
+from. The record carries that branch and every restore checks it before
+touching anything; a
+session that switched branches after its last checkpoint has, for the
+purposes of a move or rebuild, no checkpoint (the refusal says so), and a
+replacement Sandbox that would otherwise restore it is parked as Needs
+attention rather than moving the new branch onto the old tip.
+
+Nothing destroys a reachable Sandbox on the strength of an older checkpoint.
+A rebuild or a move away from a Sandbox first takes a checkpoint now; when
+that is impossible (no branch, default branch, no credential) the request is
+refused with the reason, and only an explicit second answer (the badge's
+rebuild asks again; a move to this machine asks to leave the files behind)
+proceeds without the Sandbox's files. The recorded checkpoint is used only
+when the Sandbox cannot be reached at all.
+
+## Moving a session
+
+A code session can move between this machine and any ready Sandbox provider,
+in every direction, from its ⋯ menu (_Move to Sandbox_ on this machine,
+_Move session_ in a Sandbox). The agent must be idle. From the next message
+on it runs on the destination; a fresh engine is seeded from the stored
+transcript, so the conversation carries over.
+
+- **This machine → Sandbox** (`POST /api/sessions/<id>/sandbox/attach`): the
+  worktree is checkpointed first, so uncommitted work travels along. Portals
+  on this machine stop; the Sandbox is provisioned in the background and
+  restores the checkpoint, and the badge turns Awake when it is up. The next
+  message adopts it, waiting on the provider's per-session lock if it is still
+  booting. When no checkpoint is possible (a shared checkout, a repository off
+  GitHub, the default branch), the old rule applies: with unpublished work the
+  move answers 428 and asks before moving anyway.
+- **Sandbox → Sandbox** (same route with another provider): the current
+  Sandbox is woken if needed and checkpointed, then released; the new one
+  restores the checkpoint. Refused when the Sandbox cannot be reached and no
+  checkpoint exists.
+- **Sandbox → This machine** (`POST /api/sessions/<id>/sandbox/detach`): the
+  Sandbox is checkpointed, the checkpoint is restored into a worktree on this
+  server (the branch need not exist on origin), and the Sandbox is released.
+  An unreachable Sandbox falls back to its last checkpoint; with none, the
+  move answers 428 and continues from the branch as origin has it only after
+  confirmation. The restore never lands in a checkout that may hold someone
+  else's work: finding, creating, and rewriting the worktree is one step
+  under the repository's git lock, and a branch already checked out on this
+  machine refuses the move (409, naming the checkout), except the session's
+  own former worktree when it is clean and the checkpoint extends its tip.
+  The same rule protects a branch this machine still has without a worktree
+  (left by an earlier cleanup, possibly with commits that were never
+  pushed): it is restored onto only when the checkpoint extends its tip;
+  only a branch created for the restore is reset outright. A restore that
+  fails on a worktree the move just created removes that worktree again
+  (and the branch, if it created that too) before the lock is released, so
+  retrying the move finds the branch free rather than a half-restored
+  checkout.
+
+Whichever way a session leaves a Sandbox, the old machine is retired the
+same way a deleted session's is: its workload-identity leases are revoked
+first, then its Portal routes are dropped, then it is destroyed. A destroy
+the provider refuses or swallows therefore cannot leave a running machine
+that can still exchange for credentials.
+
+A move that failed shows Needs attention and can be attempted again.
 
 Terminal tabs land inside the Sandbox (Daytona's native PTY, Box's SSH).
+
+## The app in a Sandbox, the session on this machine
+
+A project can keep its sessions on this machine and still run its dev
+server remotely. Set the project's **app** to a provider under Settings →
+Sandboxes → Projects (`perRepo.<repo>.portalSandbox` in the runtime config).
+Nothing changes for the session itself: the worktree and the agent stay on
+this machine, and the Sandbox badge stays off. The first time a Portal is
+started, by the person from the Portals panel or by the agent through
+`start_declared_portal` or `start_portal`, Open Session:
+
+- checkpoints the worktree, so uncommitted work travels too. A worktree
+  that cannot be checkpointed (a repository not on GitHub, the default
+  branch, no credential) gets no Portal Sandbox: the start is refused with
+  the reason, rather than bringing up a machine built from origin that
+  shows older code;
+- provisions a **Portal Sandbox** for the session (the provider names it
+  `<session id>--portals`) and materializes the branch on that checkpoint,
+  exactly as a rebuild would, then checkpoints and lands once more, so a
+  turn that finished while the machine came up is on it too;
+- starts the Portal there and relays it as usual. The Portals panel says so,
+  with the machine's state while it prepares, sleeps, or needs attention.
+
+After every clean turn the worktree is checkpointed again and the Portal
+Sandbox's checkout is landed on it (whatever branch it was on), so the app
+shows what the agent just did at turn granularity; the dev server's own file
+watcher does the rest. A sleeping Portal Sandbox catches up when a Portal
+wakes it, and a start or restart lands the latest checkpoint first, before
+the Portals the machine was running are relaunched; when that landing
+fails, the start fails with it and says why, and nothing is relaunched,
+rather than bringing the app up on the older tree the machine still holds.
+A start or wake from the Portals panel while the agent is working is
+refused ("Wait for the agent to finish"), since it would checkpoint a tree
+mid-edit; the agent's own `start_declared_portal` call is not, its worktree
+being at rest while the tool runs. A turn asked for while a Portal Sandbox
+wakes starts once the wake is done. The
+checkout there is nobody's work: nothing in it is ever pushed or restored
+back, and its origin stays credential-free.
+
+The Portal Sandbox is torn down with the session, and when the session moves
+into a workspace Sandbox (whose Portals run there). A session that already
+runs in a workspace Sandbox, or on a Runner, runs its Portals there and never
+gets one. A Portal Sandbox the provider has lost is replaced on the next
+start; a failed provisioning shows its reason in the Portals panel and is
+retried by starting the Portal again.
 
 ## Desktop
 
@@ -128,6 +268,12 @@ Prewarms expire after ten minutes when unused; at most two are live at once.
 This is automatic wherever a Ready provider exists; disable it with
 `"prewarm": {"enabled": false}` in `~/.opensession/sandbox.json`.
 
+**Keep one ready** on a project snapshot card holds a prepared Sandbox for
+that project between sessions, whoever starts the next one and without
+waiting for typing. It is refilled after each adoption, counts against the
+live prewarm limit, and is stored as `prewarm.keepReady`. Nothing is kept
+ready unless a project is switched on here.
+
 Each project snapshot carries a **machine size** (Small, Medium, Large),
 mapped to the provider's shapes. Daytona sizes require a base snapshot created
 with those resources; Box exposes three fixed machine types.
@@ -167,12 +313,13 @@ settings below. Read fresh per call, no restart needed except where noted.
 | `connections`                                   | Provider connections and their qualification state. Managed by Workspace → Sandboxes.                                                                                                                                           |
 | `sessionDefault`                                | `"daytona"`, `"box"`, or `"none"`: where new sessions run when nobody chose.                                                                                                                                                    |
 | `provider`, `perRepo.<id>.provider`             | Legacy default and per-repo override for API creates that pass `sandbox: true`.                                                                                                                                                 |
+| `perRepo.<id>.sessionDefault`                   | `"daytona"`, `"box"`, or `"none"`: where new sessions on that repo run, ahead of the workspace and personal defaults. Managed by Workspace → Sandboxes → Projects.                                                              |
 | `idleStopMinutes`                               | Sleep after this much idle time (default 30).                                                                                                                                                                                   |
 | `callbackBaseUrl`                               | Dial-back URL when the public ingress origin should not be used (tailnet setups).                                                                                                                                               |
 | `publicIngress`                                 | Advanced bind override for the `:3860` listener. Needs a restart.                                                                                                                                                               |
 | `daytona.snapshot`                              | Org snapshot new Daytona sandboxes start from when no project snapshot exists (sizing lives in it).                                                                                                                             |
 | `cloneCredential`                               | `{type: "none"}` or `{type: "https-token", token}` for repository clones inside Sandboxes. The live GitHub App wins.                                                                                                            |
-| `prewarm`                                       | `enabled`, `ttlMinutes`, `maxLive`, `keepReady` for the warm-on-typing pool.                                                                                                                                                    |
+| `prewarm`                                       | `enabled`, `ttlMinutes`, `maxLive` for the warm-on-typing pool; `keepReady` lists `{provider, repoId}` targets kept prepared (Keep one ready in Workspace → Sandboxes).                                                         |
 | `runnerBundleUrl`, `runnerRepoUrl`, `runnerSha` | Where Sandboxes fetch the Open Session runner payload. Unset, a source install runs the runner at its own deployed commit, so every deploy carries it along; set `runnerSha` only to hold or roll back the runner deliberately. |
 | `automation.egressAllowlist`                    | Extra hosts unattended runs may reach.                                                                                                                                                                                          |
 

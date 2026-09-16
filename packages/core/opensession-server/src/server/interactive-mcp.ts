@@ -75,6 +75,7 @@ import {
 import { makeAskHandler } from "./asks";
 import { createScheduleMcpServer } from "./schedule-mcp";
 import { activeSandboxFor } from "./session-sandbox";
+import { portalsInSandbox, sandboxForPortals } from "./portal-sandbox";
 
 /** The session's primary repo id, for the papercuts toggle (undefined =
  *  session-only session, which logs under no repo and is always enabled). */
@@ -293,12 +294,25 @@ export function interactiveMcpServers(
           "opensession-portals": createPortalsMcpServer({
             sessionId,
             worktreeDir: () => findSession(sessionId)?.worktreeDir || undefined,
+            // Portals run in the session's workspace Sandbox, or, for a
+            // session on this machine whose project asks for it, in a
+            // Portal Sandbox provisioned on the first start (portal-sandbox.ts).
             sandbox: async (options) => {
               const session = findSession(sessionId);
-              return session ? activeSandboxFor(session, options) : null;
+              return session
+                ? sandboxForPortals(session, {
+                    wake: options?.wake,
+                    provision: options?.wake,
+                    // The agent's own call, mid-turn: its worktree is at
+                    // rest while the tool runs.
+                    ownTurn: true,
+                  })
+                : null;
             },
-            hasSandbox: () =>
-              Boolean(findSession(sessionId)?.sandbox?.sandboxId),
+            hasSandbox: () => {
+              const session = findSession(sessionId);
+              return Boolean(session && portalsInSandbox(session));
+            },
             runner: () => findSession(sessionId),
             verifyEditorFixture: (leaseId) => {
               const session = findSession(sessionId);

@@ -15,7 +15,11 @@ import {
   type PreviewStatus,
 } from "../preview";
 import { findSessionAsync } from "../session-cache";
-import { activeSandboxFor } from "../session-sandbox";
+import {
+  portalSandboxProvider,
+  portalsInSandbox,
+  sandboxForPortals,
+} from "../portal-sandbox";
 import { existsSync } from "fs";
 import {
   hostPortalRouteStatus,
@@ -66,6 +70,55 @@ export function unavailableSandboxPreviewStatus(
   return {
     ...EMPTY_STATUS,
     sandboxLifecycle: sandbox.lifecycle || "preparing",
+  };
+}
+
+/**
+ * Mark a host session's Portal status with the Portal Sandbox its project
+ * runs Portals in (portal-sandbox.ts): the provider, and the machine's state
+ * when it is not the live one the status was read from. The recipes stay
+ * those of the host worktree while no machine is up, so a Portal can be
+ * started (which provisions or wakes it) and retried after a failure.
+ */
+export function withPortalSandbox(
+  session: Pick<
+    UnifiedSession,
+    | "id"
+    | "source"
+    | "sandbox"
+    | "portalSandbox"
+    | "runner"
+    | "repo"
+    | "mode"
+    | "branch"
+    | "worktreeDir"
+    | "automationId"
+    | "automation"
+  >,
+  status: PreviewStatus,
+  live: boolean,
+): PreviewStatus {
+  if (session.sandbox?.sandboxId) return status;
+  const record = session.portalSandbox;
+  const provider = record?.provider ?? portalSandboxProvider(session);
+  if (!provider) return status;
+  const lifecycle = live
+    ? "awake"
+    : record
+      ? record.lifecycle || (record.sandboxId ? "sleeping" : "preparing")
+      : undefined;
+  return {
+    ...status,
+    ...(lifecycle && lifecycle !== "awake"
+      ? { sandboxLifecycle: lifecycle }
+      : {}),
+    portalSandbox: {
+      provider,
+      ...(lifecycle ? { lifecycle } : {}),
+      ...(record?.lastLifecycleError
+        ? { error: record.lastLifecycleError }
+        : {}),
+    },
   };
 }
 
@@ -218,27 +271,52 @@ export async function handlePreviewRoutes(
             session.startedBy || undefined,
           ),
         );
-      const sbx = session.worktreeDir ? await activeSandboxFor(session) : null;
+      const sbx = session.worktreeDir ? await sandboxForPortals(session) : null;
       if (sbx)
         return Response.json(
-          await getSandboxPreviewStatus(sbx, session.worktreeDir!, session.id),
+          withPortalSandbox(
+            session,
+            await getSandboxPreviewStatus(
+              sbx,
+              session.worktreeDir!,
+              session.id,
+            ),
+            true,
+          ),
         );
-      if (session.sandbox?.sandboxId) {
+      const recorded = session.sandbox?.sandboxId
+        ? session.sandbox
+        : session.portalSandbox?.sandboxId
+          ? session.portalSandbox
+          : undefined;
+      if (recorded?.sandboxId) {
         const sleeping = sleepingSandboxPortalStatus(
           session.id,
-          session.sandbox.sandboxId,
+          recorded.sandboxId,
         );
         if (sleeping)
-          return Response.json({
-            ...sleeping,
-            sandboxLifecycle: session.sandbox.lifecycle || "sleeping",
-          });
+          return Response.json(
+            withPortalSandbox(
+              session,
+              {
+                ...sleeping,
+                sandboxLifecycle: recorded.lifecycle || "sleeping",
+              },
+              false,
+            ),
+          );
       }
       const unavailableSandbox = unavailableSandboxPreviewStatus(session);
       if (unavailableSandbox) return Response.json(unavailableSandbox);
       if (!session.worktreeDir || !existsSync(session.worktreeDir))
         return Response.json(EMPTY_STATUS);
-      return Response.json(await getPreviewStatus(session.worktreeDir));
+      return Response.json(
+        withPortalSandbox(
+          session,
+          await getPreviewStatus(session.worktreeDir),
+          false,
+        ),
+      );
     }
   }
 
@@ -255,10 +333,12 @@ export async function handlePreviewRoutes(
       if (!session)
         return Response.json({ error: "Session not found" }, { status: 404 });
       try {
+        // A project that runs its Portals in a Sandbox of their own gets
+        // that Sandbox provisioned here, on the first start.
         const sandbox = session.worktreeDir
-          ? await activeSandboxFor(session, { wake: true })
+          ? await sandboxForPortals(session, { wake: true, provision: true })
           : null;
-        if (session.sandbox?.sandboxId && !sandbox)
+        if (portalsInSandbox(session) && !sandbox)
           return Response.json(
             { error: "This session's Sandbox is unavailable" },
             { status: 409 },
@@ -309,10 +389,14 @@ export async function handlePreviewRoutes(
             env,
           });
           return Response.json(
-            await getSandboxPreviewStatus(
-              sandbox,
-              session.worktreeDir,
-              session.id,
+            withPortalSandbox(
+              session,
+              await getSandboxPreviewStatus(
+                sandbox,
+                session.worktreeDir,
+                session.id,
+              ),
+              true,
             ),
           );
         }
@@ -370,9 +454,12 @@ export async function handlePreviewRoutes(
           );
         }
         const sandbox = session.worktreeDir
-          ? await activeSandboxFor(session, { wake: m[3] === "restart" })
+          ? await sandboxForPortals(session, { wake: m[3] === "restart" })
           : null;
-        if (session.sandbox?.sandboxId && !sandbox)
+        if (
+          (session.sandbox?.sandboxId || session.portalSandbox?.sandboxId) &&
+          !sandbox
+        )
           return Response.json(
             { error: "This session's Sandbox is sleeping or unavailable" },
             { status: 409 },
@@ -410,10 +497,14 @@ export async function handlePreviewRoutes(
             });
           }
           return Response.json(
-            await getSandboxPreviewStatus(
-              sandbox,
-              session.worktreeDir!,
-              session.id,
+            withPortalSandbox(
+              session,
+              await getSandboxPreviewStatus(
+                sandbox,
+                session.worktreeDir!,
+                session.id,
+              ),
+              true,
             ),
           );
         }

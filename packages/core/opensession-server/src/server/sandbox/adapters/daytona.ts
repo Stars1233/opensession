@@ -848,6 +848,9 @@ export class DaytonaProvider implements SandboxProvider {
             seedPrivateFiles:
               trust.trustProfile !== "automation" && !sourceVerification,
             runLifecycleHooks: !sourceVerification,
+            ...(spec.restoreCheckpoint && !disposable
+              ? { restoreCheckpoint: spec.restoreCheckpoint }
+              : {}),
           },
         );
         mark("workspace ready");

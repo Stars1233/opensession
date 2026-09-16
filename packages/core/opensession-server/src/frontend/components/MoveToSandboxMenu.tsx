@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchSandboxStatus } from "../lib/api/automations";
 import { ApiError } from "../lib/api/request";
-import { attachSandbox } from "../lib/api/sandboxes";
+import { attachSandbox, detachSandbox } from "../lib/api/sandboxes";
 import { errorMessage } from "../lib/error-message";
 import {
   readySandboxProviders,
@@ -13,35 +13,43 @@ import { toast } from "../ui/toast";
 import { IconBox, IconChevronRight } from "./icons";
 import { getCurrentUser } from "./UserPicker";
 
-/** What decides whether a host session may move into a Sandbox. */
+/** What decides whether a session may move between machines. */
 export type MoveToSandboxSession = {
   id: string;
   mode?: string;
   repo?: string;
   automation?: string;
   automationId?: string;
-  sandbox?: { provider: string } | null;
+  sandbox?: { provider: string; sandboxId?: string } | null;
   runner?: object | null;
 };
 
-/** A code session on this machine, with a repo to clone and no automation
- * or Runner pinning it here. Once it carries a Sandbox the move is done. */
+/** The Sandbox provider a session runs on, or null on this machine. */
+export function currentSandboxProvider(
+  session: MoveToSandboxSession,
+): string | null {
+  const provider = session.sandbox?.provider;
+  return provider && provider !== "local" ? provider : null;
+}
+
+/** A code session with a repo and no automation or Runner pinning it. It may
+ * move from this machine into a Sandbox, from a Sandbox to another provider,
+ * or from a Sandbox back to this machine. */
 export function canMoveToSandbox(session: MoveToSandboxSession): boolean {
   return (
     session.mode === "code" &&
     !!session.repo &&
     !session.automation &&
     !session.automationId &&
-    !session.runner &&
-    (!session.sandbox?.provider || session.sandbox.provider === "local")
+    !session.runner
   );
 }
 
-/** The ⋯ menu entry that moves a session running on this machine into a
- * Sandbox. A rare, one-way choice, so it lives with the other session
- * actions rather than on its own header badge. Providers resolve when the
- * submenu opens; the move itself goes through the confirm dialog, because
- * from the next message on the agent runs somewhere else. */
+/** The ⋯ menu entry that moves a session to another machine. Providers
+ * resolve when the submenu opens; the move itself goes through the confirm
+ * dialog, because from the next message on the agent runs somewhere else.
+ * Work travels along as a checkpoint on origin wherever the repository can
+ * hold one; the server asks before leaving anything behind. */
 export function MoveToSandboxMenu({
   session,
   running,
@@ -56,6 +64,7 @@ export function MoveToSandboxMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [providers, setProviders] = useState<string[] | null>(null);
+  const current = currentSandboxProvider(session);
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +81,7 @@ export function MoveToSandboxMenu({
     };
   }, [open]);
 
-  async function move(provider: string, confirmed: boolean) {
+  async function moveToSandbox(provider: string, confirmed: boolean) {
     await attachSandbox(session.id, provider, { confirm: confirmed })
       .then(async () => {
         toast(
@@ -87,7 +96,7 @@ export function MoveToSandboxMenu({
             description: cause.message,
             confirmLabel: "Move",
             destructive: true,
-            onConfirm: () => void move(provider, true),
+            onConfirm: () => void moveToSandbox(provider, true),
           });
           return;
         }
@@ -95,16 +104,60 @@ export function MoveToSandboxMenu({
       });
   }
 
-  function pick(provider: string) {
+  const movedToHost = () =>
+    toast("Moved to this machine. The next message runs here.");
+  const hostMoveFailed = (cause: unknown) =>
+    toast(errorMessage(cause, "Could not move to this machine"));
+
+  async function moveToHost() {
+    await detachSandbox(session.id)
+      .then(movedToHost)
+      .catch((cause: unknown) => {
+        // 428: no checkpoint could be taken; the move would start from the
+        // branch as origin has it. Ask, then move.
+        if (cause instanceof ApiError && cause.status === 428) {
+          confirm({
+            title: "Move to this machine anyway?",
+            description: cause.message,
+            confirmLabel: "Move",
+            destructive: true,
+            onConfirm: () =>
+              void detachSandbox(session.id, { confirm: true })
+                .then(movedToHost)
+                .catch(hostMoveFailed),
+          });
+          return;
+        }
+        hostMoveFailed(cause);
+      });
+  }
+
+  function pickSandbox(provider: string) {
     onClose();
     confirm({
       title: `Move to ${sandboxProviderLabel(provider)}?`,
-      description:
-        "The Sandbox starts now, clones this branch from origin, and takes over on the next message. Portals on this machine stop.",
+      description: current
+        ? `The current Sandbox's files are checkpointed and restored on ${sandboxProviderLabel(provider)}, then the old Sandbox is released. Portals restart there.`
+        : "The Sandbox starts now with this branch and its uncommitted changes, and takes over on the next message. Portals on this machine stop.",
       confirmLabel: "Move",
-      onConfirm: () => void move(provider, false),
+      onConfirm: () => void moveToSandbox(provider, false),
     });
   }
+
+  function pickHost() {
+    onClose();
+    confirm({
+      title: "Move to this machine?",
+      description:
+        "The Sandbox's files are checkpointed and restored into a worktree on this server, then the Sandbox is released. Its Portals stop.",
+      confirmLabel: "Move",
+      onConfirm: () => void moveToHost(),
+    });
+  }
+
+  const destinations = (providers || []).filter(
+    (provider) => provider !== current,
+  );
 
   return (
     <Menu.SubmenuRoot open={open} onOpenChange={setOpen}>
@@ -113,29 +166,42 @@ export function MoveToSandboxMenu({
         title={
           running
             ? "Available once the agent finishes"
-            : "Run this session in a Sandbox from the next message on"
+            : current
+              ? "Run this session on another machine from the next message on"
+              : "Run this session in a Sandbox from the next message on"
         }
         data-testid="move-to-sandbox"
       >
         <IconBox size={20} className={MENU_ICON} />
-        <span className="grow">Move to Sandbox</span>
+        <span className="grow">
+          {current ? "Move session" : "Move to Sandbox"}
+        </span>
         <IconChevronRight size={16} className="text-faint" />
       </Menu.SubmenuTrigger>
       <Menu.Popup className="min-w-[220px] max-w-[300px]">
+        {current && (
+          <Menu.Item
+            onClick={pickHost}
+            title="Move this session back to a worktree on this server"
+          >
+            <span className="grow">This machine</span>
+          </Menu.Item>
+        )}
         {providers === null ? (
           <div className="px-2.5 py-2 text-meta text-dim">
             Checking Sandboxes…
           </div>
-        ) : providers.length === 0 ? (
+        ) : destinations.length === 0 ? (
           <div className="px-2.5 py-2 text-meta text-dim">
-            No Sandbox is ready. Connect Daytona or Box in Workspace &gt;
-            Sandboxes.
+            {current
+              ? "No other Sandbox provider is ready."
+              : "No Sandbox is ready. Connect Daytona or Box in Workspace > Sandboxes."}
           </div>
         ) : (
-          providers.map((provider) => (
+          destinations.map((provider) => (
             <Menu.Item
               key={provider}
-              onClick={() => pick(provider)}
+              onClick={() => pickSandbox(provider)}
               title={`Move this session to ${sandboxProviderLabel(provider)}`}
             >
               <span className="grow">{sandboxProviderLabel(provider)}</span>

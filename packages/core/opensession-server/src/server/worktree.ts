@@ -942,6 +942,92 @@ export async function createWorktreeForExistingBranch(
 }
 
 /**
+ * Claim the checkout for `branch` on this machine and run `fn` while the git
+ * lock is still held, so that finding, creating, and then rewriting the
+ * checkout is one atomic step: no other claim, worktree creation, or restore
+ * for the branch can interleave with it. `created` is true when `fn` gets a
+ * checkout that did not exist a moment ago (its content is origin's or the
+ * default branch's, and nobody else can hold work in it yet); false when the
+ * branch was already checked out (a per-branch worktree, a leftover
+ * unregistered directory, or the shared checkout), which the caller must
+ * treat as somebody's. When `fn` fails on a checkout this call created, the
+ * worktree (and the branch, if this call created that too) is removed again
+ * before the lock is released, so a retry finds the branch free instead of
+ * a half-restored checkout it must treat as somebody's. Seeding and
+ * dependency install of a new worktree run after `fn` has succeeded, never
+ * over what `fn` writes.
+ */
+export async function withClaimedBranchWorktree<T>(
+  branch: string,
+  repoId: string | undefined,
+  gitEnv: Record<string, string> | undefined,
+  fn: (claim: {
+    path: string;
+    /** This call created the worktree (possibly on a branch this machine
+     * already had). */
+    created: boolean;
+    /** This call created the branch too, from origin or the default branch:
+     * nothing on this machine is lost by resetting it. A branch that existed
+     * without a worktree may carry commits that were never pushed. */
+    createdBranch: boolean;
+  }) => Promise<T>,
+): Promise<T> {
+  const repo = getRepo(repoId);
+  const shell = gitEnv ? $.env({ ...process.env, ...gitEnv }) : $;
+  return withGitLock(async () => {
+    await $`git -C ${repo.repo} worktree prune`.quiet().nothrow();
+    const existing = (await listWorktrees(repo.id)).find(
+      (w) => w.branch === branch,
+    );
+    if (existing)
+      return fn({ path: existing.path, created: false, createdBranch: false });
+    const shared = (
+      await $`git -C ${repo.repo} branch --show-current`
+        .quiet()
+        .nothrow()
+        .text()
+    ).trim();
+    if (shared === branch)
+      return fn({ path: repo.repo, created: false, createdBranch: false });
+    const wtPath = `${worktreesDir()}/${repo.wtPrefix}-${branch}`;
+    if (existsSync(wtPath))
+      return fn({ path: wtPath, created: false, createdBranch: false });
+    await shell`git -C ${repo.repo} fetch origin ${branch} --quiet`
+      .quiet()
+      .nothrow();
+    const hasRef = async (ref: string) =>
+      (await $`git -C ${repo.repo} show-ref --verify --quiet ${ref}`.nothrow())
+        .exitCode === 0;
+    let createdBranch = false;
+    if (await hasRef(`refs/heads/${branch}`)) {
+      await $`git -C ${repo.repo} worktree add ${wtPath} ${branch}`.quiet();
+    } else if (await hasRef(`refs/remotes/origin/${branch}`)) {
+      createdBranch = true;
+      await $`git -C ${repo.repo} worktree add -b ${branch} ${wtPath} origin/${branch}`.quiet();
+    } else {
+      // Neither this machine nor origin knows the branch: start it at the
+      // default branch and let the caller move it where it belongs.
+      createdBranch = true;
+      const start = await defaultStartPoint(repo);
+      await $`git -C ${repo.repo} worktree add -b ${branch} ${wtPath} ${start}`.quiet();
+    }
+    let result: T;
+    try {
+      result = await fn({ path: wtPath, created: true, createdBranch });
+    } catch (error) {
+      await $`git -C ${repo.repo} worktree remove --force --force ${wtPath}`
+        .quiet()
+        .nothrow();
+      if (createdBranch)
+        await $`git -C ${repo.repo} branch -D ${branch}`.quiet().nothrow();
+      throw error;
+    }
+    void seedAndInstallWorktree(repo, wtPath, branch);
+    return result;
+  });
+}
+
+/**
  * Resolve a start-point ref for a new worktree branch off `base`: the local
  * ref when it carries commits `origin/<base>` lacks (a stacked worktree off a
  * session branch with unpushed work), otherwise `origin/<base>`, otherwise

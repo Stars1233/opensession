@@ -10,7 +10,8 @@ import {
   sandboxesEnabled,
   sandboxProviderConfigured,
 } from "./sandbox/config";
-import { touchNativeSession } from "./session-cache";
+import { touchNativeSession, updateSessionFile } from "./session-cache";
+import { withSessionLifecycleLane } from "./sandbox/lifecycle-lane";
 import { dropSandboxPreviewRoutes } from "./preview";
 import {
   listSandboxPortalServices,
@@ -31,43 +32,73 @@ import {
 } from "./workload-identity";
 import { getRepo } from "./worktree";
 import { revokeWorkloadIdentityForSandbox } from "./workload-identity";
-import type { UnifiedSession } from "./types";
+import type { NativeSessionFile, UnifiedSession } from "./types";
 
 /**
- * Tear down a session's sandbox, including its workspace disk (documented
- * data loss: push your work). Best-effort and detached so a provider hiccup
- * never blocks the caller
- * (session delete, archive sweep). `clearSandboxId` drops the stale id from
- * the session file so later sweeps don't re-destroy — only for sessions that
- * keep existing (the archive sweep); a deleted session has no file to touch.
+ * Tear down a session's Sandboxes, including their workspace disks
+ * (documented data loss: push your work): the workspace Sandbox and, for a
+ * host session, the Portal Sandbox that ran its dev server. Best-effort and
+ * detached so a provider hiccup never blocks the caller (session delete,
+ * archive sweep). `clearSandboxId` drops the stale ids from the session file
+ * so later sweeps don't re-destroy — only for sessions that keep existing
+ * (the archive sweep); a deleted session has no file to touch.
  */
 export function destroySessionSandbox(
   session: UnifiedSession,
   why: string,
   clearSandboxId = false,
 ): void {
+  const retire = (
+    record: { provider: string; sandboxId?: string },
+    label: string,
+    clear: () => void,
+  ) => {
+    if (!record.sandboxId || !isRemoteSandboxProvider(record.provider)) return;
+    void (async () => {
+      try {
+        await teardownSandbox(record.provider, record.sandboxId!);
+        console.log(
+          `[sandbox] destroyed ${record.sandboxId} for ${session.id} (${label})`,
+        );
+        if (clearSandboxId && session.source === "opensession") clear();
+      } catch (e) {
+        console.warn(
+          `[sandbox] destroy ${record.sandboxId} for ${session.id} (${label}) failed:`,
+          e,
+        );
+      }
+    })();
+  };
   const sb = session.sandbox;
-  if (!sb?.sandboxId) return;
-  if (!isRemoteSandboxProvider(sb.provider)) return;
-  void (async () => {
-    try {
-      revokeWorkloadIdentityForSandbox(sb.sandboxId!);
-      await dropSandboxPreviewRoutes(sb.sandboxId!);
-      await getSandboxProvider(sb.provider).destroy(sb.sandboxId!);
-      console.log(
-        `[sandbox] destroyed ${sb.sandboxId} for ${session.id} (${why})`,
-      );
-      if (clearSandboxId && session.source === "opensession")
-        touchNativeSession(session.id, {
-          sandbox: { ...sb, sandboxId: undefined },
-        });
-    } catch (e) {
-      console.warn(
-        `[sandbox] destroy ${sb.sandboxId} for ${session.id} (${why}) failed:`,
-        e,
-      );
-    }
-  })();
+  if (sb)
+    retire(sb, why, () =>
+      touchNativeSession(session.id, {
+        sandbox: { ...sb, sandboxId: undefined },
+      }),
+    );
+  const portal = session.portalSandbox;
+  if (portal)
+    retire(portal, `${why}, Portal Sandbox`, () =>
+      touchNativeSession(session.id, { portalSandbox: undefined }),
+    );
+}
+
+/**
+ * Tear one Sandbox machine down in the only safe order. Its workload-identity
+ * leases are revoked first: a destroy that fails, or that the provider
+ * swallows, must never leave a running machine that can still exchange for
+ * credentials. Then its Portal routes are dropped and the machine is
+ * destroyed. Throws when the provider refuses; the leases are gone either
+ * way. Every path that retires a Sandbox (delete, archive sweep, a move away
+ * from it, a rebuild) goes through here.
+ */
+export async function teardownSandbox(
+  provider: string,
+  sandboxId: string,
+): Promise<void> {
+  revokeWorkloadIdentityForSandbox(sandboxId);
+  await dropSandboxPreviewRoutes(sandboxId);
+  await getSandboxProvider(provider).destroy(sandboxId);
 }
 
 /**
@@ -78,67 +109,203 @@ export function destroySessionSandbox(
  */
 export async function activeSandboxFor(
   session: UnifiedSession,
-  options: { wake?: boolean } = {},
+  options: LiveSandboxOptions = {},
 ): Promise<Sandbox | null> {
   const sb = session.sandbox;
   if (!sb?.provider || !sb.sandboxId) return null;
+  const sandboxId = sb.sandboxId;
+  return liveSandbox(session, { ...sb, sandboxId }, options, {
+    disowned: "the session no longer runs on this Sandbox",
+    persist: (patch) =>
+      session.source === "opensession"
+        ? persistIfStillRecorded(session.id, (data) =>
+            data.sandbox?.sandboxId === sandboxId
+              ? { ...data, sandbox: { ...data.sandbox, ...patch } }
+              : null,
+          )
+        : Promise.resolve(true),
+  });
+}
+
+/**
+ * Whether the session's Portals belong to a workspace Sandbox: one it runs
+ * in, or one it is moving into. A move records the provider with
+ * `preparing` before it has a machine, and from that write on nothing else
+ * may own the session's Portals: a Portal Sandbox that finished coming up
+ * meanwhile is unowned, and the move's own machine runs them.
+ */
+export function workspaceSandboxClaimed(
+  session: Pick<UnifiedSession, "sandbox">,
+): boolean {
+  return (
+    Boolean(session.sandbox?.sandboxId) ||
+    isRemoteSandboxProvider(session.sandbox?.provider)
+  );
+}
+
+/**
+ * The same for a host session's Portal Sandbox (portal-sandbox.ts): the
+ * machine that runs its dev server. Its lifecycle is recorded on
+ * `portalSandbox`, never on `sandbox`, which stays the session's own.
+ */
+export async function activePortalSandboxFor(
+  session: UnifiedSession,
+  options: LiveSandboxOptions = {},
+): Promise<Sandbox | null> {
+  const record = session.portalSandbox;
+  if (!record?.provider || !record.sandboxId) return null;
+  const sandboxId = record.sandboxId;
+  return liveSandbox(session, { ...record, sandboxId }, options, {
+    disowned: "the session no longer runs its Portals on this machine",
+    persist: (patch) =>
+      persistIfStillRecorded(session.id, (data) =>
+        data.portalSandbox?.sandboxId === sandboxId &&
+        !workspaceSandboxClaimed(data)
+          ? { ...data, portalSandbox: { ...data.portalSandbox, ...patch } }
+          : null,
+      ),
+  });
+}
+
+type LifecyclePatch = {
+  lifecycle: "waking" | "awake" | "needs_attention";
+  lastLifecycleError: string | undefined;
+};
+
+/**
+ * Write a lifecycle state onto the record that still names this machine,
+ * and only then: the record is read and written under the session's
+ * mutation lock, so a move or a release that took the machine away from the
+ * session in the meantime is never undone by a wake that started before it.
+ * `false` when the record no longer names the machine (nothing written).
+ */
+async function persistIfStillRecorded(
+  sessionId: string,
+  patch: (data: NativeSessionFile) => NativeSessionFile | null,
+): Promise<boolean> {
+  let recorded = false;
+  await updateSessionFile(sessionId, (data) => {
+    const next = patch(data);
+    recorded = next !== null;
+    return next ?? data;
+  });
+  return recorded;
+}
+
+type SandboxLifecycle = {
+  /** Why a wake fails when the session stopped running on this machine. */
+  disowned: string;
+  /** Record a lifecycle state; `false`, with nothing written, when the
+   * session's record no longer names this machine. */
+  persist: (patch: LifecyclePatch) => Promise<boolean>;
+};
+
+type LiveSandboxOptions = {
+  wake?: boolean;
+  /**
+   * Runs after a wake brought the machine back and before the Portals it
+   * was running are relaunched: a Portal Sandbox lands the host checkpoint
+   * here, so the app that comes back shows the current tree. Its failure
+   * is the wake's failure and propagates to the caller; the Portals then
+   * stay down rather than come back on the older tree.
+   */
+  beforeRestore?: (sandbox: Sandbox) => Promise<void>;
+};
+
+/**
+ * A wake runs on the session's lifecycle lane from before the resume, where
+ * moves, releases, and deletion run and where run admission waits: a turn
+ * asked for while the machine comes up starts once the wake is finalized
+ * (the machine recorded awake, its checkout landed, its Portals relaunched),
+ * never under it. Each record write lands only while the record still names
+ * this machine. A wake that resumed a machine the session has meanwhile
+ * stopped running on throws `disowned` and relaunches nothing: the move
+ * that took the machine away tears it down.
+ */
+async function liveSandbox(
+  session: UnifiedSession,
+  record: { provider: string; sandboxId: string },
+  options: LiveSandboxOptions,
+  lifecycle: SandboxLifecycle,
+): Promise<Sandbox | null> {
   if (!sandboxesEnabled()) return null;
-  if (isRemoteSandboxProvider(sb.provider)) {
-    if (!sandboxProviderConfigured(sb.provider)) return null;
-    try {
-      const provider = getSandboxProvider(sb.provider);
-      let sandbox = await provider.get(sb.sandboxId);
-      let woke = false;
-      if (
-        sandbox &&
-        (await sandbox.status()) === "stopped" &&
-        options.wake &&
-        provider.resume
-      ) {
-        if (session.source === "opensession")
-          touchNativeSession(session.id, {
-            sandbox: {
-              ...sb,
-              lifecycle: "waking",
-              lastLifecycleError: undefined,
-            },
-          });
-        sandbox = await provider.resume(sb.sandboxId);
-        woke = true;
-        if (
-          sandbox &&
-          (await sandbox.status()) === "running" &&
-          session.source === "opensession"
-        )
-          touchNativeSession(session.id, {
-            sandbox: {
-              ...sb,
-              lifecycle: "awake",
-              lastLifecycleError: undefined,
-            },
-          });
-      }
-      if (sandbox && (await sandbox.status()) === "running") {
-        if (woke) await restoreSandboxPortals(session, sandbox);
-        return sandbox;
-      }
-      return null;
-    } catch (error) {
-      if (options.wake && session.source === "opensession")
-        touchNativeSession(session.id, {
-          sandbox: {
-            ...sb,
-            lifecycle: "needs_attention",
-            lastLifecycleError:
-              error instanceof Error
-                ? error.message.slice(0, 240)
-                : String(error).slice(0, 240),
-          },
-        });
-      return null;
-    }
+  if (!isRemoteSandboxProvider(record.provider)) return null;
+  if (!sandboxProviderConfigured(record.provider)) return null;
+  const failed = async (error: unknown) => {
+    if (options.wake)
+      await lifecycle.persist({
+        lifecycle: "needs_attention",
+        lastLifecycleError:
+          error instanceof Error
+            ? error.message.slice(0, 240)
+            : String(error).slice(0, 240),
+      });
+    return null;
+  };
+  const provider = getSandboxProvider(record.provider);
+  let sandbox: Sandbox | null;
+  let stopped: boolean;
+  try {
+    sandbox = await provider.get(record.sandboxId);
+    const status = sandbox ? await sandbox.status() : "gone";
+    if (sandbox && status === "running") return sandbox;
+    stopped = status === "stopped";
+  } catch (error) {
+    return failed(error);
   }
-  return null;
+  if (!stopped || !options.wake || !provider.resume) return null;
+  const resume = provider.resume.bind(provider);
+  return withSessionLifecycleLane(session.id, async () => {
+    if (
+      !(await lifecycle.persist({
+        lifecycle: "waking",
+        lastLifecycleError: undefined,
+      }))
+    )
+      throw new Error(lifecycle.disowned);
+    let woken: Sandbox | null;
+    try {
+      woken = await resume(record.sandboxId);
+      if (woken && (await woken.status()) !== "running") woken = null;
+    } catch (error) {
+      return failed(error);
+    }
+    if (!woken) return null;
+    if (
+      !(await lifecycle.persist({
+        lifecycle: "awake",
+        lastLifecycleError: undefined,
+      }))
+    )
+      throw new Error(lifecycle.disowned);
+    // Not caught: a machine that is up but could not be prepared is not
+    // "sleeping or unavailable", and the reason belongs to the caller.
+    await options.beforeRestore?.(woken);
+    try {
+      await restoreSandboxPortals(session, woken);
+    } catch (error) {
+      return failed(error);
+    }
+    return woken;
+  });
+}
+
+/** Whether a recorded Sandbox no longer exists at the provider, as opposed
+ * to sleeping or unreachable. A provider error reads as "still there". */
+export async function recordedSandboxGone(record: {
+  provider: string;
+  sandboxId: string;
+}): Promise<boolean> {
+  if (!isRemoteSandboxProvider(record.provider)) return false;
+  if (!sandboxProviderConfigured(record.provider)) return false;
+  try {
+    const sandbox = await getSandboxProvider(record.provider).get(
+      record.sandboxId,
+    );
+    return !sandbox || (await sandbox.status()) === "gone";
+  } catch {
+    return false;
+  }
 }
 
 /**

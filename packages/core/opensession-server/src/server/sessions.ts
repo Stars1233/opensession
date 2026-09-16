@@ -1110,6 +1110,8 @@ export function nativeSessionRow(data: NativeSessionFile): UnifiedSession {
     loop: data.loop,
     slackThreads: data.slackThreads,
     sandbox: data.sandbox,
+    sandboxCheckpoint: data.sandboxCheckpoint,
+    portalSandbox: data.portalSandbox,
     lastActivity: data.lastActivity,
     createdAt: data.createdAt,
     isRunning: false,

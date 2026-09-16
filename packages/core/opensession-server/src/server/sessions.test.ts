@@ -136,6 +136,34 @@ describe("removeTombstonedSessionArtifacts", () => {
   });
 });
 
+describe("nativeSessionRow", () => {
+  it("carries the Sandbox checkpoint and Portal Sandbox records through", async () => {
+    const { nativeSessionRow } = await import("./sessions");
+    const checkpoint = {
+      ref: "refs/opensession/checkpoints/os-row",
+      commit: "c".repeat(40),
+      head: "h".repeat(40),
+      tree: "t".repeat(40),
+      branch: "feature",
+      at: "2026-09-16T00:00:00.000Z",
+    };
+    const row = nativeSessionRow({
+      id: "os-row",
+      branch: "feature",
+      worktreeDir: "/tmp/os-row",
+      mode: "code",
+      createdAt: "2026-09-16T00:00:00.000Z",
+      sandboxCheckpoint: checkpoint,
+      portalSandbox: { provider: "daytona", sandboxId: "sb-portals" },
+    } as never);
+    expect(row.sandboxCheckpoint).toEqual(checkpoint);
+    expect(row.portalSandbox).toEqual({
+      provider: "daytona",
+      sandboxId: "sb-portals",
+    });
+  });
+});
+
 describe("getAllSessions", () => {
   it("resolves an exact Slack deep link directly from its owning file", async () => {
     const key = `C123-${Date.now()}.123456`;
