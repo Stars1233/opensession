@@ -977,15 +977,10 @@ export const MessageBubble = function MessageBubble({
     );
   }
 
-  // Assistant replies carry the same identity as this session's peer messages.
-  // The trailing row is for media the body did not already place (lib/placed-media.ts).
+  // Ordinary replies need no speaker label: the conversation header identifies
+  // this agent. Only agent-to-agent messages need the extra routing context.
   return (
     <div className={cn(msgRow, enterClass)} data-eid={e.id}>
-      {sessionId && (
-        <div className="mb-2 flex items-center gap-2">
-          <AgentIdentity sessionId={sessionId} current />
-        </div>
-      )}
       <ClampedBody
         className={cn(msgBody, "markdown text-fg")}
         content={displayContent}

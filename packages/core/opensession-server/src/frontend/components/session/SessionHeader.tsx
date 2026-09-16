@@ -23,7 +23,8 @@ import { OverflowFadeText } from "../../ui/overflow-fade-text";
 import { Tooltip } from "../../ui/tooltip";
 import { TopBar, TopBarActions, TopBarLeading } from "../../ui/top-bar";
 import { BrandMark } from "../BrandMark";
-import { AgentIdentity } from "../AgentIdentity";
+import { AgentAvatar } from "../../ui/agent-avatar";
+import { agentIdentity } from "../../lib/agent-identity";
 import {
   IconArchive,
   IconChevronDown,
@@ -215,11 +216,19 @@ export function SessionHeader({
             {parentSession ? session.title : workspaceName || session.title}
           </OverflowFadeText>
         )}
-        <AgentIdentity
-          sessionId={session.id}
-          current
-          className="max-w-72 shrink-0"
-        />
+        <Tooltip
+          label={`Current agent: ${agentIdentity(session.id).name}`}
+          side="bottom"
+        >
+          <span
+            role="img"
+            tabIndex={0}
+            aria-label={`Current agent: ${agentIdentity(session.id).name}`}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-control focus-visible:outline-2 focus-visible:outline-focus-ring"
+          >
+            <AgentAvatar sessionId={session.id} />
+          </span>
+        </Tooltip>
         {/* Where the session came FROM, as a quiet mark AFTER the name. It
             used to be a tinted pill at the head of the row, which made the
             loudest thing in the bar a fact you read once — and put it in

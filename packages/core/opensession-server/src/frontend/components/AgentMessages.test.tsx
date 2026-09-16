@@ -113,14 +113,17 @@ test("failed and unconfirmed sends are not presented as delivered", () => {
   expect(unknown).toContain("Delivery unconfirmed");
 });
 
-test("ordinary replies use the same identity but system notices and humans stay separate", () => {
+test("ordinary replies stay uncluttered while system notices and humans stay separate", () => {
   const html = renderToStaticMarkup(
     <MessageBubble
       entry={{ id: "a", type: "assistant", timestamp, content: "Done." }}
       sessionId="os-self"
     />,
   );
-  expect(html).toContain(agentIdentity("os-self").name);
+  expect(html).toContain("Done.");
+  expect(html).not.toContain(agentIdentity("os-self").name);
+  expect(html).not.toContain("Current agent");
+  expect(html).not.toContain("<svg");
   const system = renderToStaticMarkup(
     <MessageBubble
       entry={{
@@ -168,4 +171,45 @@ test("identifies the local agent and keeps sender and recipient in one header", 
       header.indexOf(agentIdentity(to).name),
     );
   }
+});
+
+test("the top bar keeps only an accessible avatar, with its name in the tooltip", async () => {
+  const { SessionHeader } = await import("./session/SessionHeader");
+  const html = renderToStaticMarkup(
+    <SessionHeader
+      session={{
+        id: "os-self",
+        source: "opensession",
+        branch: null,
+        worktreeDir: null,
+        startedBy: null,
+        title: "Check the retry loop",
+        lastActivity: timestamp,
+        createdAt: timestamp,
+        isRunning: false,
+      }}
+      hasWorkspace={false}
+      models={[]}
+      archiving={false}
+      onArchive={() => {}}
+      renameDraft={null}
+      onRenameDraftChange={() => {}}
+      onCommitRename={() => {}}
+      onCancelRename={() => {}}
+      canRename={false}
+      menu={null}
+      isPhone={false}
+      actions={null}
+      headerRef={null}
+      headerActionsRef={null}
+    />,
+  );
+  expect(html).toContain(
+    `aria-label="Current agent: ${agentIdentity("os-self").name}"`,
+  );
+  expect(html).toContain('tabindex="0"');
+  expect(html).toContain("<svg");
+  expect(html).not.toContain(`>${agentIdentity("os-self").name}</span>`);
+  expect(html).not.toContain(">Current agent</span>");
+  expect(html).toContain("Check the retry loop");
 });
