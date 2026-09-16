@@ -249,7 +249,10 @@ type ScriptRunner = (
  * (the agent renamed or switched it, which run-session can only notice for a
  * checkout on this machine), the session record follows in the same write,
  * so the checkpoint restores onto, and later publication targets, the
- * branch the work is really on.
+ * branch the work is really on. For the same reason nothing here decides
+ * from the record alone whether the checkout is on the default branch: a
+ * session recorded on `main` whose agent switched to a feature branch
+ * would otherwise never get a checkpoint. The script looks and says.
  */
 async function runCheckpoint(
   session: CheckpointSession,
@@ -260,8 +263,6 @@ async function runCheckpoint(
   const repo = getRepo(session.repo);
   if (!checkpointCapable(repo))
     return { state: "skipped", reason: "repository is not on GitHub" };
-  if (repo.defaultBranch === session.branch)
-    return { state: "skipped", reason: "session is on the default branch" };
   const env = await checkpointGitEnv(repo);
   if (!env) return { state: "skipped", reason: "no GitHub credential" };
   const ref = checkpointRef(session.id);
@@ -396,8 +397,14 @@ export function checkpointHostWorkspace(
  * the detaching session's own former worktree (`ownWorktreeDir`) is
  * re-adopted when that is provably lossless, that is, its tree is clean and
  * its tip is an ancestor of the checkpoint. Anything else, including a dirty
- * tree of the session's own, is left for a person to look at. A checkpoint
- * taken on another branch than `branch` is refused before anything happens.
+ * tree of the session's own, is left for a person to look at. A local branch
+ * this machine already had without a worktree (left behind by an earlier
+ * cleanup, possibly with commits that were never pushed) is restored onto
+ * only when the checkpoint extends its tip, for the same reason; only a
+ * branch created for this restore, from origin or the default branch, may be
+ * reset to the checkpoint outright, because nothing on this machine is lost
+ * that way. A checkpoint taken on another branch than `branch` is refused
+ * before anything happens.
  */
 export async function restoreCheckpointToHostWorktree(
   repo: Repo,
@@ -415,7 +422,7 @@ export async function restoreCheckpointToHostWorktree(
     branch,
     repo.id,
     env,
-    async ({ path: dir, created }) => {
+    async ({ path: dir, created, createdBranch }) => {
       if (!created) {
         if (dir !== ownWorktreeDir || isSharedCheckoutDir(dir))
           throw new Error(
@@ -432,7 +439,7 @@ export async function restoreCheckpointToHostWorktree(
       const script = `cd ${shellQuoteWord(dir)} && ${checkpointRestoreScript(
         checkpoint.ref,
         checkpoint.commit,
-        { branch, onlyForward: !created },
+        { branch, onlyForward: !createdBranch },
       )}`;
       const result = await $`bash -c ${script}`
         .env({ ...process.env, ...env })

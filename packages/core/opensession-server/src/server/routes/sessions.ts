@@ -2085,7 +2085,12 @@ export async function handleSessionsRoutes(
         searchIndex().remove(`session:${id}`);
       } catch {}
     };
-    const finishDeletion = async () => {
+    // Every deletion step works on the record as it stands once the lifecycle
+    // lane is held, not on the one this request found before it waited: a
+    // checkpoint that finished meanwhile recorded its ref on the session,
+    // and a deletion still holding the earlier copy would leave that ref,
+    // uncommitted files included, on origin for good.
+    const finishDeletion = async (session: UnifiedSession) => {
       // Runner workspace deletion is opt-in on the Runner. It remains
       // best-effort so an offline machine never blocks deleting a session.
       if (session.runner && session.repo && session.worktreeDir) {
@@ -2149,8 +2154,9 @@ export async function handleSessionsRoutes(
     const recoverTombstonedDeletion = () =>
       withSessionLifecycleLane(session.id, async () => {
         try {
-          await removeTombstonedSessionArtifacts(session);
-          await finishDeletion();
+          const ghost = (await findSessionAsync(session.id)) ?? session;
+          await removeTombstonedSessionArtifacts(ghost);
+          await finishDeletion(ghost);
           return Response.json({ ok: true });
         } catch (e: any) {
           return Response.json({ error: e.message }, { status: 500 });
@@ -2191,10 +2197,15 @@ export async function handleSessionsRoutes(
       const result = await withSessionLifecycleLane(session.id, () =>
         withSessionMutationLock(session.id, async () => {
           try {
+            // The lane may have been held by a checkpoint or a move; what
+            // they wrote is what gets deleted. A session gone meanwhile has
+            // been deleted by someone else, which is the outcome asked for.
+            const current = await findSessionAsync(session.id);
+            if (!current) return { status: 200, body: { ok: true } };
             const runIds = [
-              session.claudeSessionId,
-              session.codexThreadId,
-              session.id,
+              current.claudeSessionId,
+              current.codexThreadId,
+              current.id,
             ];
             if (
               runIds.some((id) => !!id && isAgentSessionBusy(id!)) &&
@@ -2210,24 +2221,24 @@ export async function handleSessionsRoutes(
             }
             // Local Portals are their own detached process groups. Stop them before
             // deleting session metadata or optionally removing the worktree.
-            if (session.runner)
+            if (current.runner)
               await dropRunnerPortalRoutes(
-                session.id,
-                session.runner.id,
-                session.startedBy || undefined,
+                current.id,
+                current.runner.id,
+                current.startedBy || undefined,
               );
-            else if (session.worktreeDir && !session.sandbox?.sandboxId)
+            else if (current.worktreeDir && !current.sandbox?.sandboxId)
               await stopAllPortalServices({
-                sessionId: session.id,
-                worktreeDir: session.worktreeDir,
+                sessionId: current.id,
+                worktreeDir: current.worktreeDir,
               });
             // The serialized delete must remove the file before its permanent tombstone.
             // Tombstoning first drops this active kernel from the map, so deleteSession's
             // nested compatibility write re-enters through a fresh kernel and is fenced
             // as a late writer, leaving a visible but immutable ghost session behind.
-            await deleteSession(session);
-            await tombstoneSessionKernel(session.id);
-            await finishDeletion();
+            await deleteSession(current);
+            await tombstoneSessionKernel(current.id);
+            await finishDeletion(current);
             return { status: 200, body: { ok: true } };
           } catch (e: any) {
             return { status: 500, body: { error: e.message } };

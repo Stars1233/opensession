@@ -961,7 +961,16 @@ export async function withClaimedBranchWorktree<T>(
   branch: string,
   repoId: string | undefined,
   gitEnv: Record<string, string> | undefined,
-  fn: (claim: { path: string; created: boolean }) => Promise<T>,
+  fn: (claim: {
+    path: string;
+    /** This call created the worktree (possibly on a branch this machine
+     * already had). */
+    created: boolean;
+    /** This call created the branch too, from origin or the default branch:
+     * nothing on this machine is lost by resetting it. A branch that existed
+     * without a worktree may carry commits that were never pushed. */
+    createdBranch: boolean;
+  }) => Promise<T>,
 ): Promise<T> {
   const repo = getRepo(repoId);
   const shell = gitEnv ? $.env({ ...process.env, ...gitEnv }) : $;
@@ -970,16 +979,19 @@ export async function withClaimedBranchWorktree<T>(
     const existing = (await listWorktrees(repo.id)).find(
       (w) => w.branch === branch,
     );
-    if (existing) return fn({ path: existing.path, created: false });
+    if (existing)
+      return fn({ path: existing.path, created: false, createdBranch: false });
     const shared = (
       await $`git -C ${repo.repo} branch --show-current`
         .quiet()
         .nothrow()
         .text()
     ).trim();
-    if (shared === branch) return fn({ path: repo.repo, created: false });
+    if (shared === branch)
+      return fn({ path: repo.repo, created: false, createdBranch: false });
     const wtPath = `${worktreesDir()}/${repo.wtPrefix}-${branch}`;
-    if (existsSync(wtPath)) return fn({ path: wtPath, created: false });
+    if (existsSync(wtPath))
+      return fn({ path: wtPath, created: false, createdBranch: false });
     await shell`git -C ${repo.repo} fetch origin ${branch} --quiet`
       .quiet()
       .nothrow();
@@ -1001,7 +1013,7 @@ export async function withClaimedBranchWorktree<T>(
     }
     let result: T;
     try {
-      result = await fn({ path: wtPath, created: true });
+      result = await fn({ path: wtPath, created: true, createdBranch });
     } catch (error) {
       await $`git -C ${repo.repo} worktree remove --force --force ${wtPath}`
         .quiet()

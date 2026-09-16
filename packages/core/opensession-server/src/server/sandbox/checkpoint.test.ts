@@ -401,6 +401,9 @@ describe("checkpoint script", () => {
       .quiet()
       .nothrow();
     expect(refused.exitCode).not.toBe(0);
+    expect(refused.stderr.toString()).toContain(
+      "commits the checkpoint does not include",
+    );
     expect((await git(diverged)`git rev-parse HEAD`.text()).trim()).toBe(
       theirTip,
     );

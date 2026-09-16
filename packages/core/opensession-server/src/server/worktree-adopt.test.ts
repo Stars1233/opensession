@@ -320,3 +320,62 @@ describe("review worktree reuse", () => {
     ).not.toContain(`worktree ${wtPath}\nlocked`);
   });
 });
+
+describe("withClaimedBranchWorktree", () => {
+  test("a dormant local branch is reported as pre-existing and survives a failed claim", async () => {
+    const { withClaimedBranchWorktree } = await import("./worktree");
+    // A branch with an unpushed commit and no worktree: an earlier cleanup
+    // removed the checkout and kept the branch.
+    await git(repoDir, "branch", "dormant", "origin/main");
+    await git(repoDir, "checkout", "dormant");
+    writeFileSync(join(repoDir, "dormant.txt"), "unpushed\n");
+    await git(repoDir, "add", "dormant.txt");
+    await git(repoDir, "commit", "-m", "unpushed");
+    await git(repoDir, "checkout", "main");
+    const tip = (await $`git -C ${repoDir} rev-parse dormant`.text()).trim();
+
+    let claim:
+      | { path: string; created: boolean; createdBranch: boolean }
+      | undefined;
+    await expect(
+      withClaimedBranchWorktree("dormant", "scratch", undefined, async (c) => {
+        claim = c;
+        throw new Error("restore refused");
+      }),
+    ).rejects.toThrow("restore refused");
+    expect(claim).toEqual({
+      path: join(root, "worktrees", "scratch-dormant"),
+      created: true,
+      createdBranch: false,
+    });
+    expect(existsSync(join(root, "worktrees", "scratch-dormant"))).toBe(false);
+    expect((await $`git -C ${repoDir} rev-parse dormant`.text()).trim()).toBe(
+      tip,
+    );
+  });
+
+  test("a branch created for the claim is removed again when the claim fails", async () => {
+    const { withClaimedBranchWorktree } = await import("./worktree");
+    let claim: { created: boolean; createdBranch: boolean } | undefined;
+    await expect(
+      withClaimedBranchWorktree(
+        "brand-new",
+        "scratch",
+        undefined,
+        async (c) => {
+          claim = c;
+          throw new Error("restore refused");
+        },
+      ),
+    ).rejects.toThrow("restore refused");
+    expect(claim).toMatchObject({ created: true, createdBranch: true });
+    expect(existsSync(join(root, "worktrees", "scratch-brand-new"))).toBe(
+      false,
+    );
+    expect(
+      (
+        await $`git -C ${repoDir} show-ref --verify --quiet refs/heads/brand-new`.nothrow()
+      ).exitCode,
+    ).not.toBe(0);
+  });
+});

@@ -159,10 +159,15 @@ transcript, so the conversation carries over.
   else's work: finding, creating, and rewriting the worktree is one step
   under the repository's git lock, and a branch already checked out on this
   machine refuses the move (409, naming the checkout), except the session's
-  own former worktree when it is clean and the checkpoint extends its tip. A
-  restore that fails on a worktree the move just created removes that
-  worktree again before the lock is released, so retrying the move finds
-  the branch free rather than a half-restored checkout.
+  own former worktree when it is clean and the checkpoint extends its tip.
+  The same rule protects a branch this machine still has without a worktree
+  (left by an earlier cleanup, possibly with commits that were never
+  pushed): it is restored onto only when the checkpoint extends its tip;
+  only a branch created for the restore is reset outright. A restore that
+  fails on a worktree the move just created removes that worktree again
+  (and the branch, if it created that too) before the lock is released, so
+  retrying the move finds the branch free rather than a half-restored
+  checkout.
 
 Whichever way a session leaves a Sandbox, the old machine is retired the
 same way a deleted session's is: its workload-identity leases are revoked

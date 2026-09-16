@@ -1958,7 +1958,10 @@ export function checkpointRestoreScript(
     `git fetch --no-tags --quiet origin ${shellQuoteWord(`+${ref}:refs/opensession/checkpoint`)}`,
     `test "$(git rev-parse --verify 'refs/opensession/checkpoint^{commit}')" = ${shellQuoteWord(commit)}`,
     ...(options.onlyForward
-      ? ["git merge-base --is-ancestor HEAD refs/opensession/checkpoint"]
+      ? [
+          // merge-base says nothing on failure; the caller relays stderr.
+          "{ git merge-base --is-ancestor HEAD refs/opensession/checkpoint || { echo 'this checkout has commits the checkpoint does not include; restoring would drop them' >&2; false; }; }",
+        ]
       : []),
     "git -c advice.detachedHead=false reset --hard --quiet refs/opensession/checkpoint",
     "git reset --mixed --quiet 'refs/opensession/checkpoint^'",
