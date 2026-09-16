@@ -39,8 +39,23 @@ describe("oneShot", () => {
     ).toBe("pi/openai/gpt-5.6-luna");
   });
 
+  test("uses OpenAI for default name generation on Codex-only installs", () => {
+    // Exact refusal from anthropic-bridge when no Claude account was added.
+    const error =
+      "no Claude accounts configured (add one in Settings → Providers)";
+    const primary = oneShotModel("claude-haiku-4-5");
+    expect(haikuOneShotShouldFallOver(error)).toBe(true);
+    expect(oneShotFallbackModels(primary, error, undefined)).toEqual([
+      "pi/openai/gpt-5.6-luna",
+    ]);
+  });
+
   test("does not fall over for caller or non-Haiku failures", () => {
     expect(haikuOneShotShouldFallOver("invalid model id")).toBe(false);
+    expect(haikuOneShotShouldFallOver("server restarting")).toBe(false);
+    expect(haikuOneShotShouldFallOver("The Pi engine is not enabled")).toBe(
+      false,
+    );
     expect(
       haikuOneShotFallbackModel(
         "pi/anthropic/claude-haiku-4-5",

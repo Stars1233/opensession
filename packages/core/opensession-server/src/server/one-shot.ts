@@ -77,8 +77,10 @@ export function oneShotModel(model?: string): string | undefined {
   return toPiModel(requested);
 }
 
+// An empty Claude pool is not exhaustion to the interactive runner, but it
+// must allow tool-less Haiku helpers to use OpenAI on Codex-only installs.
 const HAIKU_FALLOVER_SHAPES =
-  /usage[-_ ]?limit|weekly limit|no usable|exhausted|sidelined|rate[-_ ]?limit|quota|subscription access|disabled Claude|timed out|overloaded|too many requests|\b(429|500|502|503|529)\b|ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/i;
+  /usage[-_ ]?limit|weekly limit|no usable|no Claude accounts configured|exhausted|sidelined|rate[-_ ]?limit|quota|subscription access|disabled Claude|timed out|overloaded|too many requests|\b(429|500|502|503|529)\b|ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/i;
 
 export function haikuOneShotShouldFallOver(error: string | null): boolean {
   if (!error) return true;
