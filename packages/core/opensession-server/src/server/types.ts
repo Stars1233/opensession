@@ -378,6 +378,8 @@ export interface SlackSessionOrigin {
 }
 
 export interface SlackSessionFile {
+  /** Legacy Slack runs used code mode; explicit ask sessions remain read-only. */
+  mode?: "ask" | "code";
   branch?: string | null;
   userId?: string;
   message?: string;

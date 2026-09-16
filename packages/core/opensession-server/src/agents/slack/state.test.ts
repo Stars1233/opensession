@@ -34,6 +34,17 @@ function session(patch: Partial<SlackSession> = {}): SlackSession {
 }
 
 describe("saveSession", () => {
+  test("round-trips explicit modes and preserves ask on an ordinary save", async () => {
+    const s = session({ threadTs: "mode.1", mode: "ask" });
+    const key = getSessionKey(s.channel, s.threadTs);
+    await saveSession(s);
+    expect((await loadSession(key))?.mode).toBe("ask");
+    await saveSession(session({ threadTs: "mode.1" }));
+    expect((await loadSession(key))?.mode).toBe("ask");
+    await saveSession({ ...s, mode: "code" });
+    expect((await loadSession(key))?.mode).toBe("code");
+  });
+
   test("round-trips repoId", async () => {
     const s = session({ threadTs: "1.1", repoId: "opensession" });
     await saveSession(s);
