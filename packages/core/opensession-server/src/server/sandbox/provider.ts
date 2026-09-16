@@ -75,7 +75,7 @@ export interface SandboxSessionSpec {
    * this ensure() materializes a FRESH workspace: the branch lands on the
    * checkpoint's head with its uncommitted changes in place. A workspace
    * that already exists on the sandbox disk keeps that disk instead. */
-  restoreCheckpoint?: { ref: string; commit: string };
+  restoreCheckpoint?: { ref: string; commit: string; branch: string };
 }
 
 export interface ExecOpts {

@@ -51,9 +51,7 @@ export function destroySessionSandbox(
   if (!isRemoteSandboxProvider(sb.provider)) return;
   void (async () => {
     try {
-      revokeWorkloadIdentityForSandbox(sb.sandboxId!);
-      await dropSandboxPreviewRoutes(sb.sandboxId!);
-      await getSandboxProvider(sb.provider).destroy(sb.sandboxId!);
+      await teardownSandbox(sb.provider, sb.sandboxId!);
       console.log(
         `[sandbox] destroyed ${sb.sandboxId} for ${session.id} (${why})`,
       );
@@ -68,6 +66,24 @@ export function destroySessionSandbox(
       );
     }
   })();
+}
+
+/**
+ * Tear one Sandbox machine down in the only safe order. Its workload-identity
+ * leases are revoked first: a destroy that fails, or that the provider
+ * swallows, must never leave a running machine that can still exchange for
+ * credentials. Then its Portal routes are dropped and the machine is
+ * destroyed. Throws when the provider refuses; the leases are gone either
+ * way. Every path that retires a Sandbox (delete, archive sweep, a move away
+ * from it, a rebuild) goes through here.
+ */
+export async function teardownSandbox(
+  provider: string,
+  sandboxId: string,
+): Promise<void> {
+  revokeWorkloadIdentityForSandbox(sandboxId);
+  await dropSandboxPreviewRoutes(sandboxId);
+  await getSandboxProvider(provider).destroy(sandboxId);
 }
 
 /**

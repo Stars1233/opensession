@@ -1,11 +1,11 @@
 /** Per-session sandbox status and explicit lifecycle controls. */
 
 import { existsSync } from "node:fs";
+import { isAgentSessionBusy } from "../agent-runner";
 import { audit } from "../audit";
 import { getGitStatus, type GitStatusInfo } from "../git-status";
 import { hostRunBusy } from "../host-registry";
 import { stopAllPortalServices } from "../portal-supervisor";
-import { hasActiveRunFor } from "../run-journal";
 import { getSandboxProvider } from "../sandbox";
 import { ensureSandboxWithTransientRetry } from "../sandbox/reliability";
 import {
@@ -20,21 +20,20 @@ import {
 import {
   checkpointHostWorkspace,
   checkpointSessionWorkspace,
+  restorableCheckpoint,
   restoreCheckpointToHostWorktree,
   type CheckpointOutcome,
 } from "../sandbox/checkpoint";
+import { withSessionLifecycleLane } from "../sandbox/lifecycle-lane";
 import type { SandboxSessionSpec } from "../sandbox/provider";
-import {
-  dropSandboxPreviewRoutes,
-  suspendSandboxPreviewRoutes,
-} from "../preview";
+import { suspendSandboxPreviewRoutes } from "../preview";
 import {
   findSessionAsync,
   touchNativeSession,
   touchNativeSessionStrict,
 } from "../session-cache";
 import { resolveWorktreeTarget } from "../session-repos";
-import { activeSandboxFor } from "../session-sandbox";
+import { activeSandboxFor, teardownSandbox } from "../session-sandbox";
 import { sessionTouchedPaths } from "../session-touched";
 import type { SandboxCheckpointRecord } from "../types";
 import {
@@ -137,8 +136,46 @@ function restoreSpec(
   checkpoint: SandboxCheckpointRecord | undefined,
 ): Pick<SandboxSessionSpec, "restoreCheckpoint"> {
   return checkpoint
-    ? { restoreCheckpoint: { ref: checkpoint.ref, commit: checkpoint.commit } }
+    ? {
+        restoreCheckpoint: {
+          ref: checkpoint.ref,
+          commit: checkpoint.commit,
+          branch: checkpoint.branch,
+        },
+      }
     : {};
+}
+
+/**
+ * Refusal while a turn is admitted or running. Checked on the session's
+ * lifecycle lane, after claiming it: run admission reserves the session and
+ * then waits for the lane, so a reservation seen here belongs to a turn that
+ * starts the moment the lane is free, and the workspace is that turn's.
+ */
+function lifecycleBusyRefusal(sessionId: string): Response | null {
+  if (!hostRunBusy(sessionId) && !isAgentSessionBusy(sessionId)) return null;
+  return Response.json(
+    { error: "Wait for the agent to finish before changing this Sandbox." },
+    { status: 409 },
+  );
+}
+
+/**
+ * The recorded checkpoint, when it may stand in for a Sandbox that cannot be
+ * reached: only one taken on the session's current branch is restorable
+ * (checkpoint.ts). `missing` says why there is none, for the refusal.
+ */
+function recordedCheckpoint(
+  session: Pick<StoredSession, "branch" | "sandboxCheckpoint">,
+): { checkpoint?: SandboxCheckpointRecord; missing: string } {
+  const checkpoint = restorableCheckpoint(session);
+  if (checkpoint) return { checkpoint, missing: "" };
+  const stale = session.sandboxCheckpoint;
+  return {
+    missing: stale
+      ? `its last checkpoint was taken on branch ${stale.branch}, not ${session.branch}`
+      : "no checkpoint exists",
+  };
 }
 
 /**
@@ -221,7 +258,7 @@ async function checkpointFromSandbox(
  * (`pushed` or `unchanged`), or the recorded one when the Sandbox cannot be
  * reached at all. A reachable Sandbox whose state cannot be captured is
  * never destroyed on the strength of an older checkpoint, because the work
- * since then exists nowhere else; the response says why instead. Returns the
+ * since then exists nowhere else; `reason` says why instead. Returns the
  * session as it stands after the checkpoint so the caller's spec carries the
  * fresh record.
  */
@@ -229,7 +266,7 @@ async function freshCheckpoint(
   session: StoredSession,
 ): Promise<
   | { ok: true; session: StoredSession; reachable: boolean }
-  | { ok: false; response: Response; reachable: boolean }
+  | { ok: false; reachable: boolean; status: 409 | 502; reason: string }
 > {
   let outcome: CheckpointOutcome | null;
   try {
@@ -238,39 +275,26 @@ async function freshCheckpoint(
     return {
       ok: false,
       reachable: true,
-      response: Response.json(
-        {
-          error: `Could not checkpoint the Sandbox: ${error instanceof Error ? error.message : String(error)}`,
-        },
-        { status: 502 },
-      ),
+      status: 502,
+      reason: `Could not checkpoint the Sandbox: ${error instanceof Error ? error.message : String(error)}.`,
     };
   }
   if (!outcome) {
-    if (session.sandboxCheckpoint)
-      return { ok: true, session, reachable: false };
+    const recorded = recordedCheckpoint(session);
+    if (recorded.checkpoint) return { ok: true, session, reachable: false };
     return {
       ok: false,
       reachable: false,
-      response: Response.json(
-        {
-          error:
-            "The Sandbox cannot be reached and no checkpoint exists, so its work cannot be carried over. Wake it first.",
-        },
-        { status: 409 },
-      ),
+      status: 409,
+      reason: `The Sandbox cannot be reached and ${recorded.missing}, so its work cannot be carried over.`,
     };
   }
   if (outcome.state === "skipped")
     return {
       ok: false,
       reachable: true,
-      response: Response.json(
-        {
-          error: `This session's work cannot be checkpointed (${outcome.reason}), so the Sandbox's files would be lost. Push from the Sandbox first.`,
-        },
-        { status: 409 },
-      ),
+      status: 409,
+      reason: `This session's work cannot be checkpointed (${outcome.reason}), so the Sandbox's files would be lost. Push from the Sandbox first.`,
     };
   return {
     ok: true,
@@ -288,9 +312,10 @@ async function releaseSandbox(session: StoredSession, why: string) {
   const recorded = session.sandbox;
   if (!recorded?.sandboxId || !isRemoteSandboxProvider(recorded.provider))
     return;
-  await dropSandboxPreviewRoutes(recorded.sandboxId).catch(() => {});
   try {
-    await getSandboxProvider(recorded.provider).destroy(recorded.sandboxId);
+    // Revokes the machine's workload-identity leases before anything else,
+    // so a destroy that fails below cannot leave it running with credentials.
+    await teardownSandbox(recorded.provider, recorded.sandboxId);
     console.log(
       `[sandbox] ${session.id}: released ${recorded.sandboxId} (${why})`,
     );
@@ -318,11 +343,6 @@ async function attachSandbox(
     provider?: unknown;
     confirm?: unknown;
   };
-  if (hostRunBusy(session.id) || hasActiveRunFor(session.id))
-    return Response.json(
-      { error: "Wait for the agent to finish before moving this session." },
-      { status: 409 },
-    );
   const resolved = resolveRequestedSandbox(
     typeof body.provider === "string" && body.provider ? body.provider : true,
     session.repo,
@@ -347,7 +367,15 @@ async function attachSandbox(
     // move is refused unless a checkpoint taken NOW holds it. Only a Sandbox
     // that cannot be reached at all falls back to the recorded checkpoint.
     const fresh = await freshCheckpoint(session);
-    if (!fresh.ok) return fresh.response;
+    if (!fresh.ok)
+      return Response.json(
+        {
+          error: fresh.reachable
+            ? fresh.reason
+            : `${fresh.reason} Wake it first, or rebuild it.`,
+        },
+        { status: fresh.status },
+      );
     await releaseSandbox(session, `moving to ${provider}`);
   } else {
     const target = resolveWorktreeTarget(session);
@@ -430,11 +458,6 @@ async function detachSandbox(
   };
   const refusal = sandboxDetachRefusal(session);
   if (refusal) return Response.json({ error: refusal }, { status: 409 });
-  if (hostRunBusy(session.id) || hasActiveRunFor(session.id))
-    return Response.json(
-      { error: "Wait for the agent to finish before moving this session." },
-      { status: 409 },
-    );
   if (!session.branch)
     return Response.json(
       { error: "This session has no branch to move." },
@@ -448,11 +471,12 @@ async function detachSandbox(
   let checkpoint: SandboxCheckpointRecord | undefined;
   let reachable = false;
   let skippedReason: string | undefined;
+  const recorded = recordedCheckpoint(session);
   if (session.sandbox?.sandboxId) {
     try {
       const outcome = await checkpointFromSandbox(session);
       reachable = outcome !== null;
-      if (!outcome) checkpoint = session.sandboxCheckpoint;
+      if (!outcome) checkpoint = recorded.checkpoint;
       else if (outcome.state === "skipped") skippedReason = outcome.reason;
       else checkpoint = outcome.checkpoint;
     } catch (error) {
@@ -464,14 +488,14 @@ async function detachSandbox(
       );
     }
   } else {
-    checkpoint = session.sandboxCheckpoint;
+    checkpoint = recorded.checkpoint;
   }
   if (!checkpoint && body.confirm !== true)
     return Response.json(
       {
         error: reachable
           ? `This session's work cannot be checkpointed (${skippedReason}), so the move would start from the branch as origin has it. Push from the Sandbox first, or move anyway and leave the Sandbox's files behind.`
-          : "The Sandbox cannot be reached and no checkpoint exists. Move anyway to continue from the branch as origin has it.",
+          : `The Sandbox cannot be reached and ${recorded.missing}. Move anyway to continue from the branch as origin has it.`,
         confirmRequired: true,
       },
       { status: 428 },
@@ -666,9 +690,17 @@ export async function handleSandboxRoutes(
   if (!action || ctx.req.method !== "POST") return undefined;
   if (action === "attach" || action === "detach") {
     try {
-      return action === "attach"
-        ? await attachSandbox(ctx, session)
-        : await detachSandbox(ctx, session);
+      // The whole move runs on the session's lifecycle lane: checkpoint,
+      // release of the old machine, and the final record update, with run
+      // admission waiting on the lane and refused while a turn is admitted.
+      return await withSessionLifecycleLane(session.id, async () => {
+        const current = (await findSessionAsync(session.id)) || session;
+        const busy = lifecycleBusyRefusal(current.id);
+        if (busy) return busy;
+        return action === "attach"
+          ? attachSandbox(ctx, current)
+          : detachSandbox(ctx, current);
+      });
     } catch (error) {
       return Response.json(
         { error: error instanceof Error ? error.message : String(error) },
@@ -716,11 +748,36 @@ export async function handleSandboxRoutes(
       );
     }
   }
-  if (hostRunBusy(session.id))
+  return withSessionLifecycleLane(session.id, () =>
+    runSandboxLifecycleAction(ctx, session, action),
+  );
+}
+
+/**
+ * checkpoint, pause, resume, and recreate, on the session's lifecycle lane:
+ * the capture, the machine change, and the record update land before any
+ * turn is admitted, and none of them starts while a turn is admitted.
+ */
+async function runSandboxLifecycleAction(
+  ctx: RouteContext,
+  requested: StoredSession,
+  action: string,
+): Promise<Response> {
+  // The record may have changed while the request waited its turn on the
+  // lane (a move or rebuild ahead of it): act on the Sandbox as it is now.
+  const session = (await findSessionAsync(requested.id)) || requested;
+  const recorded = session.sandbox;
+  if (
+    !recorded?.provider ||
+    !recorded.sandboxId ||
+    recorded.sandboxId !== requested.sandbox?.sandboxId
+  )
     return Response.json(
-      { error: "Sandbox lifecycle is locked while the agent is running" },
+      { error: "The Sandbox changed while this request waited. Try again." },
       { status: 409 },
     );
+  const busy = lifecycleBusyRefusal(session.id);
+  if (busy) return busy;
   const provider = getSandboxProvider(recorded.provider);
   try {
     if (action === "checkpoint") {
@@ -794,11 +851,10 @@ export async function handleSandboxRoutes(
       let current = session;
       const fresh = await freshCheckpoint(session);
       if (fresh.ok) current = fresh.session;
-      else if (!fresh.reachable) return fresh.response;
       else if (body.discard !== true)
         return Response.json(
           {
-            error: `${(await fresh.response.json()).error} Or rebuild anyway and discard the Sandbox's files.`,
+            error: `${fresh.reason} Or rebuild anyway from the branch as origin has it.`,
             discardRequired: true,
           },
           { status: 428 },
@@ -822,8 +878,7 @@ export async function handleSandboxRoutes(
           lastLifecycleError: undefined,
         },
       });
-      await dropSandboxPreviewRoutes(recorded.sandboxId);
-      await provider.destroy(recorded.sandboxId);
+      await teardownSandbox(recorded.provider, recorded.sandboxId);
       const recreated = await provider.ensure(spec);
       touchNativeSession(session.id, {
         sandbox: {

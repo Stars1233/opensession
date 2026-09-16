@@ -14,9 +14,13 @@ import {
   checkpointCapable,
   checkpointRef,
   checkpointScript,
-  settleSessionCheckpoints,
-  withCheckpointLane,
+  restorableCheckpoint,
 } from "./checkpoint";
+import {
+  sessionLifecycleInFlight,
+  settleSessionLifecycle,
+  withSessionLifecycleLane,
+} from "./lifecycle-lane";
 
 let scratch: string;
 let origin: string;
@@ -80,11 +84,37 @@ describe("checkpointCapable", () => {
   });
 });
 
-describe("checkpoint lane", () => {
-  test("runs a session's checkpoints one at a time, in order, and a turn waits for them", async () => {
+describe("restorableCheckpoint", () => {
+  const checkpoint = {
+    ref: checkpointRef("s"),
+    commit: "c",
+    head: "h",
+    tree: "t",
+    branch: "feature-a",
+    at: "2026-09-16T00:00:00.000Z",
+  };
+  test("only a checkpoint taken on the session's current branch", () => {
+    expect(
+      restorableCheckpoint({
+        branch: "feature-a",
+        sandboxCheckpoint: checkpoint,
+      }),
+    ).toBe(checkpoint);
+    expect(
+      restorableCheckpoint({
+        branch: "feature-b",
+        sandboxCheckpoint: checkpoint,
+      }),
+    ).toBeUndefined();
+    expect(restorableCheckpoint({ branch: "feature-a" })).toBeUndefined();
+  });
+});
+
+describe("lifecycle lane", () => {
+  test("runs a session's operations one at a time, in order, and a turn waits for them", async () => {
     const order: string[] = [];
     let releaseFirst!: () => void;
-    const first = withCheckpointLane("s1", async () => {
+    const first = withSessionLifecycleLane("s1", async () => {
       order.push("first start");
       await new Promise<void>((resolve) => {
         releaseFirst = resolve;
@@ -92,13 +122,14 @@ describe("checkpoint lane", () => {
       order.push("first end");
       return 1;
     });
-    const second = withCheckpointLane("s1", async () => {
+    const second = withSessionLifecycleLane("s1", async () => {
       order.push("second");
       return 2;
     });
     // Claimed synchronously: a turn asking now already has to wait.
+    expect(sessionLifecycleInFlight("s1")).toBe(true);
     let turnStarted = false;
-    const turn = settleSessionCheckpoints("s1").then(() => {
+    const turn = settleSessionLifecycle("s1").then(() => {
       turnStarted = true;
     });
     await Promise.resolve();
@@ -110,31 +141,63 @@ describe("checkpoint lane", () => {
     await turn;
     expect(order).toEqual(["first start", "first end", "second"]);
     expect(turnStarted).toBe(true);
+    expect(sessionLifecycleInFlight("s1")).toBe(false);
   });
 
-  test("a failed checkpoint neither blocks the lane nor fails the waiting turn", async () => {
-    const failed = withCheckpointLane("s2", async () => {
+  test("a failed operation neither blocks the lane nor fails the waiting turn", async () => {
+    const failed = withSessionLifecycleLane("s2", async () => {
       throw new Error("push refused");
     });
-    const next = withCheckpointLane("s2", async () => "ok");
+    const next = withSessionLifecycleLane("s2", async () => "ok");
     await expect(failed).rejects.toThrow("push refused");
     expect(await next).toBe("ok");
-    await expect(settleSessionCheckpoints("s2")).resolves.toBeUndefined();
+    await expect(settleSessionLifecycle("s2")).resolves.toBeUndefined();
   });
 
   test("other sessions do not wait", async () => {
     let release!: () => void;
-    void withCheckpointLane(
+    void withSessionLifecycleLane(
       "s3",
       () => new Promise<void>((r) => (release = r)),
     );
     let otherRan = false;
-    await withCheckpointLane("s4", async () => {
+    await withSessionLifecycleLane("s4", async () => {
       otherRan = true;
     });
     expect(otherRan).toBe(true);
     release();
-    await settleSessionCheckpoints("s3");
+    await settleSessionLifecycle("s3");
+  });
+
+  test("an operation on the lane may claim the same lane again without waiting on itself", async () => {
+    const result = await withSessionLifecycleLane("s5", async () => {
+      // A move that checkpoints first: the checkpoint claims the lane the
+      // move already holds, and the lane stays held until the move ends.
+      const inner = await withSessionLifecycleLane("s5", async () => "inner");
+      expect(sessionLifecycleInFlight("s5")).toBe(true);
+      return `${inner} then outer`;
+    });
+    expect(result).toBe("inner then outer");
+    // A queued operation only runs once the whole outer one has finished.
+    const order: string[] = [];
+    let releaseOuter!: () => void;
+    const outer = withSessionLifecycleLane("s6", async () => {
+      await withSessionLifecycleLane("s6", async () => {
+        order.push("nested");
+      });
+      await new Promise<void>((r) => (releaseOuter = r));
+      order.push("outer end");
+    });
+    const queued = withSessionLifecycleLane("s6", async () => {
+      order.push("queued");
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(["nested"]);
+    releaseOuter();
+    await outer;
+    await queued;
+    expect(order).toEqual(["nested", "outer end", "queued"]);
   });
 });
 
@@ -250,6 +313,34 @@ describe("checkpoint script", () => {
     expect(readFileSync(join(diverged, "new.txt"), "utf-8")).toBe(
       "untracked\n",
     );
+  });
+
+  test("restore refuses a checkout on another branch than the checkpoint's", async () => {
+    const pushed = await runCheckpoint({});
+    const [, commit] = pushed.stdout.toString().trim().split(/\s+/);
+    const elsewhere = join(scratch, "elsewhere");
+    await git(scratch)`git clone -q ${origin} elsewhere`;
+    await git(elsewhere)`git checkout -q -b feature-b origin/main`;
+    const tip = (await git(elsewhere)`git rev-parse HEAD`.text()).trim();
+    const refused = await git(
+      elsewhere,
+    )`bash -c ${checkpointRestoreScript(ref, commit!, { branch: "feature" })}`
+      .quiet()
+      .nothrow();
+    expect(refused.exitCode).not.toBe(0);
+    expect((await git(elsewhere)`git rev-parse HEAD`.text()).trim()).toBe(tip);
+    expect(
+      (await git(elsewhere)`git branch --show-current`.text()).trim(),
+    ).toBe("feature-b");
+    // The same checkout on the checkpoint's branch restores.
+    await git(elsewhere)`git checkout -q -b feature origin/main`;
+    const allowed = await git(
+      elsewhere,
+    )`bash -c ${checkpointRestoreScript(ref, commit!, { branch: "feature" })}`
+      .quiet()
+      .nothrow();
+    expect(allowed.stderr.toString()).toBe("");
+    expect(allowed.exitCode).toBe(0);
   });
 
   test("restore refuses a ref that is not the recorded commit", async () => {

@@ -1756,8 +1756,9 @@ export async function setupRemoteWorkspace(
     seedPrivateFiles?: boolean;
     runLifecycleHooks?: boolean;
     /** Checkpoint to restore into a FRESHLY materialized workspace (see
-     * sandbox/checkpoint.ts). A workspace already on disk keeps its disk. */
-    restoreCheckpoint?: { ref: string; commit: string };
+     * sandbox/checkpoint.ts). A workspace already on disk keeps its disk.
+     * Refused, loudly, unless it was taken on `branch`. */
+    restoreCheckpoint?: { ref: string; commit: string; branch: string };
   } = {},
 ): Promise<void> {
   const startedAt = Date.now();
@@ -1877,11 +1878,15 @@ export async function setupRemoteWorkspace(
     // changes. A failure here is loud, because silently starting from origin's
     // branch tip is exactly the data loss the checkpoint exists to prevent.
     if (options.restoreCheckpoint && workspaceState !== "cwd") {
-      const { ref, commit } = options.restoreCheckpoint;
-      const restored = await driver.exec(checkpointRestoreScript(ref, commit), {
-        cwd,
-        timeoutMs: 300_000,
-      });
+      const { ref, commit, branch: taken } = options.restoreCheckpoint;
+      if (taken !== branch)
+        throw new Error(
+          `checkpoint ${commit.slice(0, 12)} was taken on branch ${taken}, but this session is on ${branch}; rebuild the Sandbox to continue from origin`,
+        );
+      const restored = await driver.exec(
+        checkpointRestoreScript(ref, commit, { branch }),
+        { cwd, timeoutMs: 300_000 },
+      );
       if (restored.exitCode !== 0) {
         throw new Error(
           `could not restore checkpoint ${commit.slice(0, 12)} from ${ref}: ` +
@@ -1934,15 +1939,22 @@ export async function setupRemoteWorkspace(
  * directory: fetch the hidden ref, verify it is the recorded commit, land the
  * branch on the checkpoint's parent, and leave the checkpointed tree as
  * uncommitted changes (sandbox/checkpoint.ts explains the commit shape).
+ * `branch` refuses unless that is the checkout's current branch, so a
+ * checkpoint never lands on a branch other than the one it was taken from.
  * `onlyForward` additionally refuses unless the current HEAD is an ancestor
  * of the checkpoint, so a checkout that is reused rather than fresh can lose
  * no commit. Nothing is touched before every check has passed. */
 export function checkpointRestoreScript(
   ref: string,
   commit: string,
-  options: { onlyForward?: boolean } = {},
+  options: { branch?: string; onlyForward?: boolean } = {},
 ): string {
   return [
+    ...(options.branch
+      ? [
+          `test "$(git branch --show-current)" = ${shellQuoteWord(options.branch)}`,
+        ]
+      : []),
     `git fetch --no-tags --quiet origin ${shellQuoteWord(`+${ref}:refs/opensession/checkpoint`)}`,
     `test "$(git rev-parse --verify 'refs/opensession/checkpoint^{commit}')" = ${shellQuoteWord(commit)}`,
     ...(options.onlyForward

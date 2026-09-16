@@ -942,6 +942,65 @@ export async function createWorktreeForExistingBranch(
 }
 
 /**
+ * Claim the checkout for `branch` on this machine and run `fn` while the git
+ * lock is still held, so that finding, creating, and then rewriting the
+ * checkout is one atomic step: no other claim, worktree creation, or restore
+ * for the branch can interleave with it. `created` is true when `fn` gets a
+ * checkout that did not exist a moment ago (its content is origin's or the
+ * default branch's, and nobody else can hold work in it yet); false when the
+ * branch was already checked out (a per-branch worktree, a leftover
+ * unregistered directory, or the shared checkout), which the caller must
+ * treat as somebody's. Seeding and dependency install of a new worktree run
+ * after `fn`, never over what `fn` writes.
+ */
+export async function withClaimedBranchWorktree<T>(
+  branch: string,
+  repoId: string | undefined,
+  gitEnv: Record<string, string> | undefined,
+  fn: (claim: { path: string; created: boolean }) => Promise<T>,
+): Promise<T> {
+  const repo = getRepo(repoId);
+  const shell = gitEnv ? $.env({ ...process.env, ...gitEnv }) : $;
+  return withGitLock(async () => {
+    await $`git -C ${repo.repo} worktree prune`.quiet().nothrow();
+    const existing = (await listWorktrees(repo.id)).find(
+      (w) => w.branch === branch,
+    );
+    if (existing) return fn({ path: existing.path, created: false });
+    const shared = (
+      await $`git -C ${repo.repo} branch --show-current`
+        .quiet()
+        .nothrow()
+        .text()
+    ).trim();
+    if (shared === branch) return fn({ path: repo.repo, created: false });
+    const wtPath = `${worktreesDir()}/${repo.wtPrefix}-${branch}`;
+    if (existsSync(wtPath)) return fn({ path: wtPath, created: false });
+    await shell`git -C ${repo.repo} fetch origin ${branch} --quiet`
+      .quiet()
+      .nothrow();
+    const hasRef = async (ref: string) =>
+      (await $`git -C ${repo.repo} show-ref --verify --quiet ${ref}`.nothrow())
+        .exitCode === 0;
+    if (await hasRef(`refs/heads/${branch}`)) {
+      await $`git -C ${repo.repo} worktree add ${wtPath} ${branch}`.quiet();
+    } else if (await hasRef(`refs/remotes/origin/${branch}`)) {
+      await $`git -C ${repo.repo} worktree add -b ${branch} ${wtPath} origin/${branch}`.quiet();
+    } else {
+      // Neither this machine nor origin knows the branch: start it at the
+      // default branch and let the caller move it where it belongs.
+      const start = await defaultStartPoint(repo);
+      await $`git -C ${repo.repo} worktree add -b ${branch} ${wtPath} ${start}`.quiet();
+    }
+    try {
+      return await fn({ path: wtPath, created: true });
+    } finally {
+      void seedAndInstallWorktree(repo, wtPath, branch);
+    }
+  });
+}
+
+/**
  * Resolve a start-point ref for a new worktree branch off `base`: the local
  * ref when it carries commits `origin/<base>` lacks (a stacked worktree off a
  * session branch with unpushed work), otherwise `origin/<base>`, otherwise

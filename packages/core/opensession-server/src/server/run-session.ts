@@ -60,10 +60,8 @@ import { cacheMissNotice } from "@tellahq/opensession-protocol/notices";
 import { RESTART_QUEUE_NOTICE_MESSAGE } from "@tellahq/opensession-protocol/session";
 import { dropSandboxPreviewRoutes } from "./preview";
 import { activeSandboxFor, restoreSandboxPortals } from "./session-sandbox";
-import {
-  checkpointSessionWorkspace,
-  settleSessionCheckpoints,
-} from "./sandbox/checkpoint";
+import { checkpointSessionWorkspace } from "./sandbox/checkpoint";
+import { settleSessionLifecycle } from "./sandbox/lifecycle-lane";
 import {
   wrapContext,
   stripContext,
@@ -2034,6 +2032,7 @@ export async function maybeLaunchSandboxedRun(
                     restoreCheckpoint: {
                       ref: session.sandboxCheckpoint.ref,
                       commit: session.sandboxCheckpoint.commit,
+                      branch: session.sandboxCheckpoint.branch,
                     },
                   }
                 : {}),
@@ -2527,10 +2526,12 @@ export async function runSessionPrompt(
 ): Promise<void> {
   // Any explicit new run lifts a user stop — the queue may drain again.
   stoppedSessions.delete(sessionId);
-  // A workspace checkpoint still in flight from the previous turn (or from a
-  // move or a manual save) reads the tree and force-pushes the hidden ref;
-  // the agent must not start editing under it. Resolves at once when none is.
-  await settleSessionCheckpoints(sessionId);
+  // A lifecycle operation still in flight (a checkpoint from the previous
+  // turn, a move, a rebuild, a manual save or sleep) reads or replaces the
+  // workspace; the agent must not start under it. Resolves at once when none
+  // is. Waiting here, before the reservation below, keeps the reservation
+  // from making that operation refuse.
+  await settleSessionLifecycle(sessionId);
   // A direct send to a sandbox can spend minutes provisioning before its run
   // journal exists. Give it the same durable dispatch record as a queue drain,
   // so a restart during provisioning requeues the complete prompt.
@@ -2584,6 +2585,13 @@ export async function runSessionPrompt(
     watchExternalRunAndDrain(sessionId);
     throw new RunPreparationDeferredError(sessionId);
   }
+  // The reservation is what a lifecycle operation checks before it touches
+  // the workspace. One that claimed the session's lane between the wait
+  // above and this reservation either saw the reservation and refused, or
+  // is finishing now: hold the reservation (nothing else is admitted) and
+  // let it land its final session update before this turn reads the session
+  // it runs in.
+  await settleSessionLifecycle(sessionId);
   const finishDeskNavigation = deskTextNavigation.begin(
     sessionId,
     durablePromptEntryId,

@@ -163,7 +163,11 @@ describe("recreateSandboxSpec checkpoint", () => {
     expect(
       recreateSandboxSpec({ ...session, sandboxCheckpoint: checkpoint }, null)
         .restoreCheckpoint,
-    ).toEqual({ ref: checkpoint.ref, commit: checkpoint.commit });
+    ).toEqual({
+      ref: checkpoint.ref,
+      commit: checkpoint.commit,
+      branch: checkpoint.branch,
+    });
     expect(
       recreateSandboxSpec(session, null).restoreCheckpoint,
     ).toBeUndefined();

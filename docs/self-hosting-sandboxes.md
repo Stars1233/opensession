@@ -97,9 +97,19 @@ attention with the reason) rather than silently starting from origin, and the
 clone credential is scrubbed from the workspace's origin either way.
 `POST /api/sessions/<id>/sandbox/checkpoint` takes one on demand.
 
-A session's checkpoints run one at a time, in order, and the next turn does
-not start while one is in flight, so a capture never reads a tree the agent
-is editing and the recorded commit is always the one the ref points at.
+Checkpoints, moves, rebuilds, and manual sleep all run on one per-session
+lifecycle lane: one at a time, in order. A turn does not start while an
+operation is in flight, and an operation refuses (409) while a turn is
+admitted, so a capture never reads a tree the agent is editing, no turn
+starts against a Sandbox that is about to be destroyed, and the recorded
+commit is always the one the ref points at.
+
+A checkpoint is restored only onto the branch it was taken from. The record
+carries that branch and every restore checks it before touching anything; a
+session that switched branches after its last checkpoint has, for the
+purposes of a move or rebuild, no checkpoint (the refusal says so), and a
+replacement Sandbox that would otherwise restore it is parked as Needs
+attention rather than moving the new branch onto the old tip.
 
 Nothing destroys a reachable Sandbox on the strength of an older checkpoint.
 A rebuild or a move away from a Sandbox first takes a checkpoint now; when
@@ -135,9 +145,16 @@ transcript, so the conversation carries over.
   An unreachable Sandbox falls back to its last checkpoint; with none, the
   move answers 428 and continues from the branch as origin has it only after
   confirmation. The restore never lands in a checkout that may hold someone
-  else's work: a branch already checked out on this machine refuses the move
-  (409, naming the checkout), except the session's own former worktree when
-  it is clean and the checkpoint extends its tip.
+  else's work: finding, creating, and rewriting the worktree is one step
+  under the repository's git lock, and a branch already checked out on this
+  machine refuses the move (409, naming the checkout), except the session's
+  own former worktree when it is clean and the checkpoint extends its tip.
+
+Whichever way a session leaves a Sandbox, the old machine is retired the
+same way a deleted session's is: its workload-identity leases are revoked
+first, then its Portal routes are dropped, then it is destroyed. A destroy
+the provider refuses or swallows therefore cannot leave a running machine
+that can still exchange for credentials.
 
 A move that failed shows Needs attention and can be attempted again.
 
