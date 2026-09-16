@@ -11,41 +11,90 @@
     <link rel="stylesheet" href="tailnet.css" />
     <script src="tailnet-settings.js" defer></script>
   </head>
-  <body>
-    <main class="tailnet">
-      <h1>Tailscale profiles</h1>
-      <p class="message">
-        Choose a tailnet for each organization. These settings stay on this Mac.
+  <body class="tailnet-backdrop">
+    <main
+      class="tailnet settings-card"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="title"
+      aria-describedby="description"
+    >
+      <button
+        class="button icon-button close"
+        id="close"
+        type="button"
+        aria-label="Close Tailscale profiles"
+        title="Close"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="m6 6 12 12M18 6 6 18" />
+        </svg>
+      </button>
+      <h1 id="title">Tailscale profiles</h1>
+      <p class="message" id="description">
+        Choose a tailnet for each organization. Saved only on this Mac.
       </p>
       <form id="form">
         <label for="organization">Organization</label>
         <select class="field" id="organization" disabled></select>
-        <label for="profile">Tailscale profile</label>
-        <select class="field" id="profile" disabled>
+        <div class="field-heading">
+          <label for="profile">Tailnet</label>
+          <button
+            class="button icon-button"
+            id="refresh"
+            type="button"
+            aria-label="Refresh profiles"
+            title="Refresh profiles"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 17.9 17"
+              />
+            </svg>
+          </button>
+        </div>
+        <select
+          class="field"
+          id="profile"
+          aria-describedby="network-warning"
+          disabled
+        >
           <option value="">Don't change Tailscale</option>
         </select>
-        <p class="message warning">
-          Switching changes the network for your whole Mac. Other apps and
-          organization windows may disconnect.
+        <p class="message warning" id="network-warning">
+          Switching affects every app on this Mac and may interrupt other
+          connections.
         </p>
-        <div class="actions">
-          <button class="button" id="connect" type="submit" disabled>
-            Save and connect
+        <label class="connect-option" id="connect-option" hidden>
+          <input type="checkbox" id="connect-now" />
+          Connect now
+        </label>
+        <div class="settings-actions">
+          <button class="button text-button" id="open" type="button">
+            Open Tailscale ↗
           </button>
-          <button class="button ghost" id="save" type="button" disabled>
-            Save only
-          </button>
-          <button class="button ghost" id="close" type="button">Close</button>
+          <button class="button" id="save" type="submit" disabled>Save</button>
         </div>
       </form>
-      <div class="actions secondary">
-        <button class="button ghost" id="refresh" type="button">
-          Refresh profiles
-        </button>
-        <button class="button ghost" id="open" type="button">
-          Open Tailscale
-        </button>
-      </div>
       <p id="status" role="status" aria-live="polite">
         Reading local profiles…
       </p>

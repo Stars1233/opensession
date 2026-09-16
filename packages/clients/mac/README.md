@@ -100,10 +100,13 @@ asked.
 ## Local Tailscale profiles
 
 **OS → Organizations → Tailscale profiles…** binds an organization to a saved
-Tailscale profile on this Mac. Choose **Save only** to configure it without
-changing networks, or **Save and connect** to connect now. Profiles must already
-be signed in through Tailscale. **Don't change Tailscale** is the default and
-removes an existing binding.
+Tailscale profile on this Mac. **Save** configures it without changing networks.
+To connect immediately, check **Connect now** and choose **Save and connect**.
+The refresh icon reloads profiles; **Open Tailscale** opens the Tailscale app.
+Close with **×**, **Escape**, or a click outside the card to discard unsaved
+changes. The local overlay follows its parent window and works offline.
+Profiles must already be signed in through Tailscale. **Don't change Tailscale**
+is the default and removes an existing binding.
 
 The top-left organization picker and the native organization menu switch to the
 bound profile before opening the organization's saved page. This changes

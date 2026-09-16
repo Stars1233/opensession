@@ -20,6 +20,12 @@ class FakeWindow extends EventEmitter {
   loadFile(file) {
     this.webContents.mainFrame.url = pathToFileURL(file).href;
   }
+  getContentBounds() {
+    return this.bounds || { x: 100, y: 80, width: 1100, height: 760 };
+  }
+  setBounds(bounds) {
+    this.bounds = { ...bounds };
+  }
   show() {}
   focus() {}
   close() {
@@ -204,6 +210,52 @@ describe("local tailnet IPC boundary", () => {
 });
 
 describe("connection window lifetime", () => {
+  test("settings cover and follow the parent without a native sheet swallowing outside clicks", () => {
+    const { ui, parent } = fixture();
+    ui.settings(parent, "work");
+    const window = ui.settingsWindow;
+    expect(window.options).toMatchObject({
+      ...parent.getContentBounds(),
+      parent,
+      modal: false,
+      frame: false,
+      transparent: true,
+    });
+    parent.bounds = { x: 200, y: 120, width: 900, height: 700 };
+    parent.emit("resize");
+    expect(window.bounds).toEqual(parent.bounds);
+    parent.bounds.x = 300;
+    parent.emit("move");
+    expect(window.bounds).toEqual(parent.bounds);
+    window.close();
+    expect(ui.settingsWindow).toBeNull();
+    expect(parent.listenerCount("move")).toBe(0);
+    expect(parent.listenerCount("resize")).toBe(0);
+  });
+
+  test("dismissing settings during confirmation neither saves nor connects", async () => {
+    const { ui, state, parent, handlers } = fixture();
+    ui.settings(parent, "work");
+    const window = ui.settingsWindow;
+    let confirm;
+    ui.electron.dialog.showMessageBox = () =>
+      new Promise((resolve) => {
+        confirm = resolve;
+      });
+    let connected = false;
+    ui.connectAccount = () => {
+      connected = true;
+    };
+    const saving = ui.saveSettings(window.event(), "work", "bbbb", true);
+    await Promise.resolve();
+    await handlers["os1:tailnet-action"](window.event(), "close");
+    confirm({ response: 1 });
+    expect((await saving).ok).toBe(false);
+    expect(state.stored.accounts[0].tailscaleProfileId).toBeUndefined();
+    expect(connected).toBe(false);
+    expect(state.switches).toBe(0);
+  });
+
   test("save and connect waits for the settings window's asynchronous close", async () => {
     const { ui, state, parent } = fixture();
     ui.settings(parent, "work");

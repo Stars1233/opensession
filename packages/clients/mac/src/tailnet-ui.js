@@ -45,11 +45,13 @@ class TailnetWindows {
   }
 
   createWindow(parent, page) {
+    const settings = page === "tailnet-settings.html";
     const window = new this.electron.BrowserWindow({
       parent,
-      modal: true,
-      width: 560,
-      height: 590,
+      modal: !settings,
+      ...(settings
+        ? { ...parent.getContentBounds(), frame: false, transparent: true }
+        : { width: 560, height: 590 }),
       resizable: false,
       minimizable: false,
       maximizable: false,
@@ -62,6 +64,20 @@ class TailnetWindows {
         nodeIntegration: false,
       },
     });
+    if (settings) {
+      // Cover the parent with a local backdrop. Native macOS sheets swallow
+      // outside clicks, so settings use a frameless child instead of a sheet.
+      const followParent = () => {
+        if (!parent.isDestroyed() && !window.isDestroyed())
+          window.setBounds(parent.getContentBounds());
+      };
+      parent.on("move", followParent);
+      parent.on("resize", followParent);
+      window.once("closed", () => {
+        parent.removeListener("move", followParent);
+        parent.removeListener("resize", followParent);
+      });
+    }
     window.webContents.on("will-navigate", (event) => event.preventDefault());
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.once("ready-to-show", () => {
