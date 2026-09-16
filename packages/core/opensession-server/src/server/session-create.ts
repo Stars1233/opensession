@@ -1758,6 +1758,9 @@ export async function openCreatedSession(
                       mode: spec.mode,
                       branch: spec.branch,
                       worktreeDir: spec.wtPath,
+                      stackedOn: spec.stackedOn,
+                      existingBranch: spec.worktreeKind === "existing",
+                      pstackMode,
                     }),
                     await memoryNoteFor(spec.user, spec.memoryRepoIds),
                   ]
@@ -1841,11 +1844,18 @@ export async function openCreatedSession(
             // A session that spans repos is handed the persisted map rather
             // than a reconstructed branch note.
             spanning
-              ? buildReposNote(spanning)
+              ? buildReposNote({
+                  ...spanning,
+                  existingBranch: spec.worktreeKind === "existing",
+                  pstackMode,
+                })
               : buildBranchNote({
                   mode: spec.mode,
                   branch: spec.branch,
                   worktreeDir: spec.wtPath,
+                  stackedOn: spec.stackedOn,
+                  existingBranch: spec.worktreeKind === "existing",
+                  pstackMode,
                 }),
             await memoryNoteFor(spec.user, [
               ...spec.memoryRepoIds,

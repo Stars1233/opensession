@@ -67,6 +67,42 @@ worktree. Provider-owned cleanup is separate, and destroying a Sandbox deletes
 any work not pushed elsewhere. See
 [self-hosting-sandboxes.md](self-hosting-sandboxes.md).
 
+## Publication policy
+
+Checkout isolation does not require pull requests. Each repository can set
+`publicationMode` in the instance's `~/.opensession/config.json`:
+
+```json
+{
+  "selfDev": "worktree",
+  "repos": {
+    "opensession": {
+      "repo": "/srv/opensession",
+      "sharedCheckout": true,
+      "publicationMode": "direct"
+    }
+  }
+}
+```
+
+Edit the existing repo entry; do not replace the entire `repos` registry with
+this example. `pull-request` is the default when the field is absent or invalid.
+`direct` instructs interactive code sessions to keep their isolated branch,
+review its complete diff, integrate the latest default branch, run the repo's
+checks, and publish with a normal fast-forward push to that default branch.
+A raced push requires another integration and check, never a force-push.
+
+Explicit PR requests, branches with open PRs, and stacked PR work retain the PR
+workflow. Code Storage retains its branch-as-change-request workflow. Attached
+repositories each get their own policy. This setting is prompt guidance, not a
+permission grant: automation restrictions, connected-person authority, and
+GitHub branch protections still apply. It does not merge or close existing PRs.
+
+Config is re-read for newly assembled run instructions; an already-running turn
+keeps its existing instructions. Changing publication mode does not move any
+session to a different checkout. No client wire model or UI preference changes
+are required to configure this server-side setting.
+
 ## The shared-checkout exception
 
 A repository can set `sharedCheckout: true`, making new interactive code

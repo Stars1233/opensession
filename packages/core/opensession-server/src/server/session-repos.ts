@@ -141,17 +141,50 @@ export function buildBranchNote(session: {
   mode?: "ask" | "code" | "scratch";
   branch?: string | null;
   worktreeDir?: string | null;
+  prUrl?: string;
+  prNumber?: number;
+  prs?: Readonly<UnifiedSession["prs"]>;
+  stackedOn?: StackedOn;
+  existingBranch?: boolean;
+  pstackMode?: boolean;
+  automation?: string;
+  automationDescendantPolicy?: UnifiedSession["automationDescendantPolicy"];
 }): string | undefined {
   if (session.mode === "ask" || !session.branch || !session.worktreeDir)
     return undefined;
   const repo = repoForPath(session.worktreeDir);
-  // Shared-checkout repos (opensession) and main-checkout cwds have their own
-  // rules; this note is for isolated per-branch worktrees only.
-  if (
-    sharedCheckoutForNewSessions(repo) ||
-    canonicalPath(session.worktreeDir) === canonicalPath(repo.repo)
-  )
+  // Use the actual checkout, not the default for NEW sessions: changing that
+  // default must not remove branch discipline from an existing worktree.
+  if (canonicalPath(session.worktreeDir) === canonicalPath(repo.repo))
     return undefined;
+  if (
+    repo.publicationMode === "direct" &&
+    repo.host !== "codestorage" &&
+    !session.prUrl &&
+    !session.prNumber &&
+    !session.prs?.some(
+      (pr) =>
+        pr.repo === repo.id &&
+        pr.branch === session.branch &&
+        pr.state !== "MERGED" &&
+        pr.state !== "CLOSED",
+    ) &&
+    !session.stackedOn &&
+    !session.existingBranch &&
+    !session.pstackMode &&
+    !session.automation &&
+    !session.automationDescendantPolicy
+  ) {
+    return [
+      "## Branch discipline (direct publication)",
+      `You are working in \`${session.worktreeDir}\` on branch \`${session.branch}\`. Sibling sessions share this worktree and branch; preserve all their commits and uncommitted work. Stay on this branch, never switch or create branches, reset, stash, or cherry-pick around sibling commits.`,
+      `Repository \`${repo.id}\` defaults to publishing directly to \`${repo.defaultBranch}\` without a pull request. This publication preference is independent of checkout isolation. If the user explicitly requests a PR, or this branch already has an open PR, use the PR workflow instead; never merge that PR without explicit user approval for that specific PR.`,
+      `Before publishing, inspect the complete diff against \`origin/${repo.defaultBranch}\`, including sibling commits. Stop if unfinished or unrelated work would land. Stage only your own changes, inspect the staged diff, and run the repository's required checks before committing.`,
+      `Fetch with \`git fetch origin\`. Before integrating upstream, check for rebase-merge, rebase-apply, or MERGE_HEAD under \`git rev-parse --git-dir\` and coordinate with sibling sessions. If \`git merge-base --is-ancestor origin/${repo.defaultBranch} HEAD\` fails, merge \`origin/${repo.defaultBranch}\` into this branch without rewriting its history, only with a clean index and worktree. If another session has uncommitted work, stop and coordinate; never stash or discard it. Resolve conflicts and rerun all required checks on the final candidate.`,
+      `Publish the checked commit with a normal fast-forward push: \`git push origin HEAD:refs/heads/${repo.defaultBranch}\`. Never force-push or delete the default branch. If the push is rejected because the remote advanced, fetch, integrate, review, and check again; do not blindly retry. Keep this worktree's upstream on its own branch, not the default branch.`,
+      "This preference grants no additional credentials or permissions. If server policy or branch protection refuses direct publication, report the blocker; never bypass it. Automations and their descendants keep their existing publication restrictions.",
+    ].join("\n");
+  }
   return [
     "## Branch discipline (shared worktree)",
     `You are working in \`${session.worktreeDir}\` on branch \`${session.branch}\`. Other sessions in this workspace share this exact worktree and branch — commits you don't recognize are their work, not noise.`,
@@ -213,7 +246,9 @@ export function buildStackNote(session: {
  * `@<project>:path` mentions resolve. Returns undefined for single-repo sessions
  * so the prompt stays clean.
  */
-export function buildReposNote(session: UnifiedSession): string | undefined {
+export function buildReposNote(
+  session: UnifiedSession & { existingBranch?: boolean },
+): string | undefined {
   const branchNote = [buildBranchNote(session), buildStackNote(session)]
     .filter(Boolean)
     .join("\n\n");
@@ -222,7 +257,7 @@ export function buildReposNote(session: UnifiedSession): string | undefined {
   const primaryRepo = sessionRepoId(session) ?? defaultRepo().id;
   const lines = [
     "## Repos in this session",
-    "This session spans multiple repos. Each is an isolated git worktree — `cd` into the right one to read or edit its files, and commit/push/open PRs in each repo independently (don't edit another repo's shared main checkout).",
+    "This session spans multiple repos. Each is an isolated git worktree — `cd` into the right one to read or edit its files and follow that repository's publication policy independently (don't edit another repo's shared main checkout).",
     // Canonicalized for the note only — the stored worktreeDir stays literal
     // (see canonicalPath) — so a session that predates a checkout rename
     // points the agent at the path that exists today.
@@ -233,7 +268,20 @@ export function buildReposNote(session: UnifiedSession): string | undefined {
   lines.push(
     "A file mentioned from an attached repo arrives as `@<project>:<path>` — resolve it under that repo's worktree dir above.",
   );
-  return [branchNote, lines.join("\n")].filter(Boolean).join("\n\n");
+  const attachedNotes = attached.map((repo) =>
+    buildBranchNote({
+      mode: session.mode,
+      branch: repo.branch,
+      worktreeDir: repo.dir,
+      prs: session.prs,
+      pstackMode: session.pstackMode,
+      automation: session.automation,
+      automationDescendantPolicy: session.automationDescendantPolicy,
+    }),
+  );
+  return [branchNote, lines.join("\n"), ...attachedNotes]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /** Repo ids a session spans, primary first — memory scopes + repos note agree on this. */
