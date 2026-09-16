@@ -54,6 +54,8 @@ describe("remote runner bootstrap", () => {
       "test -x /home/ubuntu/.local/bin/opensession",
     );
     expect(commands[1]).toContain("bun build --compile");
+    expect(commands[1]).toContain("--external '*.html'");
+    expect(commands[1]).toContain("--external oxc-transform-react");
     expect(commands[1]).toContain(REMOTE_RUNNER_BINARY);
   });
 
@@ -71,6 +73,53 @@ describe("remote runner bootstrap", () => {
     await expect(bootstrapRemoteSandbox(driver, "test")).rejects.toThrow(
       "exit 137): no command output",
     );
+  });
+
+  test("preserves fetch failures instead of masking them with a checkout error", async () => {
+    const root = mkdtempSync(join(tmpdir(), "opensession-bootstrap-fetch-"));
+    scratch.push(root);
+    const config = join(root, "sandbox.json");
+    writeFileSync(
+      config,
+      JSON.stringify({
+        runnerRepoUrl: "https://github.com/tellahq/opensession.git",
+        runnerSha: "deadbeef",
+        cloneCredential: { type: "https-token", token: "runner-clone-secret" },
+      }),
+    );
+    process.env.OPENSESSION_SANDBOX_CONFIG = config;
+    let fetchCommand = "";
+    const driver: RemoteDriver = {
+      async exec(command) {
+        if (command.startsWith("cat "))
+          return { exitCode: 1, stdout: "", stderr: "" };
+        if (command.includes("fetch --depth 1")) {
+          fetchCommand = command;
+          return {
+            exitCode: 128,
+            stdout: "",
+            stderr:
+              "fatal: unable to access 'https://x-access-token:runner-clone-secret@github.com/tellahq/opensession.git/': Could not resolve host: github.com",
+          };
+        }
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+      async execBackground() {},
+      async writeFile() {},
+      async ensureStarted() {},
+    };
+    let message = "";
+    try {
+      await bootstrapRemoteSandbox(driver, "test");
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("Could not resolve host: github.com");
+    expect(message).not.toContain("runner-clone-secret");
+    expect(fetchCommand).toContain(
+      ` && git -C ${REMOTE_REPO} checkout --detach`,
+    );
+    expect(fetchCommand).not.toContain("2>/dev/null");
   });
 
   test("prefers the compiled runner host with a source fallback", () => {
@@ -129,6 +178,8 @@ describe("remote runner bootstrap", () => {
     expect(compile).toContain(
       "rm -f /home/ubuntu/.local/bin/opensession-runner",
     );
+    expect(compile).toContain("--external '*.html'");
+    expect(compile).toContain("--external oxc-transform-react");
     const ghInstall = commands.find((command) =>
       command.includes("releases/download/v2.83.1"),
     );
