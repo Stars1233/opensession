@@ -130,7 +130,7 @@ export async function activeSandboxFor(
  */
 export async function activePortalSandboxFor(
   session: UnifiedSession,
-  options: { wake?: boolean } = {},
+  options: LiveSandboxOptions = {},
 ): Promise<Sandbox | null> {
   const record = session.portalSandbox;
   if (!record?.provider || !record.sandboxId) return null;
@@ -150,15 +150,38 @@ type LifecyclePatch = {
   lastLifecycleError: string | undefined;
 };
 
+type LiveSandboxOptions = {
+  wake?: boolean;
+  /**
+   * Runs after a wake brought the machine back and before the Portals it
+   * was running are relaunched: a Portal Sandbox lands the host checkpoint
+   * here, so the app that comes back shows the current tree. Its failure
+   * is the wake's failure and propagates to the caller; the Portals then
+   * stay down rather than come back on the older tree.
+   */
+  beforeRestore?: (sandbox: Sandbox) => Promise<void>;
+};
+
 async function liveSandbox(
   session: UnifiedSession,
   record: { provider: string; sandboxId: string },
-  options: { wake?: boolean },
+  options: LiveSandboxOptions,
   persist: (patch: LifecyclePatch) => void,
 ): Promise<Sandbox | null> {
   if (!sandboxesEnabled()) return null;
   if (!isRemoteSandboxProvider(record.provider)) return null;
   if (!sandboxProviderConfigured(record.provider)) return null;
+  const persistFailure = (error: unknown) => {
+    if (options.wake)
+      persist({
+        lifecycle: "needs_attention",
+        lastLifecycleError:
+          error instanceof Error
+            ? error.message.slice(0, 240)
+            : String(error).slice(0, 240),
+      });
+  };
+  let running: { sandbox: Sandbox; woke: boolean } | null;
   try {
     const provider = getSandboxProvider(record.provider);
     let sandbox = await provider.get(record.sandboxId);
@@ -175,22 +198,27 @@ async function liveSandbox(
       if (sandbox && (await sandbox.status()) === "running")
         persist({ lifecycle: "awake", lastLifecycleError: undefined });
     }
-    if (sandbox && (await sandbox.status()) === "running") {
-      if (woke) await restoreSandboxPortals(session, sandbox);
-      return sandbox;
-    }
-    return null;
+    running =
+      sandbox && (await sandbox.status()) === "running"
+        ? { sandbox, woke }
+        : null;
   } catch (error) {
-    if (options.wake)
-      persist({
-        lifecycle: "needs_attention",
-        lastLifecycleError:
-          error instanceof Error
-            ? error.message.slice(0, 240)
-            : String(error).slice(0, 240),
-      });
+    persistFailure(error);
     return null;
   }
+  if (!running) return null;
+  if (running.woke) {
+    // Not caught: a machine that is up but could not be prepared is not
+    // "sleeping or unavailable", and the reason belongs to the caller.
+    await options.beforeRestore?.(running.sandbox);
+    try {
+      await restoreSandboxPortals(session, running.sandbox);
+    } catch (error) {
+      persistFailure(error);
+      return null;
+    }
+  }
+  return running.sandbox;
 }
 
 /** Whether a recorded Sandbox no longer exists at the provider, as opposed

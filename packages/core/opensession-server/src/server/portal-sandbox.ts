@@ -105,9 +105,11 @@ export function portalsInSandbox(session: PortalSession): boolean {
  * project that runs Portals remotely. `wake` is an explicit compute action
  * (starting or restarting a Portal): it may wake a sleeping machine and
  * lands the latest host checkpoint in a Portal Sandbox first, so the app
- * that comes up shows the current tree; when that landing fails the wake
- * fails with it, rather than starting the app on whatever the machine had
- * before. A Portal Sandbox the provider has lost is replaced when
+ * that comes up shows the current tree: before the Portals a wake brings
+ * back are relaunched, and before the caller starts its own. When that
+ * landing fails the wake fails with it, rather than starting the app on
+ * whatever the machine had before. A Portal Sandbox the provider has lost
+ * is replaced when
  * provisioning is allowed. Throws when provisioning or the landing fails;
  * the reason is recorded on the session as well.
  */
@@ -119,11 +121,19 @@ export async function sandboxForPortals(
     return activeSandboxFor(session, { wake: options.wake });
   const record = session.portalSandbox;
   if (record?.sandboxId) {
+    let synced = false;
     const sandbox = await activePortalSandboxFor(session, {
       wake: options.wake,
+      // A wake relaunches the Portals the machine was running: land the
+      // checkpoint first, or they would come back public on the older tree
+      // even though the start itself then fails.
+      beforeRestore: async (woken) => {
+        await syncPortalSandbox(session, woken);
+        synced = true;
+      },
     });
     if (sandbox) {
-      if (options.wake) await syncPortalSandbox(session, sandbox);
+      if (options.wake && !synced) await syncPortalSandbox(session, sandbox);
       return sandbox;
     }
     if (
