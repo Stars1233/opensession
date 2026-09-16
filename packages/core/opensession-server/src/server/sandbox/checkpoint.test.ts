@@ -65,9 +65,10 @@ async function runCheckpoint(env: Record<string, string>) {
       OS_CWD: work,
       OS_REF: ref,
       OS_SESSION: "os-test-session",
-      OS_BRANCH: "feature",
+      OS_DEFAULT_BRANCH: "main",
       OS_LAST_HEAD: "",
       OS_LAST_TREE: "",
+      OS_LAST_BRANCH: "",
       ...env,
     })
     .quiet()
@@ -212,8 +213,16 @@ describe("checkpoint script", () => {
 
     const result = await runCheckpoint({});
     expect(result.exitCode).toBe(0);
-    const [state, commit, head] = result.stdout.toString().trim().split(/\s+/);
+    const [state, commit, head, , branch] = result.stdout
+      .toString()
+      .trim()
+      .split(/\s+/);
     expect(state).toBe("pushed");
+    // The branch is read from the checkout, not handed in.
+    expect(branch).toBe("feature");
+    expect(
+      (await git(origin)`git log -1 --format=%B ${ref}`.text()).trim(),
+    ).toContain("Branch: feature");
     const tip = (await git(work)`git rev-parse HEAD`.text()).trim();
     expect(head).toBe(tip);
     // The branch itself did not move and the tree is still dirty.
@@ -238,9 +247,53 @@ describe("checkpoint script", () => {
     const again = await runCheckpoint({
       OS_LAST_HEAD: head!,
       OS_LAST_TREE: tree!,
+      OS_LAST_BRANCH: "feature",
     });
     expect(again.exitCode).toBe(0);
-    expect(again.stdout.toString().trim()).toBe(`unchanged ${head} ${tree}`);
+    expect(again.stdout.toString().trim()).toBe(
+      `unchanged ${head} ${tree} feature`,
+    );
+  });
+
+  test("a renamed branch is a new checkpoint labeled with the checkout's branch", async () => {
+    const first = await runCheckpoint({});
+    const [, , head, tree] = first.stdout.toString().trim().split(/\s+/);
+    await git(work)`git branch -m feature feature-renamed`;
+    try {
+      // Same tip, same tree, other branch: not `unchanged`.
+      const renamed = await runCheckpoint({
+        OS_LAST_HEAD: head!,
+        OS_LAST_TREE: tree!,
+        OS_LAST_BRANCH: "feature",
+      });
+      expect(renamed.exitCode).toBe(0);
+      const [state, , , , branch] = renamed.stdout
+        .toString()
+        .trim()
+        .split(/\s+/);
+      expect(state).toBe("pushed");
+      expect(branch).toBe("feature-renamed");
+    } finally {
+      await git(work)`git branch -m feature-renamed feature`;
+    }
+  });
+
+  test("nothing is pushed from a detached HEAD or the default branch", async () => {
+    const before = (await git(origin)`git rev-parse ${ref}`.text()).trim();
+    await git(work)`git checkout -q --detach`;
+    try {
+      const detached = await runCheckpoint({});
+      expect(detached.exitCode).toBe(0);
+      expect(detached.stdout.toString().trim()).toBe("detached");
+    } finally {
+      await git(work)`git checkout -q feature`;
+    }
+    const onDefault = await runCheckpoint({ OS_DEFAULT_BRANCH: "feature" });
+    expect(onDefault.exitCode).toBe(0);
+    expect(onDefault.stdout.toString().trim()).toBe("default feature");
+    expect((await git(origin)`git rev-parse ${ref}`.text()).trim()).toBe(
+      before,
+    );
   });
 
   test("restore reproduces branch, tip, and uncommitted changes in a fresh clone", async () => {

@@ -147,6 +147,25 @@ function restoreSpec(
 }
 
 /**
+ * The session as it stands once the lifecycle lane is ours, or the refusal
+ * to send when it was deleted while the request waited its turn. A queued
+ * operation never acts on the copy it was requested with: that record may
+ * describe a Sandbox, a checkpoint, or a session that no longer exists.
+ */
+async function currentOnLane(
+  sessionId: string,
+): Promise<{ session: StoredSession } | { response: Response }> {
+  const session = await findSessionAsync(sessionId);
+  if (session) return { session };
+  return {
+    response: Response.json(
+      { error: "The session was deleted while this request waited." },
+      { status: 410 },
+    ),
+  };
+}
+
+/**
  * Refusal while a turn is admitted or running. Checked on the session's
  * lifecycle lane, after claiming it: run admission reserves the session and
  * then waits for the lane, so a reservation seen here belongs to a turn that
@@ -296,11 +315,15 @@ async function freshCheckpoint(
       status: 409,
       reason: `This session's work cannot be checkpointed (${outcome.reason}), so the Sandbox's files would be lost. Push from the Sandbox first.`,
     };
-  return {
-    ok: true,
-    reachable: true,
-    session: (await findSessionAsync(session.id)) || session,
-  };
+  const current = await currentOnLane(session.id);
+  if ("response" in current)
+    return {
+      ok: false,
+      reachable: true,
+      status: 409,
+      reason: "The session was deleted while this request waited.",
+    };
+  return { ok: true, reachable: true, session: current.session };
 }
 
 /**
@@ -694,12 +717,13 @@ export async function handleSandboxRoutes(
       // release of the old machine, and the final record update, with run
       // admission waiting on the lane and refused while a turn is admitted.
       return await withSessionLifecycleLane(session.id, async () => {
-        const current = (await findSessionAsync(session.id)) || session;
-        const busy = lifecycleBusyRefusal(current.id);
+        const current = await currentOnLane(session.id);
+        if ("response" in current) return current.response;
+        const busy = lifecycleBusyRefusal(current.session.id);
         if (busy) return busy;
         return action === "attach"
-          ? attachSandbox(ctx, current)
-          : detachSandbox(ctx, current);
+          ? attachSandbox(ctx, current.session)
+          : detachSandbox(ctx, current.session);
       });
     } catch (error) {
       return Response.json(
@@ -764,8 +788,11 @@ async function runSandboxLifecycleAction(
   action: string,
 ): Promise<Response> {
   // The record may have changed while the request waited its turn on the
-  // lane (a move or rebuild ahead of it): act on the Sandbox as it is now.
-  const session = (await findSessionAsync(requested.id)) || requested;
+  // lane (a move, rebuild, or deletion ahead of it): act on the Sandbox as
+  // it is now, never on the copy the request came with.
+  const current = await currentOnLane(requested.id);
+  if ("response" in current) return current.response;
+  const session = current.session;
   const recorded = session.sandbox;
   if (
     !recorded?.provider ||
@@ -863,7 +890,9 @@ async function runSandboxLifecycleAction(
         await touchNativeSessionStrict(session.id, {
           sandboxCheckpoint: undefined,
         });
-        current = (await findSessionAsync(session.id)) || session;
+        const cleared = await currentOnLane(session.id);
+        if ("response" in cleared) return cleared.response;
+        current = cleared.session;
       }
       // destroy() deletes the provider's state file, so the sandbox's
       // recorded trust policy has to be read before it.

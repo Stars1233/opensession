@@ -104,8 +104,19 @@ admitted, so a capture never reads a tree the agent is editing, no turn
 starts against a Sandbox that is about to be destroyed, and the recorded
 commit is always the one the ref points at.
 
-A checkpoint is restored only onto the branch it was taken from. The record
-carries that branch and every restore checks it before touching anything; a
+Deleting a session is a lifecycle operation too: it runs on the same lane,
+removes the hidden ref while it holds the lane, and any checkpoint or move
+still queued behind it finds no session and refuses (410) rather than acting
+on the deleted record or pushing the ref back.
+
+A checkpoint is labeled with the branch the checkout is actually on, read
+inside the Sandbox by the checkpoint script itself. When the agent renamed
+or switched branches during a turn, the session record follows the checkout
+in the same write, so the checkpoint restores onto, and later publication
+targets, the branch the work is really on; a detached HEAD takes no
+checkpoint. A checkpoint is restored only onto the branch it was taken
+from. The record carries that branch and every restore checks it before
+touching anything; a
 session that switched branches after its last checkpoint has, for the
 purposes of a move or rebuild, no checkpoint (the refusal says so), and a
 replacement Sandbox that would otherwise restore it is parked as Needs
@@ -148,7 +159,10 @@ transcript, so the conversation carries over.
   else's work: finding, creating, and rewriting the worktree is one step
   under the repository's git lock, and a branch already checked out on this
   machine refuses the move (409, naming the checkout), except the session's
-  own former worktree when it is clean and the checkpoint extends its tip.
+  own former worktree when it is clean and the checkpoint extends its tip. A
+  restore that fails on a worktree the move just created removes that
+  worktree again before the lock is released, so retrying the move finds
+  the branch free rather than a half-restored checkout.
 
 Whichever way a session leaves a Sandbox, the old machine is retired the
 same way a deleted session's is: its workload-identity leases are revoked

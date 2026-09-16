@@ -950,8 +950,12 @@ export async function createWorktreeForExistingBranch(
  * default branch's, and nobody else can hold work in it yet); false when the
  * branch was already checked out (a per-branch worktree, a leftover
  * unregistered directory, or the shared checkout), which the caller must
- * treat as somebody's. Seeding and dependency install of a new worktree run
- * after `fn`, never over what `fn` writes.
+ * treat as somebody's. When `fn` fails on a checkout this call created, the
+ * worktree (and the branch, if this call created that too) is removed again
+ * before the lock is released, so a retry finds the branch free instead of
+ * a half-restored checkout it must treat as somebody's. Seeding and
+ * dependency install of a new worktree run after `fn` has succeeded, never
+ * over what `fn` writes.
  */
 export async function withClaimedBranchWorktree<T>(
   branch: string,
@@ -982,21 +986,32 @@ export async function withClaimedBranchWorktree<T>(
     const hasRef = async (ref: string) =>
       (await $`git -C ${repo.repo} show-ref --verify --quiet ${ref}`.nothrow())
         .exitCode === 0;
+    let createdBranch = false;
     if (await hasRef(`refs/heads/${branch}`)) {
       await $`git -C ${repo.repo} worktree add ${wtPath} ${branch}`.quiet();
     } else if (await hasRef(`refs/remotes/origin/${branch}`)) {
+      createdBranch = true;
       await $`git -C ${repo.repo} worktree add -b ${branch} ${wtPath} origin/${branch}`.quiet();
     } else {
       // Neither this machine nor origin knows the branch: start it at the
       // default branch and let the caller move it where it belongs.
+      createdBranch = true;
       const start = await defaultStartPoint(repo);
       await $`git -C ${repo.repo} worktree add -b ${branch} ${wtPath} ${start}`.quiet();
     }
+    let result: T;
     try {
-      return await fn({ path: wtPath, created: true });
-    } finally {
-      void seedAndInstallWorktree(repo, wtPath, branch);
+      result = await fn({ path: wtPath, created: true });
+    } catch (error) {
+      await $`git -C ${repo.repo} worktree remove --force --force ${wtPath}`
+        .quiet()
+        .nothrow();
+      if (createdBranch)
+        await $`git -C ${repo.repo} branch -D ${branch}`.quiet().nothrow();
+      throw error;
     }
+    void seedAndInstallWorktree(repo, wtPath, branch);
+    return result;
   });
 }
 

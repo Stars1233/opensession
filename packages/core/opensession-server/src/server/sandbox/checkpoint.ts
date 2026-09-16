@@ -25,8 +25,13 @@
  * (lifecycle-lane.ts): one at a time, in request order, and a turn does not
  * start while one is in flight. Two captures can therefore never race each
  * other's force-push, and the recorded commit is always the one the hidden
- * ref points at. A checkpoint is only ever restored onto the branch it was
- * taken from; the record carries that branch and every restore checks it.
+ * ref points at. A checkpoint is labeled with the branch the checkout is
+ * actually on, read inside the Sandbox by the script itself (the agent may
+ * have renamed or switched branches during the turn, and the session record
+ * follows the checkout, not the other way round); it is only ever restored
+ * onto that branch, and every restore checks it. Deletion of a session runs
+ * on the same lane, so a queued operation that finds no session left is a
+ * no-op instead of resurrecting the hidden ref.
  */
 
 import { $ } from "bun";
@@ -116,9 +121,13 @@ function excludedPaths(repo: Repo): string[] {
 /**
  * The script that builds and pushes the checkpoint. Reads its inputs from the
  * environment so nothing session-specific is interpolated into shell text
- * except the excluded paths, which are quoted. Prints one line:
- * `unchanged <head> <tree>` when the last checkpoint already holds this exact
- * state, else `pushed <commit> <head> <tree>`.
+ * except the excluded paths, which are quoted. The branch it reports is the
+ * one the checkout is on right now, never the caller's idea of it. Prints
+ * one line: `detached` when HEAD is on no branch, `default <branch>` when it
+ * is on the repository's default branch (`OS_DEFAULT_BRANCH`), both without
+ * pushing; `unchanged <head> <tree> <branch>` when the last checkpoint
+ * already holds this exact state on this branch; else
+ * `pushed <commit> <head> <tree> <branch>`.
  */
 export function checkpointScript(excluded: string[]): string {
   const rm = excluded.length
@@ -127,6 +136,9 @@ export function checkpointScript(excluded: string[]): string {
   return [
     "set -eu",
     'cd "$OS_CWD"',
+    "branch=$(git branch --show-current)",
+    'if [ -z "$branch" ]; then echo detached; exit 0; fi',
+    'if [ "$branch" = "${OS_DEFAULT_BRANCH:-}" ]; then echo "default $branch"; exit 0; fi',
     "head=$(git rev-parse --verify HEAD^{commit})",
     "idx=$(mktemp)",
     'export GIT_INDEX_FILE="$idx"',
@@ -136,12 +148,12 @@ export function checkpointScript(excluded: string[]): string {
     "tree=$(git write-tree)",
     "unset GIT_INDEX_FILE",
     'rm -f "$idx"',
-    'if [ "$head" = "${OS_LAST_HEAD:-}" ] && [ "$tree" = "${OS_LAST_TREE:-}" ]; then',
-    '  echo "unchanged $head $tree"; exit 0',
+    'if [ "$head" = "${OS_LAST_HEAD:-}" ] && [ "$tree" = "${OS_LAST_TREE:-}" ] && [ "$branch" = "${OS_LAST_BRANCH:-}" ]; then',
+    '  echo "unchanged $head $tree $branch"; exit 0',
     "fi",
-    'commit=$(printf \'Open Session checkpoint\\n\\nSession: %s\\nBranch: %s\\nHead: %s\\n\' "$OS_SESSION" "$OS_BRANCH" "$head" | git commit-tree "$tree" -p "$head")',
+    'commit=$(printf \'Open Session checkpoint\\n\\nSession: %s\\nBranch: %s\\nHead: %s\\n\' "$OS_SESSION" "$branch" "$head" | git commit-tree "$tree" -p "$head")',
     'git push --force --quiet origin "$commit:$OS_REF"',
-    'echo "pushed $commit $head $tree"',
+    'echo "pushed $commit $head $tree $branch"',
   ]
     .filter(Boolean)
     .join("\n");
@@ -168,7 +180,12 @@ type ScriptRunner = (
  * it stands once the lane is theirs (a queued caller's own copy may be
  * stale). `unchanged` needs no write; `pushed` becomes the session's
  * `sandboxCheckpoint` before the lane is released, so the next checkpoint
- * and the next turn both see it.
+ * and the next turn both see it. The record is labeled with the branch the
+ * checkout is actually on; when that is not the session record's branch
+ * (the agent renamed or switched it, which run-session can only notice for a
+ * checkout on this machine), the session record follows in the same write,
+ * so the checkpoint restores onto, and later publication targets, the
+ * branch the work is really on.
  */
 async function runCheckpoint(
   session: CheckpointSession,
@@ -190,9 +207,10 @@ async function runCheckpoint(
     OS_CWD: cwd,
     OS_REF: ref,
     OS_SESSION: session.id,
-    OS_BRANCH: session.branch,
+    OS_DEFAULT_BRANCH: repo.defaultBranch,
     OS_LAST_HEAD: last?.ref === ref ? last.head : "",
     OS_LAST_TREE: last?.ref === ref ? last.tree : "",
+    OS_LAST_BRANCH: last?.ref === ref ? last.branch : "",
   });
   if (result.exitCode !== 0) {
     throw new Error(
@@ -201,21 +219,33 @@ async function runCheckpoint(
   }
   const line = result.stdout.trim().split("\n").at(-1) || "";
   const [state, ...parts] = line.split(/\s+/);
-  if (state === "unchanged" && last?.ref === ref)
+  if (state === "detached")
+    return { state: "skipped", reason: "checkout is on a detached HEAD" };
+  if (state === "default")
+    return { state: "skipped", reason: "session is on the default branch" };
+  if (state === "unchanged" && last?.ref === ref && parts[2] === last.branch)
     return { state: "unchanged", checkpoint: last };
-  if (state !== "pushed" || parts.length < 3)
+  if (state !== "pushed" || parts.length < 4)
     throw new Error(`checkpoint produced no result: ${line.slice(0, 200)}`);
+  const branch = parts[3]!;
   const checkpoint: SandboxCheckpointRecord = {
     ref,
     commit: parts[0]!,
     head: parts[1]!,
     tree: parts[2]!,
-    branch: session.branch,
+    branch,
     at: new Date().toISOString(),
   };
-  await touchNativeSessionStrict(session.id, { sandboxCheckpoint: checkpoint });
+  const patch =
+    branch === session.branch
+      ? { sandboxCheckpoint: checkpoint }
+      : { sandboxCheckpoint: checkpoint, branch };
+  await touchNativeSessionStrict(session.id, patch);
   console.log(
-    `[sandbox] ${session.id}: checkpoint ${checkpoint.commit.slice(0, 12)} on ${ref}`,
+    `[sandbox] ${session.id}: checkpoint ${checkpoint.commit.slice(0, 12)} on ${ref}` +
+      (branch === session.branch
+        ? ""
+        : ` (checkout is on ${branch}, record said ${session.branch}; record updated)`),
   );
   return { state: "pushed", checkpoint };
 }
@@ -227,14 +257,17 @@ async function runCheckpoint(
  * Serialized on the session's lifecycle lane, which is claimed synchronously
  * here; `sandbox` may be a resolver that is only called once the lane is
  * ours, with the session record as it stands then. A resolver that yields
- * null (no reachable Sandbox) makes the checkpoint a no-op `skipped`.
+ * null (no reachable Sandbox) makes the checkpoint a no-op `skipped`, and so
+ * does a session that was deleted while the request waited: the caller's
+ * copy of the record is never used in its place.
  */
 export function checkpointSessionWorkspace(
   session: CheckpointSession,
   sandbox: Sandbox | ((current: CheckpointSession) => Promise<Sandbox | null>),
 ): Promise<CheckpointOutcome> {
   return withSessionLifecycleLane(session.id, async () => {
-    const current = (await findSessionAsync(session.id)) || session;
+    const current = await findSessionAsync(session.id);
+    if (!current) return { state: "skipped", reason: "session was deleted" };
     if (!isRemoteSandboxProvider(current.sandbox?.provider))
       return { state: "skipped", reason: "not a Sandbox session" };
     const target =
@@ -264,7 +297,8 @@ export function checkpointHostWorkspace(
     if (!existsSync(dir)) return { state: "skipped", reason: "no worktree" };
     if (isSharedCheckoutDir(dir))
       return { state: "skipped", reason: "shared checkout" };
-    const current = (await findSessionAsync(session.id)) || session;
+    const current = await findSessionAsync(session.id);
+    if (!current) return { state: "skipped", reason: "session was deleted" };
     return runCheckpoint(
       { ...current, sandbox: undefined },
       dir,
