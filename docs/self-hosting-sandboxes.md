@@ -189,7 +189,11 @@ this machine, and the Sandbox badge stays off. The first time a Portal is
 started, by the person from the Portals panel or by the agent through
 `start_declared_portal` or `start_portal`, Open Session:
 
-- checkpoints the worktree, so uncommitted work travels too;
+- checkpoints the worktree, so uncommitted work travels too. A worktree
+  that cannot be checkpointed (a repository not on GitHub, the default
+  branch, no credential) gets no Portal Sandbox: the start is refused with
+  the reason, rather than bringing up a machine built from origin that
+  shows older code;
 - provisions a **Portal Sandbox** for the session (the provider names it
   `<session id>--portals`) and materializes the branch on that checkpoint,
   exactly as a rebuild would;

@@ -18,7 +18,6 @@ import { getSandboxProvider, type Sandbox } from "./sandbox";
 import {
   checkpointHostWorkspace,
   landCheckpointInSandbox,
-  restorableCheckpoint,
 } from "./sandbox/checkpoint";
 import {
   isRemoteSandboxProvider,
@@ -165,30 +164,30 @@ async function provisionPortalSandbox(
   // moved): its record is not this call's to write any more.
   let owned = true;
   try {
+    // The machine mirrors this worktree, and the checkpoint just taken is
+    // the only faithful copy of it. A worktree that cannot be checkpointed
+    // (not on GitHub, on the default branch, no credential) gets no Portal
+    // Sandbox rather than one built from origin that shows older code.
     const outcome = await checkpointHostWorkspace(session, dir);
     if (outcome.state === "skipped")
-      console.log(
-        `[sandbox] ${session.id}: Portal Sandbox starts from origin (checkpoint skipped: ${outcome.reason})`,
+      throw new Error(
+        `this worktree cannot be checkpointed (${outcome.reason}), and the Portal Sandbox would show older code`,
       );
+    const checkpoint = outcome.checkpoint;
     const current = await findSessionAsync(session.id);
     if (!current) throw new Error("the session was deleted");
-    const checkpoint = restorableCheckpoint(current);
     const sandbox = await ensureSandboxWithTransientRetry(
       getSandboxProvider(provider),
       {
         sessionId: portalSandboxSessionId(session.id),
         repo: current.repo,
-        branch: current.branch || undefined,
+        branch: checkpoint.branch,
         mode: "code",
-        ...(checkpoint
-          ? {
-              restoreCheckpoint: {
-                ref: checkpoint.ref,
-                commit: checkpoint.commit,
-                branch: checkpoint.branch,
-              },
-            }
-          : {}),
+        restoreCheckpoint: {
+          ref: checkpoint.ref,
+          commit: checkpoint.commit,
+          branch: checkpoint.branch,
+        },
       },
     );
     try {
@@ -210,7 +209,7 @@ async function provisionPortalSandbox(
             sandboxId: sandbox.id,
             lifecycle: "awake",
             lastLifecycleError: undefined,
-            syncedCommit: checkpoint?.commit,
+            syncedCommit: checkpoint.commit,
           },
         });
       });
@@ -229,8 +228,7 @@ async function provisionPortalSandbox(
       throw error;
     }
     console.log(
-      `[sandbox] ${session.id}: Portal Sandbox ${sandbox.id} ready` +
-        (checkpoint ? ` on checkpoint ${checkpoint.commit.slice(0, 12)}` : ""),
+      `[sandbox] ${session.id}: Portal Sandbox ${sandbox.id} ready on checkpoint ${checkpoint.commit.slice(0, 12)}`,
     );
     return sandbox;
   } catch (error) {
@@ -251,10 +249,13 @@ async function provisionPortalSandbox(
  * Bring the Portal Sandbox's checkout up to the host worktree: checkpoint
  * the worktree and land the checkpoint there, on the session's lifecycle
  * lane so the capture and the landing see one consistent record. `current`
- * when the Sandbox already sits on the latest checkpoint. A failed capture
- * or landing throws, with the reason recorded on the session for the
- * Portals panel: the machine then holds an older tree, and a wake that
- * went on regardless would report the app ready on stale code.
+ * when the Sandbox already sits on the latest checkpoint; `skipped` only
+ * when the machine is not this session's Portal Sandbox any more. A failed
+ * capture or landing throws, and so does a capture the worktree does not
+ * allow (no branch, the default branch, no credential), with the reason
+ * recorded on the session for the Portals panel: the machine then holds an
+ * older tree, and a wake that went on regardless would report the app
+ * ready on stale code.
  */
 export function syncPortalSandbox(
   session: UnifiedSession,
@@ -270,7 +271,10 @@ export function syncPortalSandbox(
         current,
         current.worktreeDir,
       );
-      if (outcome.state === "skipped") return "skipped";
+      if (outcome.state === "skipped")
+        throw new Error(
+          `this worktree cannot be checkpointed (${outcome.reason}), and the Portal Sandbox holds older code`,
+        );
       if (outcome.checkpoint.commit === record.syncedCommit) return "current";
       await landCheckpointInSandbox(current.repo, sandbox, outcome.checkpoint);
       await touchNativeSessionStrict(current.id, {
