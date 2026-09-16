@@ -353,10 +353,22 @@ uses scratch state and never touches live sessions. The certification dates in
 
 Sandboxes are labeled `opensession.session=<id>`. Daytona stops an idle
 sandbox itself (`autoStopInterval`) and retains the disk; wake is `start`.
-Project snapshots are Daytona snapshots. Daytona's default image (1 vCPU / 1
-GB / 3 GiB) is too small for real repositories: set a sized org snapshot
-under the connection's settings. Automations use Daytona's per-sandbox domain
-allowlist. Self-hostable.
+Project snapshots are Daytona snapshots. Without a snapshot or explicit size,
+Open Session cold-creates from `daytonaio/sandbox:0.8.0` with 2 vCPU, 4 GiB
+memory and 10 GiB disk. Daytona's implicit 1 GiB / 3 GiB snapshot OOM-kills
+the runner compiler (exit 137) and cannot hold the completed runtime. The
+4 GiB / 10 GiB cold bootstrap and compiled runner were live-verified; larger
+repositories may need more headroom. Explicit sizes still win, and configured
+snapshots keep their baked-in size, so replace an undersized snapshot rather
+than expecting the cold fallback to resize it. Bootstrap errors include the
+command exit code even when the provider returns no output.
+
+A failed setup may have a provider machine before the session records its
+Sandbox ID. Moves and deletion recover that machine from its durable provider
+mapping and wait for in-flight provisioning before retirement. Refused Daytona
+deletions retain the mapping for retry; a move does not forget its source when
+retirement fails. Automations use Daytona's per-sandbox domain allowlist.
+Self-hostable.
 
 ### Box (ascii.dev)
 

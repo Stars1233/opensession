@@ -33,7 +33,11 @@ import {
   touchNativeSessionStrict,
 } from "../session-cache";
 import { resolveWorktreeTarget } from "../session-repos";
-import { activeSandboxFor, teardownSandbox } from "../session-sandbox";
+import {
+  activeSandboxFor,
+  teardownRecordedSandbox,
+  teardownSandbox,
+} from "../session-sandbox";
 import { releasePortalSandbox } from "../portal-sandbox";
 import { sessionTouchedPaths } from "../session-touched";
 import type { SandboxCheckpointRecord } from "../types";
@@ -198,6 +202,8 @@ function recordedCheckpoint(
   };
 }
 
+const attachedSandboxProvisions = new Map<string, symbol>();
+
 /**
  * Provision the Sandbox a session just moved into, off the request. The next
  * turn's own ensure() queues behind this one on the provider's per-session
@@ -208,8 +214,11 @@ async function provisionAttachedSandbox(
   session: StoredSession,
   provider: string,
 ): Promise<void> {
+  const attempt = Symbol();
+  attachedSandboxProvisions.set(session.id, attempt);
   const recorded = async () => {
     const current = await findSessionAsync(session.id);
+    if (attachedSandboxProvisions.get(session.id) !== attempt) return null;
     // Only the move this call started may finish it: a later move, a turn
     // that recorded the Sandbox first, or a detach leaves nothing to write.
     return current?.sandbox?.provider === provider && !current.sandbox.sandboxId
@@ -231,33 +240,40 @@ async function provisionAttachedSandbox(
         ...restoreSpec(session.sandboxCheckpoint),
       },
     );
-    const current = await recorded();
-    if (!current) return;
-    touchNativeSession(session.id, {
-      sandbox: {
-        ...current,
-        sandboxId: sandbox.id,
-        workspace: sandbox.workspace,
-        lifecycle: "awake",
-        lastLifecycleError: undefined,
-      },
+    await withSessionLifecycleLane(session.id, async () => {
+      const current = await recorded();
+      if (!current) return;
+      await touchNativeSessionStrict(session.id, {
+        sandbox: {
+          ...current,
+          sandboxId: sandbox.id,
+          workspace: sandbox.workspace,
+          lifecycle: "awake",
+          lastLifecycleError: undefined,
+        },
+      });
+      console.log(`[sandbox] ${session.id}: moved into ${sandbox.id}`);
     });
-    console.log(`[sandbox] ${session.id}: moved into ${sandbox.id}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(
       `[sandbox] ${session.id}: could not provision the ${provider} Sandbox it moved to:`,
       message,
     );
-    const current = await recorded();
-    if (!current) return;
-    touchNativeSession(session.id, {
-      sandbox: {
-        ...current,
-        lifecycle: "needs_attention",
-        lastLifecycleError: message,
-      },
+    await withSessionLifecycleLane(session.id, async () => {
+      const current = await recorded();
+      if (!current) return;
+      await touchNativeSessionStrict(session.id, {
+        sandbox: {
+          ...current,
+          lifecycle: "needs_attention",
+          lastLifecycleError: message,
+        },
+      });
     });
+  } finally {
+    if (attachedSandboxProvisions.get(session.id) === attempt)
+      attachedSandboxProvisions.delete(session.id);
   }
 }
 
@@ -334,21 +350,14 @@ async function freshCheckpoint(
  */
 async function releaseSandbox(session: StoredSession, why: string) {
   const recorded = session.sandbox;
-  if (!recorded?.sandboxId || !isRemoteSandboxProvider(recorded.provider))
-    return;
-  try {
-    // Revokes the machine's workload-identity leases before anything else,
-    // so a destroy that fails below cannot leave it running with credentials.
-    await teardownSandbox(recorded.provider, recorded.sandboxId);
-    console.log(
-      `[sandbox] ${session.id}: released ${recorded.sandboxId} (${why})`,
-    );
-  } catch (error) {
-    console.warn(
-      `[sandbox] ${session.id}: could not release ${recorded.sandboxId} (${why}):`,
-      error instanceof Error ? error.message : String(error),
-    );
-  }
+  if (!recorded || !isRemoteSandboxProvider(recorded.provider)) return;
+  // Also retire failed/in-flight provisioning, before the move erases its
+  // provider selection. A failed retirement must leave that selection intact
+  // so the person can retry instead of silently leaking paid compute.
+  const id = await teardownRecordedSandbox(session.id, recorded);
+  console.log(
+    `[sandbox] ${session.id}: released ${id || "unmaterialized Sandbox"} (${why})`,
+  );
 }
 
 /**
@@ -400,7 +409,6 @@ async function attachSandbox(
         },
         { status: fresh.status },
       );
-    await releaseSandbox(session, `moving to ${provider}`);
   } else {
     const target = resolveWorktreeTarget(session);
     if (target && existsSync(target.dir)) {
@@ -448,6 +456,7 @@ async function attachSandbox(
     // runs the Portals from now on.
     await releasePortalSandbox(session, `moving to ${provider}`);
   }
+  await releaseSandbox(session, `moving to ${provider}`);
   await touchNativeSessionStrict(session.id, {
     sandbox: {
       provider,

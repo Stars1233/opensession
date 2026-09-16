@@ -11,6 +11,10 @@ import {
   sandboxProviderConfigured,
 } from "./sandbox/config";
 import { touchNativeSession, updateSessionFile } from "./session-cache";
+import {
+  findRemoteStateBySessionAsync,
+  withRemoteEnsureLock,
+} from "./sandbox/adapters/bootstrap";
 import { withSessionLifecycleLane } from "./sandbox/lifecycle-lane";
 import { dropSandboxPreviewRoutes } from "./preview";
 import {
@@ -52,13 +56,14 @@ export function destroySessionSandbox(
     record: { provider: string; sandboxId?: string },
     label: string,
     clear: () => void,
+    providerSessionId = session.id,
   ) => {
-    if (!record.sandboxId || !isRemoteSandboxProvider(record.provider)) return;
+    if (!isRemoteSandboxProvider(record.provider)) return;
     void (async () => {
       try {
-        await teardownSandbox(record.provider, record.sandboxId!);
+        const id = await teardownRecordedSandbox(providerSessionId, record);
         console.log(
-          `[sandbox] destroyed ${record.sandboxId} for ${session.id} (${label})`,
+          `[sandbox] retired ${id || "unmaterialized Sandbox"} for ${session.id} (${label})`,
         );
         if (clearSandboxId && session.source === "opensession") clear();
       } catch (e) {
@@ -78,9 +83,32 @@ export function destroySessionSandbox(
     );
   const portal = session.portalSandbox;
   if (portal)
-    retire(portal, `${why}, Portal Sandbox`, () =>
-      touchNativeSession(session.id, { portalSandbox: undefined }),
+    retire(
+      portal,
+      `${why}, Portal Sandbox`,
+      () => touchNativeSession(session.id, { portalSandbox: undefined }),
+      `${session.id}--portals`,
     );
+}
+
+/** A failed ensure still owns a provider machine before the session has an
+ * id. Wait for that ensure to finish before looking up and retiring it, so a
+ * move/delete cannot miss an in-flight create. Callers hold the lifecycle
+ * lane, or have already deleted the session, preventing new run admission. */
+export function teardownRecordedSandbox(
+  providerSessionId: string,
+  record: { provider: string; sandboxId?: string },
+): Promise<string | null> {
+  if (!isRemoteSandboxProvider(record.provider)) return Promise.resolve(null);
+  return withRemoteEnsureLock(record.provider, providerSessionId, async () => {
+    const id =
+      record.sandboxId ||
+      (await findRemoteStateBySessionAsync(record.provider, providerSessionId))
+        ?.sandboxId;
+    if (!id) return null;
+    await teardownSandbox(record.provider, id);
+    return id;
+  });
 }
 
 /**

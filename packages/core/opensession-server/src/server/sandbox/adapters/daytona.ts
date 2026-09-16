@@ -227,9 +227,10 @@ export function daytonaCreateResources(
     ? Math.max(1, Math.ceil(overrides.memoryMb / 1024))
     : daytonaMemoryGiB(cfg.memory);
   const cpu = overrides?.cpu || cfg.cpus;
-  return cpu || memory || overrides?.diskGb
-    ? { cpu: cpu || 2, memory: memory || 4, disk: overrides?.diskGb || 10 }
-    : undefined;
+  // Omitting resources selects Daytona's 1 GiB / 3 GiB default snapshot.
+  // A cold runner compile is OOM-killed there (exit 137). Every cold create,
+  // including a repo without a project profile, needs the full runner shape.
+  return { cpu: cpu || 2, memory: memory || 4, disk: overrides?.diskGb || 10 };
 }
 
 /** Daytona's no-source create overload restores its default snapshot. Custom
@@ -1053,9 +1054,14 @@ export class DaytonaProvider implements SandboxProvider {
       }
       removeRemoteState(this.id, sandboxId);
     } catch (error) {
-      if (options.strict) throw error;
+      if (daytonaNotFound(error)) {
+        removeRemoteState(this.id, sandboxId);
+        return;
+      }
+      // A timeout or refused delete may leave paid compute alive. Keep its
+      // recovery mapping and let the lifecycle caller retry the retirement.
       console.warn(`[sandbox:daytona] destroy(${sandboxId}):`, error);
-      removeRemoteState(this.id, sandboxId);
+      throw error;
     }
   }
 }

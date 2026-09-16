@@ -96,11 +96,11 @@ export interface SandboxDaytonaConfig {
   /**
    * Org snapshot to create sandboxes from (custom `resources` are rejected
    * when creating from a snapshot, so sizing lives in the snapshot itself).
-   * Unset = Daytona's default snapshot: 1 vCPU / 1GB / 3GiB disk — too small
-   * for real repo workspaces (the runner payload alone is ~2GB; a large repo's
-   * clone died on ENOSPC). Create one via the SDK, e.g. name
-   * sandbox-lg-us, image daytonaio/sandbox:0.8.0, resources {cpu:2,
-   * memory:4, disk:10 (org max)}, regionId "us".
+   * Unset = an explicit daytonaio/sandbox:0.8.0 image with the project or
+   * provider size, defaulting to 2 vCPU / 4 GiB memory / 10 GiB disk.
+   * Daytona's implicit 1 GiB / 3 GiB snapshot OOM-kills the runner compiler.
+   * Configured snapshots retain their baked-in resources; replace undersized
+   * snapshots rather than expecting cold-create resource defaults to resize them.
    */
   snapshot?: string;
 }

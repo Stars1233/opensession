@@ -63,6 +63,7 @@ import {
   rmSync,
   unlinkSync,
 } from "fs";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "path";
 import { OPENSESSION_SESSIONS_DIR, homeDir, stateDir } from "../../paths";
 import {
@@ -630,6 +631,41 @@ export function findRemoteStateBySession(
   );
 }
 
+/** Lifecycle callers must also find machines whose setup failed before the
+ * session acquired a sandboxId. Read only provider mappings, never actor DBs,
+ * and keep this recovery lookup off synchronous gateway I/O. */
+export async function findRemoteStateBySessionAsync(
+  provider: string,
+  sessionId: string,
+): Promise<RemoteSandboxState | null> {
+  let files: string[];
+  try {
+    files = await readdir(STATE_DIR);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  for (const file of files) {
+    if (!file.startsWith(`${provider}-`) || !file.endsWith(".json")) continue;
+    let raw: string;
+    try {
+      raw = await readFile(`${STATE_DIR}/${file}`, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    let state: RemoteSandboxState;
+    try {
+      state = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (state?.provider === provider && state.sessionId === sessionId)
+      return withTrustPolicy(state);
+  }
+  return null;
+}
+
 /** Enumerate a provider's persisted sandboxes. Used by provider-side orphan
  * audits (notably local MicroVM prewarms); malformed files fail closed. */
 export function listRemoteStates(provider: string): RemoteSandboxState[] {
@@ -1016,7 +1052,7 @@ export async function assertDialbackReachable(
 function need(r: ExecResult, what: string): void {
   if (r.exitCode !== 0) {
     throw new Error(
-      `remote sandbox bootstrap failed (${what}): ${redactUrl((r.stderr || r.stdout).trim().slice(0, 500))}`,
+      `remote sandbox bootstrap failed (${what}, exit ${r.exitCode}): ${redactUrl((r.stderr.trim() || r.stdout.trim() || "no command output").slice(0, 500))}`,
     );
   }
 }
