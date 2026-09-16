@@ -177,7 +177,7 @@ test("ordinary replies stay uncluttered while system notices and humans stay sep
   expect(human).not.toContain(sessionAgentName("os-self"));
 });
 
-test("identifies the local agent and keeps sender and recipient in one header", () => {
+test("agent headers use one corner avatar and explicit direction", () => {
   for (const entry of [incoming, outgoing]) {
     const html = renderToStaticMarkup(
       <MessageBubble entry={entry} sessionId="os-self" />,
@@ -185,20 +185,21 @@ test("identifies the local agent and keeps sender and recipient in one header", 
     const header = html
       .split('data-agent-message-header=""')[1]!
       .split("</div>")[0]!;
-    expect(header).toContain(sessionAgentName("os-self"));
+    expect(header.match(/viewBox="0 0 80 80"/g)).toHaveLength(1);
     expect(header).toContain(sessionAgentName("os-peer"));
-    expect(header).toContain(
-      `aria-label="Current session: ${sessionAgentName("os-self")}"`,
-    );
-    expect(header).not.toContain(">Current session</span>");
-    expect(header).toContain('sr-only">to</span>');
-    expect(header).not.toContain('data-session-id="os-self"');
     expect(header).toContain('data-session-id="os-peer"');
-    const from = entry === incoming ? "os-peer" : "os-self";
-    const to = entry === incoming ? "os-self" : "os-peer";
-    expect(header.indexOf(sessionAgentName(from))).toBeLessThan(
-      header.indexOf(sessionAgentName(to)),
+    expect(header).toContain(
+      entry === outgoing ? "To agent</span>" : "From agent</span>",
     );
+    if (entry === outgoing) {
+      expect(header).toContain("order-last");
+      expect(header).toContain(
+        `aria-label="Current session: ${sessionAgentName("os-self")}"`,
+      );
+    } else {
+      expect(header).toContain("rotate-180");
+    }
+    expect(html).not.toContain("Delivery details");
   }
 });
 
@@ -353,5 +354,43 @@ test("agent chat bubbles share user-message sizing but keep their provenance cle
     expect(html).toContain("w-fit");
     expect(html).toContain("max-w-[min(600px,90%)]");
     expect(html).toContain("size-4.5");
+  }
+});
+
+test("summary hover follows the bubble instead of an inset button", () => {
+  const html = renderToStaticMarkup(
+    <MessageBubble entry={outgoing} sessionId="os-self" />,
+  );
+  expect(html).toContain("rounded-xl p-0");
+  expect(html).toContain("rounded-[inherit]");
+  expect(html).toContain("active:scale-100");
+  expect(html).toContain("phone:min-h-12");
+});
+
+test("delivery marks distinguish queue, send, handling, failure and missing evidence", async () => {
+  const { AgentDeliveryMark } = await import("./AgentDeliveryMark");
+  for (const [status, label, checks] of [
+    ["queued", "Queued", 0],
+    ["started", "Sent", 1],
+    ["steered", "Sent", 1],
+    ["handled", "Handled", 2],
+    ["error", "Not sent", 0],
+    ["unknown", "Delivery unconfirmed", 0],
+  ] as const) {
+    const html = renderToStaticMarkup(
+      <AgentDeliveryMark
+        result={{
+          id: "receipt",
+          type: "tool_result",
+          timestamp,
+          content: `Delivery status=${status}: Result`,
+        }}
+      />,
+    );
+    expect(html).toContain(`aria-label="${label}"`);
+    expect(html.match(/M5.75 12.75L9.5 16.25L18.25 7.75/g) ?? []).toHaveLength(
+      checks,
+    );
+    expect(html).not.toContain("Read");
   }
 });

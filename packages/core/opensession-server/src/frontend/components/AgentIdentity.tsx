@@ -11,11 +11,13 @@ export function AgentIdentity({
   linked = false,
   current = false,
   className,
+  variant = "full",
 }: {
   sessionId?: string;
   linked?: boolean;
   current?: boolean;
   className?: string;
+  variant?: "full" | "name" | "avatar";
 }) {
   const name = useAgentName(sessionId);
   const tooltip = (
@@ -26,7 +28,7 @@ export function AgentIdentity({
   );
   const content = (
     <>
-      {sessionId && (
+      {sessionId && variant !== "name" && (
         <span className="relative inline-flex shrink-0">
           <AgentAvatar sessionId={sessionId} className="size-4.5" />
           {current && (
@@ -37,11 +39,12 @@ export function AgentIdentity({
           )}
         </span>
       )}
-      <span className="truncate">{name}</span>
+      {variant !== "avatar" && <span className="truncate">{name}</span>}
     </>
   );
   const classes = cn(
     "inline-flex min-w-0 max-w-[min(20rem,calc((100%-2rem)/2))] items-center gap-2 text-label font-medium text-dim",
+    variant === "avatar" && "max-w-none shrink-0 justify-center phone:min-w-11",
     className,
   );
   if (current)

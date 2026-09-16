@@ -19,7 +19,7 @@ import { UserAvatar } from "./UserAvatar";
 import { openGalleryFrom } from "../lib/media-lightbox-gallery";
 import { unplacedMedia } from "../lib/placed-media";
 import {
-  IconArrowRight,
+  IconArrowUpRight,
   IconChevronDown,
   IconExpand,
   IconFileText2,
@@ -30,10 +30,8 @@ import { pastedTextLineLabel } from "@tellahq/opensession-protocol/pasted-text";
 import { personKey } from "../lib/review-queue";
 import { AnsweredAskCard } from "./AnsweredAskCard";
 import { AgentIdentity } from "./AgentIdentity";
-import {
-  agentDeliveryStatus,
-  outgoingAgentMessage,
-} from "../lib/agent-message";
+import { AgentDeliveryMark } from "./AgentDeliveryMark";
+import { outgoingAgentMessage } from "../lib/agent-message";
 
 import {
   fileChipCard,
@@ -187,7 +185,7 @@ export function ClampedBody({
                 className={showAll ? undefined : "-rotate-90"}
               />
             }
-            className="w-full min-w-0 justify-start border-0 px-0 text-left text-label font-normal text-dim phone:min-h-11"
+            className="w-full min-h-7.5 min-w-0 justify-start rounded-[inherit] border-0 px-2.5 py-0.5 text-left text-label font-normal text-dim active:scale-100 active:bg-pressed phone:min-h-12"
           >
             <span className="min-w-0 truncate">
               {fetching ? "Loading message…" : summary.text}
@@ -196,7 +194,7 @@ export function ClampedBody({
           <div
             id={bodyId}
             hidden={!showAll}
-            className={showAll ? "my-2" : undefined}
+            className={showAll ? "px-2.5 pt-1.5 pb-2.5" : undefined}
           >
             {showAll ? body : null}
           </div>
@@ -818,7 +816,6 @@ export const MessageBubble = function MessageBubble({
     return <AnsweredAskCard record={e.notice.ask} entryId={e.id} />;
 
   const outgoing = outgoingAgentMessage(e);
-  const deliveryStatus = agentDeliveryStatus(toolResult);
   const peerMessage =
     e.notice?.kind === "session-notice" || e.notice?.kind === "worker-report";
   if (outgoing || peerMessage) {
@@ -835,37 +832,32 @@ export const MessageBubble = function MessageBubble({
       >
         <div
           className={cn(
-            "mb-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 text-meta text-faint",
-            outgoing && "justify-end",
+            "mb-1 flex w-fit max-w-full min-w-0 items-center gap-1 text-meta text-faint",
+            outgoing ? "self-end" : "self-start",
           )}
           data-agent-message-header=""
         >
           <AgentIdentity
             sessionId={senderId}
-            linked
+            variant="avatar"
             current={!!senderId && senderId === sessionId}
+            className={outgoing ? "order-last justify-end" : "justify-start"}
           />
-          {(outgoing?.to || sessionId) && (
-            <>
-              <span className="inline-flex shrink-0 items-center">
-                <IconArrowRight className="size-4" />
-                <span className="sr-only">to</span>
-              </span>
-              <AgentIdentity
-                sessionId={outgoing?.to ?? sessionId}
-                linked
-                current={(outgoing?.to ?? sessionId) === sessionId}
-              />
-            </>
-          )}
-          {outgoing && (
-            <span
-              className={deliveryStatus === "Not sent" ? "text-red" : undefined}
-            >
-              {deliveryStatus}
-            </span>
-          )}
+          <span className="inline-flex shrink-0 items-center gap-0.5">
+            <IconArrowUpRight
+              className={cn("size-3.5", !outgoing && "rotate-180")}
+            />
+            {outgoing ? "To agent" : "From agent"}
+          </span>
+          <AgentIdentity
+            sessionId={outgoing?.to ?? senderId}
+            variant="name"
+            linked
+            current={(outgoing?.to ?? senderId) === sessionId}
+            className="max-w-96 flex-1"
+          />
           <MsgTime ts={e.timestamp} />
+          {outgoing && <AgentDeliveryMark result={toolResult} />}
         </div>
         {e.notice?.kind === "worker-report" && (
           <span className="mb-1 text-meta text-faint">Worker report</span>
@@ -873,7 +865,7 @@ export const MessageBubble = function MessageBubble({
         <div
           className={cn(
             msgBubbleUser,
-            "flex w-fit min-w-0 flex-col rounded-xl px-2.5 py-0.5",
+            "flex w-fit min-w-0 flex-col rounded-xl p-0",
             outgoing ? "bg-accent/10" : "self-start",
           )}
         >
@@ -884,21 +876,6 @@ export const MessageBubble = function MessageBubble({
             sessionId={sessionId}
           />
         </div>
-        {outgoing && toolResult && (
-          <Collapsible.Root className="mt-1 self-end">
-            <Collapsible.Trigger className="rounded-control py-1 text-meta text-faint hover:text-fg phone:min-h-11">
-              Delivery details
-            </Collapsible.Trigger>
-            <Collapsible.Panel className={collapsiblePanelClasses}>
-              <ClampedBody
-                content={toolResult.content}
-                entry={toolResult}
-                sessionId={sessionId}
-                className={cn(msgBody, "markdown text-dim")}
-              />
-            </Collapsible.Panel>
-          </Collapsible.Root>
-        )}
         <EntryImages
           images={unplacedMedia(e.images, e.content)}
           sessionId={sessionId}
