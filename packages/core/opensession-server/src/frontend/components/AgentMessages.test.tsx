@@ -147,3 +147,25 @@ test("ordinary replies use the same identity but system notices and humans stay 
   );
   expect(human).not.toContain(agentIdentity("os-self").name);
 });
+
+test("identifies the local agent and keeps sender and recipient in one header", () => {
+  for (const entry of [incoming, outgoing]) {
+    const html = renderToStaticMarkup(
+      <MessageBubble entry={entry} sessionId="os-self" />,
+    );
+    const header = html
+      .split('data-agent-message-header=""')[1]!
+      .split("</div>")[0]!;
+    expect(header).toContain(agentIdentity("os-self").name);
+    expect(header).toContain(agentIdentity("os-peer").name);
+    expect(header).toContain("Current agent");
+    expect(header).toContain('sr-only">to</span>');
+    expect(header).not.toContain('data-session-id="os-self"');
+    expect(header).toContain('data-session-id="os-peer"');
+    const from = entry === incoming ? "os-peer" : "os-self";
+    const to = entry === incoming ? "os-self" : "os-peer";
+    expect(header.indexOf(agentIdentity(from).name)).toBeLessThan(
+      header.indexOf(agentIdentity(to).name),
+    );
+  }
+});

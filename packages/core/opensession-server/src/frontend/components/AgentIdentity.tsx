@@ -7,24 +7,33 @@ import { cn } from "../ui/cn";
 export function AgentIdentity({
   sessionId,
   linked = false,
+  current = false,
   className,
 }: {
   sessionId?: string;
   linked?: boolean;
+  current?: boolean;
   className?: string;
 }) {
   const name = sessionId ? agentIdentity(sessionId).name : "Unknown agent";
   const content = (
     <>
       {sessionId && <AgentAvatar sessionId={sessionId} />}
-      <span className="min-w-0 truncate">{name}</span>
+      <span className="min-w-0">
+        <span className="block truncate">{name}</span>
+        {current && (
+          <span className="block text-meta font-normal text-faint">
+            Current agent
+          </span>
+        )}
+      </span>
     </>
   );
   const classes = cn(
     "inline-flex min-w-0 items-center gap-2 text-label font-medium text-dim",
     className,
   );
-  return linked && sessionId ? (
+  return linked && !current && sessionId ? (
     <a
       href={`${BASE_PATH}/session/${encodeURIComponent(sessionId)}`}
       data-session-id={sessionId}

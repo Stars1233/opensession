@@ -1,3 +1,4 @@
+import { agentIdentity } from "../../lib/agent-identity";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { fetchAudit } from "../../lib/api";
@@ -158,11 +159,11 @@ export function AuditPanel() {
                 <span className="text-dim truncate">{auditSummary(e)}</span>
                 {sid && (
                   <a
-                    className="ml-auto shrink-0 text-meta text-faint underline"
+                    className="ml-auto min-w-0 max-w-48 shrink truncate text-meta text-faint underline phone:max-w-32"
                     href={`${BASE_PATH}/session/${sid}`}
                     onClick={(ev) => ev.stopPropagation()}
                   >
-                    {sid.slice(0, 18)}…
+                    {agentIdentity(sid).name}
                   </a>
                 )}
               </button>

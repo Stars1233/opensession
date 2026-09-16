@@ -1,3 +1,4 @@
+import { agentIdentity } from "./agent-identity";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   resetResolvedSessionTitles,
@@ -173,4 +174,22 @@ describe("composer session projection", () => {
       ),
     ).toEqual({ start: 7, end: 46 });
   });
+});
+
+test("an unresolved session projects its agent name while copying still uses its ID", () => {
+  setSessionTitles([]);
+  resetResolvedSessionTitles();
+  const projection = projectComposerSessions(ID);
+  expect(projection.displayText).toBe(
+    SESSION_GLYPH_SLOT + agentIdentity(ID).name,
+  );
+  expect(projection.canonicalText).toBe(ID);
+  const selection = composerCanonicalSelection(
+    projection,
+    0,
+    projection.displayText.length,
+  );
+  expect(projection.canonicalText.slice(selection.start, selection.end)).toBe(
+    ID,
+  );
 });

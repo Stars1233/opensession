@@ -17,7 +17,7 @@ import { fullTime, shortTime } from "../lib/time";
 import { UserAvatar } from "./UserAvatar";
 import { openGalleryFrom } from "../lib/media-lightbox-gallery";
 import { unplacedMedia } from "../lib/placed-media";
-import { IconExpand, IconFileText2, IconPencil } from "./icons";
+import { IconArrowRight, IconExpand, IconFileText2, IconPencil } from "./icons";
 import { Collapsible, collapsiblePanelClasses } from "../ui/collapsible";
 import { pastedTextLineLabel } from "@tellahq/opensession-protocol/pasted-text";
 import { personKey } from "../lib/review-queue";
@@ -761,22 +761,37 @@ export const MessageBubble = function MessageBubble({
         data-eid={e.id}
         data-agent-message={outgoing ? "outgoing" : "incoming"}
       >
-        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint">
-          <AgentIdentity sessionId={senderId} linked={senderId !== sessionId} />
-          <span>Agent</span>
-          <MsgTime ts={e.timestamp} />
-        </div>
-        {outgoing && (
-          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 text-meta text-faint">
-            <span>To</span>
-            <AgentIdentity sessionId={outgoing.to} linked />
+        <div
+          className="mb-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint"
+          data-agent-message-header=""
+        >
+          <AgentIdentity
+            sessionId={senderId}
+            linked
+            current={!!senderId && senderId === sessionId}
+          />
+          {(outgoing?.to || sessionId) && (
+            <>
+              <span className="inline-flex shrink-0 items-center">
+                <IconArrowRight size={14} />
+                <span className="sr-only">to</span>
+              </span>
+              <AgentIdentity
+                sessionId={outgoing?.to ?? sessionId}
+                linked
+                current={(outgoing?.to ?? sessionId) === sessionId}
+              />
+            </>
+          )}
+          {outgoing && (
             <span
               className={deliveryStatus === "Not sent" ? "text-red" : undefined}
             >
               {deliveryStatus}
             </span>
-          </div>
-        )}
+          )}
+          <MsgTime ts={e.timestamp} />
+        </div>
         {e.notice?.kind === "worker-report" && (
           <span className="mb-1 text-meta text-faint">Worker report</span>
         )}
@@ -968,8 +983,7 @@ export const MessageBubble = function MessageBubble({
     <div className={cn(msgRow, enterClass)} data-eid={e.id}>
       {sessionId && (
         <div className="mb-2 flex items-center gap-2">
-          <AgentIdentity sessionId={sessionId} />
-          <span className="text-meta text-faint">Agent</span>
+          <AgentIdentity sessionId={sessionId} current />
         </div>
       )}
       <ClampedBody

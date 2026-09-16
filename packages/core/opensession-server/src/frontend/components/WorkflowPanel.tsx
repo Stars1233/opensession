@@ -1,3 +1,4 @@
+import { agentIdentity } from "../lib/agent-identity";
 import React, { useEffect, useState } from "react";
 import { z } from "zod";
 import { BASE_PATH } from "../lib/base";
@@ -302,12 +303,14 @@ function NestedSessionRow({
         ROW_CLASS,
         "min-h-11 flex-col items-stretch gap-0.5 no-underline hover:bg-hover desktop:min-h-0",
       )}
-      title={`Open ${session.id}`}
+      title={`Open ${agentIdentity(session.id).name}`}
     >
       <span className="flex min-w-0 items-center gap-2">
         <StatusMark status={markStatus} />
         <span className="min-w-0 flex-1 truncate text-label text-fg">
-          {session.label}
+          {session.label && session.label !== session.id
+            ? session.label
+            : agentIdentity(session.id).name}
         </span>
         <span className="shrink-0 text-meta text-faint">
           {session.status.replace("_", " ")}

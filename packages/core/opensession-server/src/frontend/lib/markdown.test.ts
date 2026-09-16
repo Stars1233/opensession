@@ -1,3 +1,4 @@
+import { agentIdentity } from "./agent-identity";
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import {
   markdownAffordable,
@@ -113,7 +114,7 @@ describe("renderMarkdown session links", () => {
     expect(html).not.toContain("target=");
   });
 
-  it("labels a pasted (auto-linked) session URL with just the session id", () => {
+  it("labels a pasted session URL with the agent name", () => {
     const url =
       "http://127.0.0.1:3850/workspace/ws-28712580-a369-4d58-996b-f8c23e523ed1/session/bks-019f9608-ab20-7000-b98e-4de52d5fe436";
     const html = renderMarkdown(`${url} shows no right sidebar.`);
@@ -122,7 +123,7 @@ describe("renderMarkdown session links", () => {
     );
     // the ~90-char URL is the href, never the chip's (nowrap) label
     expect(html).toContain(
-      '<span class="session-link-label">bks-019f9608…</span>',
+      `<span class="session-link-label">${agentIdentity("bks-019f9608-ab20-7000-b98e-4de52d5fe436").name}</span>`,
     );
     expect(html).toContain(`href="${url}"`);
     expect(html).not.toContain(`>${url}</a>`);
@@ -205,8 +206,8 @@ describe("session chip labels", () => {
       '<span class="session-link-label">Fix the sidebar hover states</span>',
     );
     expect(html).toContain(`data-session-id="${id}"`);
-    // the full id stays reachable in the tooltip
-    expect(html).toContain(`title="Open Fix the sidebar hover states (${id})"`);
+    // Human labels stay readable; the target retains the canonical ID.
+    expect(html).toContain(`title="Open Fix the sidebar hover states"`);
     expect(html).not.toContain("data-session-label");
   });
 
@@ -248,10 +249,10 @@ describe("session chip labels", () => {
     );
     expect(html).toContain("data-session-archived");
     expect(html).toContain('<rect x="4" y="4.75" width="16" height="4"');
-    expect(html).toContain(`(${id}) · archived`);
+    expect(html).toContain(` · archived`);
   });
 
-  it("keeps the id fallback when the referenced session was deleted", async () => {
+  it("keeps the agent name when the referenced session was deleted", async () => {
     setResolvedSessionTitles([{ requestedId: id, title: null }]);
     const requested: string[][] = [];
     const unsubscribe = onSessionTitleResolutionRequested((ids) =>
@@ -261,7 +262,7 @@ describe("session chip labels", () => {
       const html = renderMarkdown(`Delegated to \`${id}\`.`);
       await Promise.resolve();
       expect(html).toContain(
-        '<span class="session-link-label">bks-019f24b5…</span>',
+        `<span class="session-link-label">${agentIdentity(id).name}</span>`,
       );
       expect(requested).toEqual([]);
     } finally {
@@ -289,7 +290,7 @@ describe("session chip labels", () => {
       setSessionTitles([[id, "Fix the sidebar hover states"]]);
       expect(label.textContent).toBe("Fix the sidebar hover states");
       expect(anchor.dataset.sessionLabel).toBeUndefined();
-      expect(anchor.title).toBe(`Open Fix the sidebar hover states (${id})`);
+      expect(anchor.title).toBe("Open Fix the sidebar hover states");
     } finally {
       if (previousDocument)
         Object.defineProperty(globalThis, "document", previousDocument);
@@ -313,7 +314,7 @@ describe("session chip labels", () => {
       '<span class="session-link-label">Ship the movavi comparison page</span>',
     );
     expect(html).toContain(
-      `title="Open Ship the movavi comparison page · Alternatives (${id})"`,
+      `title="Open Ship the movavi comparison page · Alternatives"`,
     );
   });
 
@@ -327,32 +328,32 @@ describe("session chip labels", () => {
       ],
     ]);
     expect(renderMarkdown(`Delegated to \`${id}\`.`)).toContain(
-      `title="Open Fix the sidebar hover states (${id})"`,
+      `title="Open Fix the sidebar hover states"`,
     );
   });
 
-  it("falls back to a shortened id, marked for monospace", () => {
+  it("falls back to an agent name without monospace styling", () => {
     const html = renderMarkdown(`Delegated to \`${id}\`.`);
     expect(html).toContain(
-      '<span class="session-link-label">bks-019f24b5…</span>',
+      `<span class="session-link-label">${agentIdentity(id).name}</span>`,
     );
-    expect(html).toContain('data-session-label="id"');
-    expect(html).toContain(`title="Open session ${id}"`);
+    expect(html).not.toContain('data-session-label="id"');
+    expect(html).toContain(`title="Open ${agentIdentity(id).name}"`);
   });
 
-  it("cuts an `os-` id on a segment boundary, not mid-separator", () => {
+  it("names a current session ID", () => {
     const html = renderMarkdown(
       "Delegated to `os-019fd30a-785b-7000-ad89-9c2fb5b74a19`.",
     );
     expect(html).toContain(
-      '<span class="session-link-label">os-019fd30a…</span>',
+      `<span class="session-link-label">${agentIdentity("os-019fd30a-785b-7000-ad89-9c2fb5b74a19").name}</span>`,
     );
   });
 
-  it("keeps short legacy slug ids whole", () => {
+  it("names legacy slug IDs too", () => {
     const html = renderMarkdown("Delegated to `bks-worker-two`.");
     expect(html).toContain(
-      '<span class="session-link-label">bks-worker-two</span>',
+      `<span class="session-link-label">${agentIdentity("bks-worker-two").name}</span>`,
     );
   });
 
@@ -369,7 +370,7 @@ describe("session chip labels", () => {
   it("re-labels already-rendered markdown when titles arrive", () => {
     const src = `Delegated to \`${id}\`.`;
     expect(renderMarkdown(src)).toContain(
-      '<span class="session-link-label">bks-019f24b5…</span>',
+      `<span class="session-link-label">${agentIdentity(id).name}</span>`,
     );
     setSessionTitles([[id, "Late title"]]);
     expect(renderMarkdown(src)).toContain(
@@ -415,13 +416,13 @@ describe("session chip labels", () => {
     );
   });
 
-  it("shortens an id-only link label when no title is known", () => {
+  it("names an id-only link label when no title is known", () => {
     const url = `http://127.0.0.1:3850/session/${id}`;
     const html = renderMarkdown(`Session: [${id}](${url})`);
     expect(html).toContain(
-      '<span class="session-link-label">bks-019f24b5…</span>',
+      `<span class="session-link-label">${agentIdentity(id).name}</span>`,
     );
-    expect(html).toContain('data-session-label="id"');
+    expect(html).not.toContain('data-session-label="id"');
   });
 
   it("ignores blank titles and unrelated sessions", () => {
@@ -430,7 +431,7 @@ describe("session chip labels", () => {
       ["bks-someone-else", "Other"],
     ]);
     expect(renderMarkdown(`Delegated to \`${id}\`.`)).toContain(
-      '<span class="session-link-label">bks-019f24b5…</span>',
+      `<span class="session-link-label">${agentIdentity(id).name}</span>`,
     );
   });
 });

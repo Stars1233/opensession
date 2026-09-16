@@ -1,3 +1,4 @@
+import { agentIdentity } from "./agent-identity";
 import { Marked, type Token, type TokenizerThis, type Tokens } from "marked";
 import { type CalloutIconKind, calloutIconMarkup } from "../components/icons";
 import { BASE_PATH } from "./base";
@@ -250,7 +251,7 @@ const AUTOMATION_ID_BARE = new RegExp(`(?:^|[^\\w/-])(?=auto-${UUIDV7})`, "i");
 // Chip labels. A raw `bks-<uuid>` is 40 characters of noise in the middle of a
 // sentence, so a chip shows the name of the work it points at when we know it.
 // The app shell registers what it already polls (App.tsx); anything not in that
-// list (archived, deleted, not yet polled) falls back to a shortened id.
+// list (archived, deleted, not yet polled) falls back to the stable agent name.
 interface SessionName {
   /** What the chip shows: a human session's workspace, or a worker's task. */
   label: string;
@@ -276,7 +277,6 @@ const sessionTitleListeners = new Set<() => void>();
 /** Sessions whose agent is mid-run, for the chip's live dot. */
 let runningSessions = new Set<string>();
 const SESSION_TITLE_MAX = 38;
-const SESSION_ID_SHORT = 12; // `os-019fb3ad2` / `bks-019fb3ad`
 
 function knownSessionName(id: string): SessionName | undefined {
   return sessionTitles.get(id) ?? resolvedSessionTitles.get(id);
@@ -334,7 +334,7 @@ export interface ResolvedSessionTitle {
 }
 
 /** Publish lightweight metadata fetched for references outside the live list.
- *  A missing title marks a deleted/unknown id so it keeps the honest id label. */
+ *  A missing title marks a deleted/unknown id so it keeps its generated agent name. */
 export function setResolvedSessionTitles(
   entries: Iterable<ResolvedSessionTitle>,
 ): void {
@@ -593,7 +593,7 @@ function syncRenderedSessionTitles(): void {
 export function sessionTitleFor(id: string): string | undefined {
   const name = knownSessionName(id);
   if (!name) queueSessionTitleRequest(id);
-  return name?.label;
+  return name?.label ?? agentIdentity(id).name;
 }
 
 /** Whether a resolved session reference points into archived history. */
@@ -604,16 +604,6 @@ export function sessionArchivedFor(id: string): boolean {
 /** The name shown for a stable workspace mention in a composer draft. */
 export function workspaceTitleFor(id: string): string | undefined {
   return workspaceTitles.get(id);
-}
-
-export function shortSessionId(id: string): string {
-  // Legacy `bks-<slug>` ids are already short and cutting them mid-word reads
-  // worse than showing the whole thing; only uuid-shaped ids get abbreviated.
-  // The trailing-dash trim keeps the cut off a segment boundary — the two
-  // prefixes differ in length, so a fixed cut lands mid-separator for one.
-  return id.length <= 20
-    ? id
-    : `${id.slice(0, SESSION_ID_SHORT).replace(/-+$/, "")}…`;
 }
 
 // The chip's leading glyph names the destination state: a conversation for
@@ -645,7 +635,7 @@ function sessionChipIcon(archived?: boolean): string {
 function sessionChip(
   id: string,
   label: string,
-  opts: { href?: string; tip?: string; idLabel?: boolean; archived?: boolean },
+  opts: { href?: string; tip?: string; archived?: boolean },
 ): string {
   // With an href it's a real link (cmd/middle-click open a tab); without one
   // the delegated click handler is the only way in, so it needs the button role
@@ -655,7 +645,6 @@ function sessionChip(
     : `role="button" tabindex="0" `;
   return (
     `<a ${anchor}class="session-link" data-session-id="${attr(id)}"` +
-    `${opts.idLabel ? ' data-session-label="id"' : ""}` +
     `${opts.archived ? " data-session-archived" : ""}` +
     // Baked from the current set so a fresh chip is right on first paint;
     // syncRenderedSessionRuns corrects it from then on.
@@ -674,14 +663,12 @@ function sessionLabel(title: string): string {
 function sessionLink(id: string, href?: string): string {
   const name = knownSessionName(id);
   if (!name) queueSessionTitleRequest(id);
-  const label = name ? sessionLabel(name.label) : shortSessionId(id);
-  // The label is lossy either way (truncated title, abbreviated id), so the
-  // full id always stays in the tooltip. data-session-label marks the id
-  // fallback for the monospace treatment.
+  const label = name ? sessionLabel(name.label) : agentIdentity(id).name;
+  // Unknown, deleted, and not-yet-loaded references still get a readable name.
+  // The canonical ID stays in the link target and data attribute, never the label.
   return sessionChip(id, attr(label), {
     href,
     tip: sessionTip(id),
-    idLabel: !name,
     archived: name?.archived,
   });
 }
@@ -712,9 +699,9 @@ function sessionTip(id: string): string {
     : name?.archived
       ? " · archived"
       : "";
-  if (!name) return `Open session ${id}${status}`;
+  if (!name) return `Open ${agentIdentity(id).name}${status}`;
   const tab = name.tab ? ` · ${name.tab}` : "";
-  return `Open ${name.label}${tab} (${id})${status}`;
+  return `Open ${name.label}${tab}${status}`;
 }
 
 // Agents write pull requests the GitHub way — a bare `#5528`, sometimes

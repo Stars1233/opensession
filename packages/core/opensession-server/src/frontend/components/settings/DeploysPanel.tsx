@@ -1,3 +1,4 @@
+import { agentIdentity } from "../../lib/agent-identity";
 import { useEffect, useState } from "react";
 import {
   deleteDeployApp,
@@ -90,7 +91,7 @@ export function DeploysPanel() {
                     <>
                       {" · "}
                       <a className="underline" href={`/session/${d.sessionId}`}>
-                        published from this session
+                        {agentIdentity(d.sessionId).name}
                       </a>
                     </>
                   ) : null}

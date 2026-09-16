@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { agentIdentity } from "../lib/agent-identity";
 import type { TranscriptEntry } from "../lib/types";
 import { CodeHighlight } from "./LazyCode";
 import { ToolInputDiff } from "./ToolInputDiff";
@@ -234,7 +235,11 @@ export function toolSummary(
     toolDetail(unwrapped.toolName, input.value),
     (p) => tidyPath(p, roots),
   );
-  if (detail) return detail;
+  const sessionId = sessionToolId(unwrapped.toolName, input.value);
+  if (detail)
+    return sessionId
+      ? detail.replaceAll(sessionId, agentIdentity(sessionId).name)
+      : detail;
   if (
     parseMcpTool(unwrapped.toolName) &&
     fallback.trim() === `Using ${unwrapped.toolName}`
@@ -661,9 +666,10 @@ export const ToolCallBlock = function ToolCallBlock({
                 e.stopPropagation();
                 e.currentTarget.click();
               }}
-              title="Open this session"
+              title={`Open ${agentIdentity(linkedSessionId).name}`}
+              aria-label={`Open ${agentIdentity(linkedSessionId).name}'s session`}
             >
-              Open
+              {agentIdentity(linkedSessionId).name}
               <IconArrowUpRight className="size-4 shrink-0 opacity-70" />
             </span>
           )}

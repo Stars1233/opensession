@@ -1,3 +1,4 @@
+import { agentIdentity } from "../lib/agent-identity";
 import { repoLabel } from "../lib/repo-label";
 import { BASE_PATH } from "../lib/base";
 import React, { useEffect, useEffectEvent, useState } from "react";
@@ -502,7 +503,7 @@ export function Goals({ onOpenSession, selectedId, onSelect }: Props) {
                             }}
                             href={`${BASE_PATH}/session/${sel.bksSessionId}`}
                           >
-                            open the goal's session
+                            {agentIdentity(sel.bksSessionId).name}
                           </a>
                         </span>
                       </>

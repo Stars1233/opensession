@@ -217,7 +217,8 @@ export function SessionHeader({
         )}
         <AgentIdentity
           sessionId={session.id}
-          className="max-w-48 shrink-0 phone:max-w-32"
+          current
+          className="max-w-72 shrink-0"
         />
         {/* Where the session came FROM, as a quiet mark AFTER the name. It
             used to be a tinted pill at the head of the row, which made the
