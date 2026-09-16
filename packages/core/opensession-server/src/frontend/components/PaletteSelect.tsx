@@ -16,10 +16,27 @@ export type PaletteSelectOption = {
   singleOnly?: boolean;
 };
 
+/**
+ * A row after the options that does something other than pick one: opens a
+ * dialog, starts a flow. Rendered below a divider on desktop and as the last
+ * entry of the phone's native menu, where choosing it runs `onSelect` and
+ * leaves the picked value where it was.
+ */
+export type PaletteSelectAction = {
+  label: string;
+  icon?: React.ReactNode;
+  onSelect: () => void;
+};
+
+/** The phone `<select>`'s value for the action row. A NUL can't be a repo
+ *  id, a model id, or anything else a caller would list. */
+const ACTION_VALUE = "\0action";
+
 type Props = {
   value: string;
   options: PaletteSelectOption[];
   onChange: (value: string) => void;
+  action?: PaletteSelectAction;
   /**
    * Values picked alongside `value`, in the order they were added. Passing
    * `onToggleExtra` turns the menu multi-select: the platform's command
@@ -43,6 +60,7 @@ export function PaletteSelect({
   value,
   options,
   onChange,
+  action,
   extraValues,
   onToggleExtra,
   multiHint,
@@ -71,7 +89,10 @@ export function PaletteSelect({
         <select
           className="absolute inset-0 h-full w-full cursor-pointer appearance-none border-none opacity-0 disabled:cursor-default"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            if (e.target.value === ACTION_VALUE) action?.onSelect();
+            else onChange(e.target.value);
+          }}
           disabled={disabled}
           aria-label={ariaLabel}
         >
@@ -80,6 +101,7 @@ export function PaletteSelect({
               {option.label}
             </option>
           ))}
+          {action && <option value={ACTION_VALUE}>{action.label}</option>}
         </select>
       </div>
     );
@@ -144,6 +166,25 @@ export function PaletteSelect({
             </Menu.Item>
           );
         })}
+        {action && (
+          <>
+            <Menu.Separator />
+            <Menu.Item
+              onClick={() => {
+                setOpen(false);
+                action.onSelect();
+              }}
+              className="gap-2.5"
+            >
+              {action.icon && (
+                <span className="flex shrink-0 text-dim" aria-hidden="true">
+                  {action.icon}
+                </span>
+              )}
+              <span className="min-w-0 truncate">{action.label}</span>
+            </Menu.Item>
+          </>
+        )}
         {onToggleExtra &&
           multiHint && (
             // `w-0 min-w-full` keeps this line out of the popup's own width:
