@@ -5,6 +5,7 @@ import { join } from "path";
 import {
   AWS_HUMAN_AUTH_DENIAL,
   agentAwsCredsEnabled,
+  agentAwsCredsForUntrustedRuns,
   agentAwsMintUser,
   ensureAgentAwsCredsFile,
   getAgentAwsEnv,
@@ -70,6 +71,7 @@ describe("AWS human-auth guard", () => {
 describe("IMDS mint gate", () => {
   const ENV_KEYS = [
     "AGENT_AWS_CREDS",
+    "AGENT_AWS_UNTRUSTED_RUNS",
     "AGENT_AWS_REGION",
     "AGENT_AWS_MINT_USER",
     "AWS_REGION",
@@ -138,6 +140,22 @@ describe("IMDS mint gate", () => {
       integrations: { aws: { enabled: false, region: "eu-central-1" } },
     });
     expect(agentAwsCredsEnabled()).toBe(false);
+  });
+
+  test("untrusted runs get AWS only when the instance opts them in", () => {
+    writeConfig({ integrations: { aws: { region: "eu-central-1" } } });
+    expect(agentAwsCredsForUntrustedRuns()).toBe(false);
+    writeConfig({
+      integrations: { aws: { region: "eu-central-1", untrustedRuns: true } },
+    });
+    expect(agentAwsCredsForUntrustedRuns()).toBe(true);
+    process.env.AGENT_AWS_UNTRUSTED_RUNS = "false";
+    expect(agentAwsCredsForUntrustedRuns()).toBe(false);
+    process.env.AGENT_AWS_UNTRUSTED_RUNS = "true";
+    writeConfig({});
+    expect(agentAwsCredsForUntrustedRuns()).toBe(true);
+    process.env.AGENT_AWS_UNTRUSTED_RUNS = "1";
+    expect(agentAwsCredsForUntrustedRuns()).toBe(false);
   });
 
   test("the mint unit runs as the configured user, never a hardcoded one", () => {

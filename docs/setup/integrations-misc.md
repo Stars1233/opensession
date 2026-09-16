@@ -232,12 +232,13 @@ to protect, set `OPENSESSION_ALLOW_IMDS=1` to skip that installer check.
 **Off by default.** The mint is EC2-specific and needs passwordless sudo, so it
 only runs when you turn it on:
 
-| Setting                                             | Meaning                                                                                                                                                   |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AGENT_AWS_CREDS`                                   | Only the literal `true` enables, any other value disables. Checked first, so it is also the off switch on a host that pins a region.                      |
-| `integrations.aws.enabled`                          | Used when `AGENT_AWS_CREDS` is unset.                                                                                                                     |
-| `AGENT_AWS_REGION` / `integrations.aws.region`      | With neither of the above set, pinning a region for agent runs enables the mint.                                                                          |
-| `AGENT_AWS_MINT_USER` / `integrations.aws.mintUser` | The unprivileged account the transient unit runs as. Defaults to the account the server runs as. This selects the unit's UID/GID; it does not grant sudo. |
+| Setting                                                       | Meaning                                                                                                                                                                            |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AGENT_AWS_CREDS`                                             | Only the literal `true` enables, any other value disables. Checked first, so it is also the off switch on a host that pins a region.                                               |
+| `integrations.aws.enabled`                                    | Used when `AGENT_AWS_CREDS` is unset.                                                                                                                                              |
+| `AGENT_AWS_REGION` / `integrations.aws.region`                | With neither of the above set, pinning a region for agent runs enables the mint.                                                                                                   |
+| `AGENT_AWS_MINT_USER` / `integrations.aws.mintUser`           | The unprivileged account the transient unit runs as. Defaults to the account the server runs as. This selects the unit's UID/GID; it does not grant sudo.                          |
+| `AGENT_AWS_UNTRUSTED_RUNS` / `integrations.aws.untrustedRuns` | Off by default. `true` also vends the credentials to automation runs and Plain discussion sessions, which hold untrusted ticket text. Turn on only with a read-only instance role. |
 
 The service installer's fixed run-host helper permission does not grant the
 separate `sudo -n systemd-run` access this mint needs. Provision a narrowly

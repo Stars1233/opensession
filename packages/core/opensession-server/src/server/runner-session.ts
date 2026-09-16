@@ -9,6 +9,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "fs";
 import { configuredServer } from "./config";
+import { agentAwsCredsForUntrustedRuns } from "./aws-creds";
 import {
   HostHandle,
   type HandleCallbacks,
@@ -194,7 +195,7 @@ export async function maybeLaunchRunnerRun(
     deniedTools: runInputs.deniedTools,
     publicationPolicy,
     confirmTools: STRIPE_CONFIRM_TOOLS,
-    aws: !runInputs.isAutomationSession,
+    aws: !runInputs.isAutomationSession || agentAwsCredsForUntrustedRuns(),
     author: commitAuthorFor(opts.user, sessionPrincipal(session)),
     user: runUser,
     accountUser: runInputs.accountUser,
@@ -239,7 +240,7 @@ export async function maybeLaunchRunnerRun(
     fallbackModel: interactiveFallbackModel(session.model),
     deniedTools: runInputs.deniedTools,
     publicationPolicy,
-    aws: !runInputs.isAutomationSession,
+    aws: !runInputs.isAutomationSession || agentAwsCredsForUntrustedRuns(),
     trustProfile: runInputs.isAutomationSession ? "automation" : "interactive",
     kind: runInputs.isAutomationSession ? "automation" : "prompt",
     runnerId: runner.id,

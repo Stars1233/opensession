@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   assertAutomationDescendantOpeningIsolation,
   openingCreateTrustPolicy,
@@ -38,6 +38,26 @@ describe("automation descendant opening policy", () => {
         runnerTarget: undefined,
       }),
     ).not.toThrow();
+  });
+
+  afterEach(() => {
+    delete process.env.AGENT_AWS_UNTRUSTED_RUNS;
+  });
+
+  test("an instance that opts untrusted runs into AWS vends it to the opening turn", () => {
+    process.env.AGENT_AWS_UNTRUSTED_RUNS = "true";
+    const policy = openingCreateTrustPolicy({
+      automationDescendantPolicy: descendant,
+      branch: "compat/layout",
+      runMcpServers: [],
+      user: "Automation (automation)",
+    });
+    expect(policy.aws).toBe(true);
+    // Only AWS moves: the automation scoping is untouched.
+    expect(policy.automation).toBe(true);
+    expect(policy.user).toBeUndefined();
+    expect(policy.mcpServers).toEqual([]);
+    expect(policy.trustProfile).toBe("automation");
   });
 
   test("opening turn is automation-scoped with no user, AWS, or MCP", () => {
