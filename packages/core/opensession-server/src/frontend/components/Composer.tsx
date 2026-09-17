@@ -139,8 +139,9 @@ interface Props {
    */
   value?: string;
   onChange?: (value: string) => void;
-  /** Composer activity for the session's live typing indicator. */
-  onTyping?: (active: boolean) => void;
+  /** Composer activity for the session's live typing indicator. `text` is
+   * the current draft, which co-viewers may preview while it is active. */
+  onTyping?: (active: boolean, text: string) => void;
   /** Reports when dictation owns the input so a host can coordinate nearby UI. */
   onDictationActive?: (active: boolean) => void;
   config: ComposerConfig;
@@ -391,7 +392,7 @@ export function Composer({
       pastedTexts.map((attachment) => attachment.id),
     );
     const consume = () => {
-      onTyping?.(false);
+      onTyping?.(false, "");
       if (!isControlled) {
         // Clear the store before React commits the empty field. On iOS the send
         // button can blur the textarea first; a pending remote draft would then
@@ -1597,7 +1598,10 @@ export function Composer({
               // effect, which is both later and more reliable than a microtask
               // queued from here (see useFileMentions).
               sessionNames.handleChange(e);
-              onTyping?.(e.currentTarget.value.length > 0);
+              onTyping?.(
+                e.currentTarget.value.length > 0,
+                e.currentTarget.value,
+              );
             }}
             onKeyDown={handleKeyDown}
             onKeyUp={syncMentions}
@@ -1617,7 +1621,7 @@ export function Composer({
             onFocus={() => setFocused(true)}
             onBlur={() => {
               setFocused(false);
-              onTyping?.(false);
+              onTyping?.(false, "");
               const remote = pendingRemoteText.current;
               pendingRemoteText.current = null;
               if (

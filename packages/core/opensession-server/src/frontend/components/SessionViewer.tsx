@@ -707,7 +707,7 @@ export function SessionViewer({
   const { isAsk, hasWorkspace, hasRepoWork, handlePromote } = agentsController;
   const { gitRefreshTick, setGitRefreshTick } = presenceController;
   const { sessionPrTargetsRef, viewers, setViewers } = presenceController;
-  const { typingUsers, setTypingUsers } = presenceController;
+  const { typingPresence, setTypingPresence } = presenceController;
   const { workspacePreparing, setWorkspacePreparing } = presenceController;
   const { isBusy, busySince, stopRequestedAt } = runController;
   const { setStopRequestedAt, stopRequest } = runController;
@@ -939,7 +939,7 @@ export function SessionViewer({
     runtime: {
       setWorkflowRuns,
       setViewers,
-      setTypingUsers,
+      setTypingPresence,
       dispatch: dispatchSessionRuntime,
       setGitRefreshTick,
       prTargetsRef: sessionPrTargetsRef,
@@ -1760,7 +1760,7 @@ export function SessionViewer({
               tailActionNeedsLayoutScrollRef,
               fileDragActive,
               canForkSession,
-              typingUsers,
+              typingPresence,
               setQuote,
               focusComposerForQuote,
             },

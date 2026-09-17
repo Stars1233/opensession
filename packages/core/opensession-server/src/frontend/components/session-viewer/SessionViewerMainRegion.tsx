@@ -87,6 +87,7 @@ import {
   VIEWER_SUMMARY_STEP,
 } from "../../lib/session-viewer-classes";
 import type { UnifiedSession, SessionNote } from "../../lib/types";
+import type { TypingPresence } from "../../lib/typing";
 import type { SessionViewerProps } from "../../lib/session-viewer-bindings";
 import type { QueueReceipt } from "../../lib/session-queue";
 import type { FileAttachment } from "../../lib/images";
@@ -254,7 +255,7 @@ interface TranscriptInteraction {
   tailActionNeedsLayoutScrollRef: RefObject<boolean>;
   fileDragActive: boolean;
   canForkSession: boolean;
-  typingUsers: ComponentProps<typeof TypingIndicator>["users"];
+  typingPresence: TypingPresence;
   setQuote: Dispatch<SetStateAction<Quote | null>>;
   focusComposerForQuote: () => HTMLTextAreaElement | null;
 }
@@ -528,7 +529,7 @@ export function SessionViewerMainRegion({
     tailActionNeedsLayoutScrollRef,
     fileDragActive,
     canForkSession,
-    typingUsers,
+    typingPresence,
     setQuote,
     focusComposerForQuote,
   } = transcript.interaction;
@@ -1248,7 +1249,7 @@ export function SessionViewerMainRegion({
                   </div>
                 )}
                 <TypingIndicator
-                  users={typingUsers}
+                  presence={typingPresence}
                   className="mx-auto mb-1 w-full max-w-[calc(var(--session-col)+40px)] px-5"
                 />
                 <Composer
@@ -1256,7 +1257,9 @@ export function SessionViewerMainRegion({
                   // per session via draftKey). Remount on the tab-bar +
                   // after its persisted draft has been cleared.
                   key={composerResetSeq ?? 0}
-                  onTyping={(active) => setTyping(session.id, active)}
+                  onTyping={(active, text) =>
+                    setTyping(session.id, active, text)
+                  }
                   config={{
                     draftKey,
                     images,

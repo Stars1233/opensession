@@ -970,7 +970,12 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
 
         case "typing": {
           if (typeof msg.sessionId !== "string") break;
-          setClientTyping(ws, msg.sessionId, msg.typing === true);
+          setClientTyping(
+            ws,
+            msg.sessionId,
+            msg.typing === true,
+            typeof msg.text === "string" ? msg.text : undefined,
+          );
           break;
         }
 

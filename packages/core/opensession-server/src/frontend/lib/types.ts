@@ -964,7 +964,9 @@ export type WSClientMessage =
   // session_row frames instead of asking every client to refetch.
   | { type: "sessions_subscribe"; query: string }
   // Short-lived composer activity. The server expires it unless refreshed.
-  | { type: "typing"; sessionId: string; typing: boolean }
+  // `text` is the head of the draft, shown to co-viewers who hover the
+  // indicator; it travels only while the lease is live and is never stored.
+  | { type: "typing"; sessionId: string; typing: boolean; text?: string }
   // Interactive shell frames. The terminal tab multiplexes PTYs by termId.
   | {
       type: "term_start";
@@ -983,7 +985,14 @@ export type WSServerMessage =
   // usage, queue, asks, session_created / workspace_status / model_changed.
   | ProtocolServerMessage
   | { type: "presence"; sessionId: string; viewers: string[] }
-  | { type: "typing"; sessionId: string; users: string[] }
+  // `drafts` maps a typing user to the head of their draft; absent when
+  // nobody's lease carried text.
+  | {
+      type: "typing";
+      sessionId: string;
+      users: string[];
+      drafts?: Record<string, string>;
+    }
   | {
       type: "global_presence";
       viewing: Array<{ user: string; sessionId: string }>;
