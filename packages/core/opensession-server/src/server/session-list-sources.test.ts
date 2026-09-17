@@ -163,21 +163,6 @@ describe("session list sources", () => {
   });
 
   test("no new production module lists a session store directory", () => {
-    // Pinned offenders, none on the list path. The Slack and Linear loops
-    // restore their own store at startup; analytics credits Slack owners
-    // from a minute-cached read; web-auth, the transcript orphan sweep,
-    // plain-archive and generated-titles still list the sessions directory
-    // for their own bookkeeping and are due the same catalog treatment.
-    // Adding a file here needs that scrutiny; removing one is progress.
-    const pinned = new Set([
-      "agents/slack/state.ts",
-      "agents/linear/session.ts",
-      "server/analytics.ts",
-      "server/web-auth.ts",
-      "server/transcript-orphan-sweep.ts",
-      "server/plain-archive.ts",
-      "server/generated-titles.ts",
-    ]);
     const offenders: string[] = [];
     for (const path of productionFiles()) {
       const file = relativeTo(path);
@@ -185,7 +170,27 @@ describe("session list sources", () => {
       if (SESSION_STORE_LISTING.test(readFileSync(path, "utf8")))
         offenders.push(file);
     }
-    expect(offenders.filter((file) => !pinned.has(file))).toEqual([]);
+    expect(offenders).toEqual([]);
+  });
+
+  test("maintenance readers have no scanner escape hatch or placement fanout", () => {
+    const catalog = read("session-catalog-read.ts");
+    expect(catalog).toContain('op: "catalog_complete"');
+    expect(catalog).toContain('op: "catalog_page"');
+    expect(catalog).not.toMatch(/\b(?:readdir|opendir|readFile)(?:Sync)?\(/);
+    expect(catalog).not.toContain('op: "get"');
+    const orphan = read("transcript-orphan-sweep.ts");
+    expect(orphan).not.toContain("transcript.sessionIds");
+    expect(orphan).not.toContain("actorTranscriptSessionIds");
+    // The UI facade has a legacy local-SQLite fallback. Operator diagnostics
+    // must stay on the owning actor RPC instead of opening that shared store.
+    expect(orphan).not.toContain('from "./actor-transcript"');
+    expect(orphan).toContain("sessionTranscript({");
+    expect(orphan).toContain("ids.length > 100");
+    expect(orphan).toContain("Live orphan transcript deletion is forbidden");
+    const boot = read("../../opensession.ts");
+    expect(boot).not.toContain("migrateSessionsToGithubUser");
+    expect(boot).not.toContain("kickOrphanTranscriptSweep");
   });
 
   test("agent source writers publish so the projection learns every write", () => {
