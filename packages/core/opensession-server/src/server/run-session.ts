@@ -2269,7 +2269,7 @@ export async function maybeLaunchSandboxedRun(
       ),
       fallbackModel: opts.isAutomationSession
         ? undefined
-        : interactiveFallbackModel(session.model),
+        : interactiveFallbackModel(session.model, session.autoFallback),
       effort: portablePreset?.effort ?? session.effort,
       fastMode: session.fastMode,
       pstackMode: session.pstackMode,
@@ -3355,7 +3355,10 @@ async function runSessionPromptInner(
           author: commitAuthorFor(user, sessionPrincipal(session)),
           user: runInputs.user,
           accountUser: runInputs.accountUser,
-          fallbackModel: interactiveFallbackModel(session.model),
+          fallbackModel: interactiveFallbackModel(
+            session.model,
+            session.autoFallback,
+          ),
           effort: session.effort,
           fastMode: session.fastMode,
           pstackMode: session.pstackMode,
@@ -3409,9 +3412,11 @@ async function runSessionPromptInner(
       // an automation-owned session carries no pin, so their own subscription
       // is tried before the automation's account and the pool.
       ...runAccountSpec(session, runInputs),
-      // Only switch models when a fallback is explicitly configured. By default,
-      // usage exhaustion stops the run so the human can choose what to do.
-      fallbackModel: interactiveFallbackModel(session.model),
+      // Respect the session opt-out as well as the instance fallback policy.
+      fallbackModel: interactiveFallbackModel(
+        session.model,
+        session.autoFallback,
+      ),
       images,
       // Engine switch: seed the fresh pi session's persisted transcript
       // with the prior history (same entries the handoff note was built from)

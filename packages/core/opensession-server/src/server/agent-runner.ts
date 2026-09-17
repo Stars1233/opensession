@@ -593,11 +593,12 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
   const wantsBestCodex = requestedModel?.id === BEST_AVAILABLE_CODEX_MODEL;
   const primaryModel =
     workspacePreset?.model || resolveConcreteModel(opts.model);
-  const preferredFallback = /^(?:claude|codex)\//.test(primaryModel)
-    ? "none"
-    : wantsBestCodex
-      ? BEST_AVAILABLE_CODEX_MODEL
-      : opts.fallbackModel;
+  const preferredFallback =
+    opts.fallbackModel === "none" || /^(?:claude|codex)\//.test(primaryModel)
+      ? "none"
+      : wantsBestCodex
+        ? BEST_AVAILABLE_CODEX_MODEL
+        : opts.fallbackModel;
   // No fallback configured (interactive auto-switch off, or an automation with
   // fallbackModel:"none") ⇒ run the primary and surface whatever it does.
   if (!preferredFallback || preferredFallback === "none") {

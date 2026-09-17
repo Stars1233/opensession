@@ -1,3 +1,4 @@
+import type { useSessionModelWorkflowController } from "../../hooks/useSessionModelWorkflowController";
 import type {
   ComponentProps,
   CSSProperties,
@@ -328,8 +329,9 @@ interface ComposerConfiguration {
   models: ComposerProps["config"]["models"];
   defaultModel: string;
   model: string;
-  effort: ComposerProps["config"]["effort"];
-  fastMode: boolean;
+  runPreferences: ReturnType<
+    typeof useSessionModelWorkflowController
+  >["model"]["runPreferences"];
   accounts: NonNullable<ComposerProps["config"]["accounts"]>;
   accountId: string;
   standing: ComposerStanding;
@@ -357,8 +359,6 @@ interface ComposerActions {
   setNoteMode: ComposerProps["actions"]["onNoteModeChange"];
   handleCancel: ComposerProps["actions"]["onStop"];
   handleModelChange: ComposerProps["actions"]["onModelChange"];
-  setEffort: ComposerProps["actions"]["onEffortChange"];
-  setFastMode: ComposerProps["actions"]["onFastModeChange"];
 }
 
 interface ComposerMoreActions {
@@ -585,8 +585,7 @@ export function SessionViewerMainRegion({
     models,
     defaultModel,
     model,
-    effort,
-    fastMode,
+    runPreferences,
     accounts,
     accountId,
     standing,
@@ -595,6 +594,14 @@ export function SessionViewerMainRegion({
     noteMode,
     attachedComposer,
   } = composer.configuration;
+  const {
+    effort,
+    setEffort,
+    fastMode,
+    setFastMode,
+    autoFallback,
+    changeAutoFallback,
+  } = runPreferences;
   const {
     setTyping,
     setForkFrom,
@@ -609,8 +616,6 @@ export function SessionViewerMainRegion({
     setNoteMode,
     handleCancel,
     handleModelChange,
-    setEffort,
-    setFastMode,
   } = composer.actions;
   const { handleAccountChange, handleSetGoal, handlePstackModeChange } =
     composer.moreActions;
@@ -1314,6 +1319,7 @@ export function SessionViewerMainRegion({
                         ? "Switch the model for this session"
                         : "Set the model from the owning agent (its session file is agent-owned)",
                     effort,
+                    autoFallback,
                     fastMode,
                     // Account pinning is a backstage-session affordance. The
                     // picker filters the combined pool by the active model.
@@ -1341,6 +1347,7 @@ export function SessionViewerMainRegion({
                     onStop: handleCancel,
                     onModelChange: handleModelChange,
                     onEffortChange: setEffort,
+                    onAutoFallbackChange: changeAutoFallback,
                     onFastModeChange: setFastMode,
                     onAccountChange:
                       session.source === "opensession"
