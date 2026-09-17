@@ -281,9 +281,13 @@ if (!g.__opensessionBooted) {
   await warmWorkspacesAsync();
 }
 // The first list read fills the list index. With the actor up it can come
-// from the metadata catalog; before this point it would have to read every
-// session file. Prime it here so no later boot step or route pays that scan,
-// then build the Slack thread index from the same snapshot.
+// from the metadata catalog. An unavailable or unseeded catalog cannot fall
+// back to filesystem discovery. Prime the index before any list reader, then
+// build the Slack thread index from the same snapshot.
+// The demo instance lists a generated dataset: its files are projected into
+// the catalogs first, because the list is primed from the catalogs alone.
+if (!g.__opensessionBooted && process.env.OPENSESSION_DEMO === "1")
+  await (await import("./src/server/demo")).seedDemoDataset();
 if (!g.__opensessionBooted) await primeSessionListIndex();
 void ensureSlackLinkIndex();
 

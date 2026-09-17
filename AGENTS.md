@@ -155,7 +155,13 @@ filesystem APIs for migrations and exports, and async RPC to worker-owned
 catalogs for application state. An `async` function that calls `readFileSync`,
 `Bun.spawnSync`, or synchronous SQLite still violates this rule. Never add a
 synchronous fallback when a worker is unavailable. Cross-session views belong
-in the central catalog, not in directory scans or per-session database reads.
+in the central catalog, not in directory scans or per-session database reads. PR/branch
+ownership lookups must use indexed catalog projections (including attached
+repos), not a full session list followed by checkout/HEAD probes. Missing
+coverage or catalog errors must serve an existing snapshot or fail unavailable,
+never fall back to scanning session files. Keep filesystem discovery in explicit
+offline migrations and targeted, asynchronous per-session writers. The catalog
+and GitHub ownership boundary tests in `bun run check` guard these paths.
 
 `packages/core/opensession-server/opensession.ts` is composition and boot code.
 Put HTTP handlers in `src/server/routes/`, WebSocket handling in

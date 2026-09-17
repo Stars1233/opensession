@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   getConfig,
+  getConfigAsync,
   configuredRepos,
   configuredPaths,
   configuredServer,
@@ -52,6 +53,26 @@ afterEach(() => {
 });
 
 describe("config loader", () => {
+  test("async snapshots preserve defaults and observe config replacement", async () => {
+    withConfig(
+      JSON.stringify({ repos: { alpha: { repo: "/alpha", default: true } } }),
+    );
+    expect(defaultRepo(configuredRepos(await getConfigAsync())).id).toBe(
+      "alpha",
+    );
+    withConfig(
+      JSON.stringify({ repos: { beta: { repo: "/beta", default: true } } }),
+    );
+    expect(defaultRepo(configuredRepos(await getConfigAsync())).id).toBe(
+      "beta",
+    );
+    withConfig(null);
+    expect(await getConfigAsync()).toEqual({});
+    expect(defaultRepo(configuredRepos(await getConfigAsync())).id).toBe(
+      "opensession",
+    );
+  });
+
   test("supports one canonical public ingress origin", () => {
     withConfig(
       JSON.stringify({

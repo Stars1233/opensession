@@ -17,6 +17,7 @@
 
 import { homeDir } from "./paths";
 import { existsSync, readFileSync, statSync } from "fs";
+import { readFile, stat } from "node:fs/promises";
 import { resolve as resolvePath } from "path";
 import { statePath } from "./paths";
 import { writeFileAtomic } from "./shared/atomic-write";
@@ -635,6 +636,25 @@ export function getConfig(): OpenSessionConfig {
   }
 }
 
+/** Gateway-safe config snapshot. Never falls back to synchronous I/O. */
+export async function getConfigAsync(): Promise<OpenSessionConfig> {
+  const path = configPath();
+  try {
+    const st = await stat(path);
+    if (
+      cache?.path === path &&
+      cache.mtimeMs === st.mtimeMs &&
+      cache.size === st.size
+    )
+      return cache.value;
+    const value = parseConfig(await readFile(path, "utf-8"));
+    cache = { path, mtimeMs: st.mtimeMs, size: st.size, value };
+    return value;
+  } catch {
+    return {};
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Typed getters (env var → config.json → portable default)
 // ---------------------------------------------------------------------------
@@ -765,8 +785,10 @@ export function configuredSelfDev(): SelfDevMode {
  * The repo registry. An explicit `repos` object is authoritative; without one,
  * a source checkout gets a portable self-repo so a first run is useful.
  */
-export function configuredRepos(): Record<string, Repo> {
-  const configured = getConfig().repos;
+export function configuredRepos(
+  config: OpenSessionConfig = getConfig(),
+): Record<string, Repo> {
+  const configured = config.repos;
   const merged = configured ? {} : builtinRepos();
   for (const [id, entry] of Object.entries(configured || {})) {
     const base = merged[id];
@@ -853,8 +875,9 @@ export function newSessionRepoDefault(): string {
 }
 
 /** The instance's operational default repository. */
-export function defaultRepo(): Repo {
-  const repos = configuredRepos();
+export function defaultRepo(
+  repos: Record<string, Repo> = configuredRepos(),
+): Repo {
   const repo =
     Object.values(repos).find((r) => r.default) || Object.values(repos)[0];
   if (!repo) throw new Error("No repositories are registered");

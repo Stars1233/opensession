@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UnifiedSession } from "./types";
+import type { SessionArchiveSlice } from "./sessions";
 
 let home: string;
 let priorHome: string | undefined;
@@ -109,6 +110,19 @@ function writeSlackSession(id: string, data: Record<string, unknown>): void {
   writeFileSync(
     join(home, ".slack-sessions", `${id}.json`),
     JSON.stringify(data, null, 2),
+  );
+}
+
+/** The cooperative assembly over the files this test wrote: the offline
+ * scanner feeds the same sources a catalog rebuild would. */
+async function listFromFiles(
+  mod: typeof import("./sessions"),
+  slice: SessionArchiveSlice = "include",
+): Promise<UnifiedSession[]> {
+  const { scanSessionSourceDocuments } = await import("./session-source-scan");
+  return mod.assembleSessionListAsync(
+    mod.sessionListSourcesFromDocuments(scanSessionSourceDocuments()),
+    slice,
   );
 }
 
@@ -269,16 +283,26 @@ describe("getAllSessions", () => {
       worktreeDir: null,
     });
 
-    const { getAllSessionsAsync, readNativeSession } = await import(
+    const mod = await import(
       `./sessions.ts?legacy-index=${crypto.randomUUID()}`
     );
+    const { readNativeSession } = mod;
     // A cold synchronous lookup starts the cooperative refresh but never
     // traverses every project directory on the caller's stack.
     expect(
       readNativeSession("bks-legacy-transcript-index")?.transcriptPath,
     ).toBeNull();
 
-    await getAllSessionsAsync();
+    // The list never discovers transcripts: its rows carry none, whatever
+    // the index holds. A detail read of one session warms the reverse index
+    // cooperatively and resolves through it.
+    const listed = (await listFromFiles(mod)).find(
+      (session: UnifiedSession) => session.id === "bks-legacy-transcript-index",
+    );
+    expect(listed?.transcriptPath).toBeNull();
+    expect(
+      (await mod.resolveSessionTranscriptPathAsync(listed!)).transcriptPath,
+    ).toBe(transcriptPath);
     expect(
       readNativeSession("bks-legacy-transcript-index")?.transcriptPath,
     ).toBe(transcriptPath);
@@ -316,9 +340,8 @@ describe("getAllSessions", () => {
       workspaceId: "ws-cooperative-archived",
       archived: true,
     });
-    const { getAllSessions, getAllSessionsAsync } = await import(
-      `./sessions.ts?test=${crypto.randomUUID()}`
-    );
+    const mod = await import(`./sessions.ts?test=${crypto.randomUUID()}`);
+    const { getAllSessions } = mod;
     const select = (sessions: UnifiedSession[]) =>
       sessions.map(({ id, title, source, model, workspaceId }) => ({
         id,
@@ -329,11 +352,11 @@ describe("getAllSessions", () => {
       }));
 
     const full = getAllSessions();
-    expect(select(await getAllSessionsAsync())).toEqual(select(full));
-    expect(select(await getAllSessionsAsync("exclude"))).toEqual(
+    expect(select(await listFromFiles(mod))).toEqual(select(full));
+    expect(select(await listFromFiles(mod, "exclude"))).toEqual(
       select(full.filter((session: UnifiedSession) => !session.archived)),
     );
-    expect(select(await getAllSessionsAsync("only"))).toEqual(
+    expect(select(await listFromFiles(mod, "only"))).toEqual(
       select(full.filter((session: UnifiedSession) => session.archived)),
     );
   });
@@ -355,16 +378,14 @@ describe("getAllSessions", () => {
       lastActivity: "2026-07-02T18:01:00.000Z",
     });
 
-    const { getAllSessionsAsync } = await import(
-      `./sessions.ts?test=${crypto.randomUUID()}`
-    );
+    const mod = await import(`./sessions.ts?test=${crypto.randomUUID()}`);
     expect(
-      (await getAllSessionsAsync("exclude")).some(
+      (await listFromFiles(mod, "exclude")).some(
         (session: UnifiedSession) =>
           session.codexThreadId === "codex-thread-archived",
       ),
     ).toBe(false);
-    const archived = (await getAllSessionsAsync("only")).filter(
+    const archived = (await listFromFiles(mod, "only")).filter(
       (session: UnifiedSession) =>
         session.codexThreadId === "codex-thread-archived",
     );
@@ -396,16 +417,14 @@ describe("getAllSessions", () => {
     const { setArchived } = await import("./archive");
     await setArchived(aliasId, true);
     try {
-      const { getAllSessionsAsync } = await import(
-        `./sessions.ts?test=${crypto.randomUUID()}`
-      );
+      const mod = await import(`./sessions.ts?test=${crypto.randomUUID()}`);
       expect(
-        (await getAllSessionsAsync("exclude")).some(
+        (await listFromFiles(mod, "exclude")).some(
           (session: UnifiedSession) =>
             session.codexThreadId === "codex-thread-archived-alias",
         ),
       ).toBe(false);
-      const archived = (await getAllSessionsAsync("only")).filter(
+      const archived = (await listFromFiles(mod, "only")).filter(
         (session: UnifiedSession) =>
           session.codexThreadId === "codex-thread-archived-alias",
       );

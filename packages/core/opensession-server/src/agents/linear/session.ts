@@ -12,6 +12,7 @@ import {
 } from "../../server/config";
 import { getDefaultModel, toPiModel } from "../../server/models";
 import { writeJsonAtomic } from "../../server/shared/atomic-write";
+import { publishSessionChange } from "../../server/session-cache";
 import {
   createWorktree as createRepoWorktree,
   removeWorktree,
@@ -261,6 +262,9 @@ export async function saveSessionInfo(
     updatedAt: new Date().toISOString(),
   };
   writeJsonAtomic(`${SESSION_DIR}/${branch}.json`, data);
+  // The list index and the catalog projection learn this file only from a
+  // targeted publish; the gateway never lists the directory.
+  await publishSessionChange(`linear-${branch}`);
 }
 
 export async function loadSessionInfo(

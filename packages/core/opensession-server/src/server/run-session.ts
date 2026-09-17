@@ -8,6 +8,7 @@
  * cache in session-cache.ts.
  */
 
+import { ownedWorktreeHeadBranch } from "./session-branch-ownership";
 import {
   mirrorSlackSessionReply,
   SLACK_SESSION_NOTE,
@@ -145,12 +146,10 @@ import {
   ensureAskCheckout,
   ensureScratchDir,
   getRepo,
-  isSharedCheckoutDir,
   repoForPath,
   repoForPathOrNull,
   reviveWorktree,
   sessionRepoId,
-  worktreeHeadBranch,
 } from "./worktree";
 import { createGoalSelfMcpServer } from "../agents/slack/goal-tools";
 import { runHostsDir, type RunHostSpec } from "../runner-host/protocol";
@@ -3764,10 +3763,9 @@ async function runSessionPromptInner(
     // or ask checkout) are exempt: no session owns their HEAD, so syncing
     // would stamp whatever branch another flow left parked there onto this
     // session (bks-019f97ec, 2026-07-25).
-    const headBranch =
-      session.branch && !isSharedCheckoutDir(session.worktreeDir)
-        ? worktreeHeadBranch(session.worktreeDir)
-        : null;
+    const headBranch = session.branch
+      ? await ownedWorktreeHeadBranch(session.worktreeDir)
+      : null;
     // Export the engine identity and usage before settling or draining the
     // next prompt, whose resume inputs can still come from the session file.
     await touchNativeSession(session.id, {
