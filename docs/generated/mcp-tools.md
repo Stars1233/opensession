@@ -47,7 +47,7 @@ touches an in-process tool:
 | [`opensession-search`](#opensession-search) | 2 | interactive | – |
 | [`opensession-self-deploy`](#opensession-self-deploy) | 2 | interactive | Withheld from dev instances (isDevInstance()) — the script targets the production service and state. |
 | [`opensession-humans`](#opensession-humans) | 3 | interactive, Slack loop, goal wake | Interactive runs need a session id (the answer routes back to it). |
-| [`opensession-keychain`](#opensession-keychain) | 3 | interactive | Needs a session id. |
+| [`opensession-keychain`](#opensession-keychain) | 5 | interactive | Needs a session id. |
 | [`opensession-publish`](#opensession-publish) | 4 | interactive | Needs a session id. |
 | [`opensession-repos`](#opensession-repos) | 6 | interactive | Needs a session id. |
 | [`opensession-memory`](#opensession-memory) | 9 | interactive | Needs a session id. |
@@ -73,7 +73,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-32 servers, 145 tools.
+32 servers, 147 tools.
 
 ## opensession-sessions
 
@@ -449,6 +449,18 @@ Borrow a teammate's credential for a stated purpose, with their approval.
 - **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`
 - **Runs** interactive
 - **Condition** Needs a session id.
+
+### `request_1password`
+
+`mcp__opensession-keychain__request_1password` · input: `account` (string, required), `reference` (string, required), `purpose` (string, required), `url` (string, required), `method` ("GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE", required), `injection` ("bearer" | "x-api-key", required), `body` (string)
+
+Request ONE 1Password field for ONE exact HTTPS API request on the prompting teammate's Mac. Use an op://vault/item/[section/]field reference, never a secret value. No vault search, whole-item reads, shell commands, or standing access. The human reviews the account, field, purpose, URL, method and body in OS → Review 1Password request… while viewing this session, then approves once. Requires the Mac app, signed-in web identity, installed op CLI and its desktop integration. Expires in 10 minutes. The value stays on the Mac and is injected directly into the approved HTTPS request. ONLY HTTP status is returned, never the response body or headers, so this cannot retrieve API data for you. Do not use a model-provider endpoint as the destination. On decline/failure do not re-request without the human's go-ahead.
+
+### `onepassword_request_status`
+
+`mcp__opensession-keychain__onepassword_request_status` · input: `requestId` (string, required)
+
+Check this session's 1Password request. Returns only pending/claimed/completed/declined/failed and an HTTP status when completed. No secrets, response bodies, headers or CLI errors are available. Missing requests expired or were revoked by a server restart.
 
 ### `list_credentials`
 

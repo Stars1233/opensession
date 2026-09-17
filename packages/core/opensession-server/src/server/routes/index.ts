@@ -34,6 +34,7 @@ import { handleWorkspaceRoutes } from "./workspace";
 import { handleAutomationsRoutes } from "./automations";
 import { handleHumanAsksRoutes } from "./human-asks";
 import { handleKeychainRoutes } from "./keychain";
+import { handleOnePasswordRoutes } from "./onepassword";
 import { handleDeployRoutes } from "./deploys";
 import { handlePeopleRoutes } from "./people";
 import { handleMemoryRoutes } from "./memory";
@@ -99,6 +100,7 @@ export const routeHandlers: RouteHandler[] = [
   handleAutomationsRoutes,
   handleHumanAsksRoutes,
   handleKeychainRoutes,
+  handleOnePasswordRoutes,
   handleDeployRoutes,
   handlePeopleRoutes,
   handleMemoryRoutes,

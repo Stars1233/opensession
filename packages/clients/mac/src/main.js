@@ -21,6 +21,26 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { execFile } = require("node:child_process");
 const { NativeDictation } = require("./native-dictation");
+const { OnePasswordReview } = require("./onepassword-ui");
+const { showOnePasswordApproval } = require("./onepassword-approval");
+const onePasswordReview = new OnePasswordReview({
+  dialog,
+  approve: showOnePasswordApproval,
+  context: (target) => {
+    if (!target || target.isDestroyed() || !target.isVisible()) return null;
+    const pageUrl = target.webContents.getURL();
+    if (!inActiveWindow(pageUrl, target)) return null;
+    const url = new URL(pageUrl);
+    const match = url.pathname.match(/^\/session\/([a-zA-Z0-9-]+)\/?$/);
+    if (
+      !match ||
+      (url.protocol !== "https:" &&
+        !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+    )
+      return null;
+    return { origin: url.origin, sessionId: match[1], pageUrl };
+  },
+});
 const {
   accountForContext,
   isOpenSessionAppUrl,
@@ -1311,6 +1331,10 @@ function buildAppMenu() {
         submenu: [
           { role: "about" },
           { label: "Check for Updates…", click: checkForUpdatesFromMenu },
+          {
+            label: "Review 1Password request…",
+            click: () => void onePasswordReview.review(activeWindow()),
+          },
           { type: "separator" },
           {
             label: "Organizations",
