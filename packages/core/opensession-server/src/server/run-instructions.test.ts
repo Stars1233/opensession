@@ -127,9 +127,7 @@ describe("buildRunInstructions", () => {
     expect(prompt).toContain(
       "- `opensession-sessions`: Create, inspect, steer, or cancel",
     );
-    expect(prompt).toContain(
-      "goes to `suggest_task`, not a line in your reply",
-    );
+    expect(prompt).toContain("`suggest_task` is only for a drive-by finding");
     expect(prompt).toContain("- `opensession-portals`: ");
     expect(prompt).not.toContain("`opensession-memory`");
     expect(prompt).toContain("`tella-stage` `lease_editor_fixture`");
