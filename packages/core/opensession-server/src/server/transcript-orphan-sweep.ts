@@ -8,7 +8,7 @@
 import { catalogSessionDocuments } from "./session-catalog-read";
 import { isContextInjection } from "@tellahq/opensession-protocol/notices";
 import { audit } from "./audit";
-import { transcript } from "./actor-transcript";
+import { sessionTranscript } from "./session-kernel";
 import type { TranscriptEntry } from "./types";
 
 interface OrphanStore {
@@ -38,13 +38,14 @@ function actorOrphanStore(candidateSessionIds: string[]): OrphanStore {
         seqHighWater: number;
       }> = [];
       for (const sessionId of candidateSessionIds) {
-        const summary = await transcript.summary(sessionId);
+        const summary = await sessionTranscript({ op: "summary", sessionId });
         if (summary) rows.push({ sessionId, ...summary });
       }
       return rows;
     },
-    countEvents: transcript.countEvents,
-    readTail: transcript.readTail,
+    countEvents: (sessionId) => sessionTranscript({ op: "count", sessionId }),
+    readTail: (sessionId, limit) =>
+      sessionTranscript({ op: "tail", sessionId, limit }),
     deleteSessionTranscript: async () => {
       throw new Error("Live orphan transcript deletion is forbidden");
     },

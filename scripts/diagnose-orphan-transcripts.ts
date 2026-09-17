@@ -5,7 +5,7 @@ const ids = process.argv.slice(2);
 if (
   !ids.length ||
   ids.length > 100 ||
-  ids.some((id) => !/^[a-zA-Z0-9_-]+$/.test(id))
+  ids.some((id) => !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(id))
 )
   throw new Error(
     "Usage: bun scripts/diagnose-orphan-transcripts.ts <session-id> [<session-id> ...] (1..100)",

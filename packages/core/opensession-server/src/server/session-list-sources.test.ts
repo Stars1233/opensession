@@ -182,6 +182,10 @@ describe("session list sources", () => {
     const orphan = read("transcript-orphan-sweep.ts");
     expect(orphan).not.toContain("transcript.sessionIds");
     expect(orphan).not.toContain("actorTranscriptSessionIds");
+    // The UI facade has a legacy local-SQLite fallback. Operator diagnostics
+    // must stay on the owning actor RPC instead of opening that shared store.
+    expect(orphan).not.toContain('from "./actor-transcript"');
+    expect(orphan).toContain("sessionTranscript({");
     expect(orphan).toContain("ids.length > 100");
     expect(orphan).toContain("Live orphan transcript deletion is forbidden");
     const boot = read("../../opensession.ts");

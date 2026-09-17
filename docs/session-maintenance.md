@@ -71,7 +71,8 @@ references may still represent real work.
    snapshot. Repairing a derived index is not authorization to delete actor data.
 4. Transcript diagnosis is separately bounded and read-only:
    `bun scripts/diagnose-orphan-transcripts.ts <id> [<id> ...]` accepts 1..100
-   explicit IDs, never a placement cursor. Missing coverage refuses diagnosis;
+   explicit IDs, never a placement cursor. Missing coverage or actor authority
+   refuses diagnosis; there is no fallback that opens the shared legacy database.
    known sessions, conversation records, recent records and large histories are
    kept. A proposed context-only orphan is still only a candidate.
 5. Any actual transcript deletion needs a separately reviewed offline repair
