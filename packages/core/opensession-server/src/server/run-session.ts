@@ -3008,8 +3008,7 @@ async function runSessionPromptInner(
       contextSessions ?? [],
     );
     const attachedSessions = attachedIds
-      .filter((id) => id !== sessionId)
-      .map((id) => findSession(id))
+      .map((id) => (id === sessionId ? session : findSession(id)))
       .filter((s): s is UnifiedSession => !!s);
     const attachedDigests: {
       id: string;
@@ -3024,7 +3023,11 @@ async function runSessionPromptInner(
         model: s.model,
         // Async: an attached session's transcript can be multi-MB. Read the
         // actor-owned transcript first, with the legacy file fallback.
-        entries: await mergedSessionTranscriptAsync(s),
+        // For a duplicate, its own copied transcript is the snapshot. Intake
+        // already appended this prompt, so leave it out of the history note.
+        entries: (await mergedSessionTranscriptAsync(s)).filter(
+          (entry) => s.id !== sessionId || entry.id !== durablePromptEntryId,
+        ),
       });
     }
     for (const c of attachedDigests) inlinedSessionIds.add(c.id);

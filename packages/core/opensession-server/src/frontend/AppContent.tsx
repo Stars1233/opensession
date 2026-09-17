@@ -1209,7 +1209,8 @@ export function AppContent({
     openDraft,
     openNewSessionInWorkspace: (mode, origin) =>
       handleNewSession(mode, null, origin),
-    duplicateSession: () => handleNewSession("share", null, undefined, true),
+    duplicateSession: (messageId) =>
+      handleNewSession("share", null, undefined, true, messageId),
     startNewChat: (session, prompt) =>
       openNewSessionInWorkspace(session, "share", prompt),
     openPrefilledSession,
