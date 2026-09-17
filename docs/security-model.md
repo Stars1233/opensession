@@ -27,6 +27,12 @@ configuration for the run.
   its per-launch dial-back token (`src/server/routes/run-host-aws.ts`). The
   run's `aws` grant is decided by the server at launch and checked again
   there, so an automation descendant cannot ask its way into the role.
+  The interactive-only Runner MCP also grants the configured role to bounded
+  commands, after checking Runner command permissions. It sends only the
+  assumed role's AWS environment over the authenticated channel, never in
+  the command text or audit log. Clients explicitly advertise support, and
+  failed credential issuance prevents dispatch. Internal workspace probes
+  do not opt into this grant; the MCP is not mounted for unattended runs.
   ([runners.md](runners.md#aws-access-from-a-runner))
 - Each automation has an optional `mcpServers` allowlist (per-automation
   field, settable via the API); runs only see those servers. Example: a
