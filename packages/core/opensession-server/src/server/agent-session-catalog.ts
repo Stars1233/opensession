@@ -123,6 +123,11 @@ function decode(value: string): AgentSessionProjection | undefined {
   }
   if (!parsed || typeof parsed !== "object" || !("data" in parsed))
     return undefined;
+  if (
+    parsed.data !== null &&
+    (typeof parsed.data !== "object" || Array.isArray(parsed.data))
+  )
+    return undefined;
   return {
     file: typeof parsed.file === "string" ? parsed.file : "",
     data: parsed.data ?? null,
@@ -210,12 +215,8 @@ export async function agentSessionCatalogSources<K extends AgentSessionKind>(
     for (const row of page) {
       if (row.value === null) continue;
       const projection = decode(row.value);
-      if (!projection) {
-        console.warn(
-          `[agent-session-catalog] ${kind} source ${row.key} is not a valid projection; skipping`,
-        );
-        continue;
-      }
+      if (!projection)
+        throw new Error(`Invalid ${kind} session projection: ${row.key}`);
       if (projection.data === null) continue;
       sources.push({
         file: projection.file || `${row.key}.json`,
@@ -227,6 +228,17 @@ export async function agentSessionCatalogSources<K extends AgentSessionKind>(
     await Bun.sleep(0);
   }
   return sources;
+}
+
+/** Live consumers must distinguish an empty imported store from missing coverage. */
+export async function completeAgentSessionCatalogSources<
+  K extends AgentSessionKind,
+>(kind: K): Promise<AgentSessionSource<K>[]> {
+  if (!(await agentSessionCatalogImportComplete(kind)))
+    throw new Error(
+      `${kind} session catalog is not seeded; run scripts/seed-session-metadata-catalog.ts`,
+    );
+  return agentSessionCatalogSources(kind);
 }
 
 const MIRROR_PUT_ATTEMPTS = 3;

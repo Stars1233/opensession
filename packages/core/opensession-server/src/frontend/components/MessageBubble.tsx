@@ -413,6 +413,13 @@ const NOTICE_ICON_PATHS = new Map<NoticeIconName, React.ReactNode>([
     </>,
   ],
   ["done", <path d="M20 6 9 17l-5-5" />],
+  [
+    "clock",
+    <>
+      <circle cx="12" cy="12" r="9.5" />
+      <path d="M12 7v5l3 2" />
+    </>,
+  ],
 ]);
 
 /** Triangle-alert glyph for a toned notice; inherits the pill's colour. */
@@ -886,6 +893,36 @@ export const MessageBubble = function MessageBubble({
       </div>
     );
   }
+
+  // A check-back the agent scheduled for itself. It starts a turn like a
+  // person's message and sits on their side, but the label says who really
+  // wrote it: nobody typed this, and it must not read as if they did.
+  if (e.notice?.kind === "scheduled-prompt")
+    return (
+      <div
+        className={cn(msgRow, "msg-user", msgOwnTurn, enterClass)}
+        data-eid={e.id}
+        data-scheduled-prompt=""
+        role="group"
+        aria-label="Scheduled check-back"
+      >
+        <div className={msgLabel}>
+          <span className="inline-flex items-center">
+            <NoticeIcon icon="clock" />
+            {e.notice.title}
+          </span>
+          <MsgTime ts={e.timestamp} />
+        </div>
+        {displayContent && (
+          <ClampedBody
+            className={cn(msgBubbleUser, "markdown", "text-dim")}
+            content={displayContent}
+            entry={e}
+            sessionId={sessionId}
+          />
+        )}
+      </div>
+    );
 
   // Operational events remain notices; agent correspondence is conversation.
   if (e.notice)

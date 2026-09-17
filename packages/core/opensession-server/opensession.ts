@@ -121,7 +121,6 @@ import {
   crossSiteViolation,
   ensureAutomationWebSession,
   keypadBearerAuthorized,
-  migrateSessionsToGithubUser,
   resolveWebAuth,
   type WebIdentity,
   webAuthRequired,
@@ -1388,19 +1387,14 @@ if (!g.__opensessionBooted) {
     }
   }
 
-  // One-time (marker-guarded): when GitHub web sign-in is active, backfill
-  // createdByLogin on pre-existing sessions so they belong to the same
-  // verified person after the identity switch. No-op while the feature is
-  // off — flipping it on in config takes effect at the next boot. Dev
-  // instances skip it: a differently-configured dev boot must never
-  // re-decide the migration over its (or worse, shared) session files.
+  // Historical identity backfill is an explicit, bounded operator migration
+  // (scripts/migrate-session-github-users.ts), never a boot-time fleet writer.
   try {
     if (!devInstance) {
       ensureAutomationWebSession();
-      migrateSessionsToGithubUser();
     }
   } catch (e) {
-    console.error("[web-auth] session migration failed:", e);
+    console.error("[web-auth] automation identity initialization failed:", e);
   }
 
   // Demo dataset hook: seeds synthetic sessions/state in-process (live asks
