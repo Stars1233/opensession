@@ -29,6 +29,44 @@ Connect cannot install a service, it says why;
 The Runner connects outbound over the tailnet. Open Session never dials into
 the machine.
 
+## AWS access from a Runner
+
+Runs on a Runner do not inherit the Open Session host's AWS credentials, and
+the host never sends its instance-role session to a Runner. Instead a
+workspace administrator can give a Runner an IAM role under **Settings →
+Runners → Configure → AWS role ARN** (with an optional external ID). When set:
+
+1. The Open Session host mints its own instance-role session as usual
+   (`docs/setup/integrations-misc.md`, "AWS creds for runs"). The mint must be
+   enabled on the host; a Runner cannot mint anything itself.
+2. Each run host the Runner starts asks the server for credentials over the
+   same per-launch token it uses to dial back. The server assumes the Runner's
+   role with `sts:AssumeRole` and returns only that role session, one hour at
+   a time, refreshed before expiry.
+3. Pi's local tools see the session through the usual
+   `AWS_SHARED_CREDENTIALS_FILE` pointer, so `aws` and the SDKs work with no
+   extra setup on the Runner.
+
+The role's trust policy must allow the host's instance role to assume it, and
+may require the external ID:
+
+```json
+{
+  "Effect": "Allow",
+  "Principal": { "AWS": "arn:aws:iam::123456789012:role/opensession-host" },
+  "Action": "sts:AssumeRole",
+  "Condition": { "StringEquals": { "sts:ExternalId": "team-42" } }
+}
+```
+
+The host's instance role needs `sts:AssumeRole` on the Runner's role. Give the
+Runner's role only what its work needs; a different Runner can have a different
+role. Runs the server withholds AWS from (automation descendants, unless
+`integrations.aws.untrustedRuns` is on) get nothing from this path either. A
+Runner with no role configured simply runs without AWS credentials. The Runner
+software must be current enough to ask for vended credentials; older installs
+keep running without AWS.
+
 ## ChromeOS Runners
 
 A Chromebook's Linux container (Crostini, a Debian VM) is an ordinary Linux

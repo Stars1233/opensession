@@ -84,6 +84,10 @@ import {
   timerPoisonRequestCheck,
 } from "./src/server/run-ws";
 import {
+  handleRunHostAwsRoute,
+  isRunHostAwsRoute,
+} from "./src/server/routes/run-host-aws";
+import {
   githubReconnectRequired,
   startGithubTokenRefresher,
 } from "./src/server/github-auth";
@@ -655,6 +659,11 @@ const server: import("bun").Server<WSClientData> = hotServe({
 
     if (path.startsWith("/run-ws/") || path === "/rpc-ws") {
       return handleSandboxWsUpgrade(req, server, path);
+    }
+    // A Runner run host fetching its AWS role session: same per-launch
+    // wsToken gate as the dial-backs above, plain HTTP instead of an upgrade.
+    if (isRunHostAwsRoute(path)) {
+      return handleRunHostAwsRoute(req, path);
     }
 
     // SPA fallback: any unmatched non-API GET serves the app shell, so

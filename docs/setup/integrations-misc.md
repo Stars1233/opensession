@@ -251,6 +251,14 @@ A bare `AWS_REGION` does not enable anything: it names the region for a run
 that already has credentials, and it is set on plenty of machines with no
 instance role to mint.
 
+**Runners.** The instance-role session never leaves the host. A Runner's run
+hosts instead ask the server for credentials
+(`GET /run-hosts/<hostId>/aws-credentials`, authenticated with the run's
+dial-back token), and the server answers only when an administrator gave that
+Runner an IAM role in Settings → Runners: it assumes the role with the minted
+instance session and vends the role session. See
+[runners.md](../runners.md#aws-access-from-a-runner) for the trust policy.
+
 With the mint off, `getAgentAwsEnv` / `ensureAgentAwsCredsFile` return `{}`
 without spawning anything, and runs proceed without AWS. That is the expected
 state on a laptop or plain VPS. When enabled, credentials are cached until five
