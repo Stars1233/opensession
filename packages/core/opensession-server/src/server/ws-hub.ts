@@ -31,7 +31,8 @@ export function broadcastToAll(msg: object) {
 
 /**
  * Every socket that belongs to `user`: the verified sign-in first name when
- * web auth stamped one, else the client-claimed UserPicker name. Both spell
+ * web auth stamped one, else the sidebar subscription or watch UserPicker
+ * name. A home-screen socket need not watch any session. These spell
  * the person the way `requestUser` does, so a per-user store write can tell
  * exactly that person's other windows and devices.
  */
@@ -40,7 +41,8 @@ export function broadcastToUser(user: string, msg: object) {
   if (!wanted) return;
   const payload = JSON.stringify(msg);
   for (const ws of allClients) {
-    const identity = ws.data.authUser || ws.data.user;
+    const identity =
+      ws.data.authUser || ws.data.sidebarScope?.user || ws.data.user;
     if (identity?.trim().toLowerCase() !== wanted) continue;
     try {
       ws.send(payload);

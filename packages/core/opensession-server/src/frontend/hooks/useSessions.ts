@@ -368,7 +368,13 @@ export function useSessions({
       else if (message.type === "session_row_removed") onRowRemoved(message.id);
       // Lanes, snoozes and hides shape the server-side sidebar projection, so
       // a write from another device changes which rows this list carries.
-      else if (message.type === "user_map_changed") onInvalidated();
+      else if (
+        message.type === "pins_changed" ||
+        message.type === "workspaces_changed" ||
+        (message.type === "user_map_changed" &&
+          ["lanes", "hides", "snoozes"].includes(message.map))
+      )
+        onInvalidated();
     });
   }, [addHandler]);
 

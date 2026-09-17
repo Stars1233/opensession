@@ -419,6 +419,15 @@ describe("broadcastToUser", () => {
   test("reaches every socket of that person and nobody else", () => {
     const signedIn = socket({ user: "michiel", authUser: "Michiel" });
     const picker = socket({ user: "Michiel" });
+    const sidebar = socket({
+      user: null,
+      sidebarScope: {
+        user: "Michiel",
+        person: "me",
+        repo: "all",
+        autoCreated: "hide",
+      },
+    });
     const claimsOtherwise = socket({ user: "Michiel", authUser: "Louise" });
     const teammate = socket({ user: "Louise" });
     const anonymous = socket({});
@@ -428,6 +437,7 @@ describe("broadcastToUser", () => {
     const frame = { type: "user_map_changed", map: "lanes" };
     expect(signedIn).toEqual([frame]);
     expect(picker).toEqual([frame]);
+    expect(sidebar).toEqual([frame]);
     expect(claimsOtherwise).toEqual([]);
     expect(teammate).toEqual([]);
     expect(anonymous).toEqual([]);

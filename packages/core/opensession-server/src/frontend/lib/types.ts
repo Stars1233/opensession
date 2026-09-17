@@ -1003,15 +1003,16 @@ export type WSServerMessage =
   // One of this person's sidebar maps was written from any client. Sent only
   // to that person's sockets and carries no entries: the receiver re-reads the
   // map, so a claim made on the phone reaches a desktop window that never
-  // lost visibility. Native clients safely ignore this frame.
+  // lost visibility. Older clients safely ignore unknown map names.
   | {
       type: "user_map_changed";
-      map: "lanes" | "snoozes" | "hides";
+      map: "lanes" | "snoozes" | "hides" | "tab-colors" | "reads";
       user: string;
     }
   // The materialized session list changed. Web clients refetch their scoped
   // sidebar projection; older and native clients safely ignore this frame.
   | { type: "sessions_invalidated" }
+  | { type: "workspaces_changed" }
   // One session's list row changed and is visible in this socket's subscribed
   // sidebar scope (sessions_subscribe). Replaces a whole-list refetch for the
   // common write. `session_row_removed` is the same change for a row the
