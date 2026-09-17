@@ -257,7 +257,10 @@ export async function maybeLaunchRunnerRun(
     humanPrompter: runInputs.accountUser,
     promptEntryId: opts.promptEntryId,
   });
-  registerRunWsHost(hostId, wsToken);
+  registerRunWsHost(hostId, wsToken, {
+    runnerId: runner.id,
+    aws: spec.aws === true,
+  });
   const hostSpecs = new Map<string, RunHostSpec>([[hostId, spec]]);
 
   const launcher: HostLauncher = {
@@ -277,7 +280,10 @@ export async function maybeLaunchRunnerRun(
       mkdirSync(dir, { recursive: true });
       writeJsonAtomic(`${dir}/${HOST_SPEC_NAME}`, nextSpec);
       hostSpecs.set(nextSpec.hostId, nextSpec);
-      registerRunWsHost(nextSpec.hostId, nextSpec.wsToken!);
+      registerRunWsHost(nextSpec.hostId, nextSpec.wsToken!, {
+        runnerId: runner.id,
+        aws: nextSpec.aws === true,
+      });
     },
     async launch(nextHostId, _dir) {
       const nextSpec = hostSpecs.get(nextHostId);
@@ -469,7 +475,10 @@ export async function resumeRunnerRun(
     humanPrompter: spec.accountUser,
     promptEntryId: spec.promptEntryId,
   });
-  registerRunWsHost(spec.hostId, spec.wsToken!);
+  registerRunWsHost(spec.hostId, spec.wsToken!, {
+    runnerId: run.runnerId,
+    aws: spec.aws === true,
+  });
   const alive = await runnerHostStatus(run.runnerId, {
     sessionId: session.id,
     repo: session.repo,
@@ -498,7 +507,10 @@ export async function resumeRunnerRun(
       mkdirSync(dir, { recursive: true });
       writeJsonAtomic(`${dir}/${HOST_SPEC_NAME}`, nextSpec);
       hostSpecs.set(nextSpec.hostId, nextSpec);
-      registerRunWsHost(nextSpec.hostId, nextSpec.wsToken!);
+      registerRunWsHost(nextSpec.hostId, nextSpec.wsToken!, {
+        runnerId: run.runnerId!,
+        aws: nextSpec.aws === true,
+      });
     },
     async launch(hostId) {
       const nextSpec = hostSpecs.get(hostId);

@@ -21,6 +21,13 @@ configuration for the run.
   is not added to Pi's local-tool environment. MCP subprocesses use safe SDK
   defaults plus their configured headers/env or OAuth projection. Neither path
   inherits the server's full environment or `~/.opensession.env`.
+- The host's instance-role AWS session is never sent to a Runner. A Runner
+  run host receives credentials only for the IAM role an administrator
+  configured on that Runner, assumed server-side and fetched by the host with
+  its per-launch dial-back token (`src/server/routes/run-host-aws.ts`). The
+  run's `aws` grant is decided by the server at launch and checked again
+  there, so an automation descendant cannot ask its way into the role.
+  ([runners.md](runners.md#aws-access-from-a-runner))
 - Each automation has an optional `mcpServers` allowlist (per-automation
   field, settable via the API); runs only see those servers. Example: a
   support-triage automation might name only its support-inbox, identity,
