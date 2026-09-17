@@ -571,6 +571,8 @@ export interface UnifiedSession {
   model?: string;
   /** Pi reasoning variant for this session's runs; unset = model default. */
   effort?: string;
+  /** Allow automatic model switching when the selected model is unavailable. Defaults to true. */
+  autoFallback?: boolean;
   /** OpenAI priority service tier for ChatGPT OAuth Codex runs. */
   fastMode?: boolean;
   /** Pstack mode: the pstack skill family loads for this session's runs. */

@@ -1136,6 +1136,7 @@ export function nativeSessionRow(data: NativeSessionFile): UnifiedSession {
     mcpServers: data.mcpServers,
     model: data.model,
     effort: data.effort,
+    autoFallback: data.autoFallback,
     fastMode: data.fastMode,
     pstackMode: data.pstackMode,
     accountId: data.accountId,

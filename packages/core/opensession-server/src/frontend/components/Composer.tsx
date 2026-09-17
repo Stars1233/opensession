@@ -189,6 +189,7 @@ export function Composer({
     modelPillDisabled,
     modelTitle,
     effort,
+    autoFallback,
     fastMode,
     accounts,
     accountId,
@@ -214,6 +215,7 @@ export function Composer({
     onStop,
     onModelChange,
     onEffortChange,
+    onAutoFallbackChange,
     onFastModeChange,
     onAccountChange,
     onSetGoal,
@@ -1762,6 +1764,8 @@ export function Composer({
             modelTitle={modelTitle}
             effort={effort}
             onEffortChange={onEffortChange}
+            autoFallback={autoFallback}
+            onAutoFallbackChange={onAutoFallbackChange}
             fastMode={fastMode}
             onFastModeChange={onFastModeChange}
             accounts={accounts}

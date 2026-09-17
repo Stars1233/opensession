@@ -252,6 +252,7 @@ export interface CreateSessionMessage {
   forkFrom?: unknown;
   model?: unknown;
   effort?: unknown;
+  autoFallback?: unknown;
   fastMode?: unknown;
   pstackMode?: unknown;
   accountId?: string;
@@ -413,6 +414,7 @@ export interface ResolvedCreate {
   effort?: string;
   /** Stable preset instructions captured at creation, even if the workspace changes later. */
   presetNote?: string;
+  autoFallback?: boolean;
   fastMode?: boolean;
   /** Pstack mode from the palette toggle; `/pstack <task>` as the opening prompt also enables it. */
   pstackMode?: boolean;
@@ -724,6 +726,7 @@ function createdSessionFileDefaults(spec: ResolvedCreate): NativeSessionFile {
     ...(spec.effort ? { effort: spec.effort } : {}),
     ...(spec.presetNote ? { presetNote: spec.presetNote } : {}),
     ...(specPstackMode(spec) ? { pstackMode: true } : {}),
+    ...(spec.autoFallback === false ? { autoFallback: false } : {}),
     ...(spec.fastMode ? { fastMode: true } : {}),
     ...(spec.accountId ? { accountId: spec.accountId } : {}),
     ...(spec.slackOrigin
@@ -1915,7 +1918,10 @@ export async function openCreatedSession(
               fastMode: spec.fastMode,
               pstackMode,
               accountId: spec.accountId,
-              fallbackModel: interactiveFallbackModel(spec.model),
+              fallbackModel: interactiveFallbackModel(
+                spec.model,
+                spec.autoFallback,
+              ),
               mcpServers: openingTrust.mcpServers,
               proxyMcpServers: Object.keys(openingMcp),
               reposNote: openingReposNote,
@@ -2450,6 +2456,9 @@ export async function handleCreateSessionMessage(
       SESSION_EFFORTS.has(msg.effort.trim().toLowerCase())
         ? msg.effort.trim().toLowerCase()
         : undefined);
+  const createAutoFallback = forkSource
+    ? forkSource.autoFallback !== false
+    : msg.autoFallback !== false;
   const createFastMode = forkSource
     ? forkSource.fastMode
     : msg.fastMode === true;
@@ -3032,6 +3041,7 @@ export async function handleCreateSessionMessage(
       model,
       effort: createEffort,
       presetNote: workspacePreset?.note,
+      autoFallback: createAutoFallback,
       fastMode: createFastMode,
       pstackMode: createPstackMode,
       accountId: createAccountId,

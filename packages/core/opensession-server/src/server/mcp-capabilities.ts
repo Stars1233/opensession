@@ -28,10 +28,11 @@ export const INTERNAL_MCP_CAPABILITIES = {
     summary: "See and steer other sessions, and spawn worker sessions.",
     // create_session is admin-only; the humanResume and automationSelf shapes
     // mount spawn_task instead, and this text is shared, so it names both.
-    // The suggest_task trigger names what runs already do with such findings
-    // (mention them in the reply) so the tool replaces that habit.
+    // suggest_task is a drive-by channel. Follow-ups to the current work
+    // used to land there too, which flooded threads with cards for things
+    // the same session would have picked up anyway; those stay in the reply.
     guidance:
-      "Create, inspect, steer, or cancel visible sessions and worker tasks. A request for a new session means `create_session` (or `spawn_task` where that is the only one offered), not an in-process worker. A well-scoped follow-up you notice outside the request (a bug on the way, a missing tool or test) goes to `suggest_task`, not a line in your reply, and you do not start it.",
+      "Create, inspect, steer, or cancel visible sessions and worker tasks. A request for a new session means `create_session` (or `spawn_task` where that is the only one offered), not an in-process worker. `suggest_task` is only for a drive-by finding: self-contained work unrelated to the current request that this session will not pick up (a bug spotted on the way, a missing test elsewhere). Follow-ups and next steps of the current work go in your reply as a plain suggestion so the person decides. Suggest each task at most once, and do not start it.",
   },
   "opensession-admin": {
     summary: "Manage automations, MCP connections and channel memory.",

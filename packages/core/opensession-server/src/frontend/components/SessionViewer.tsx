@@ -819,7 +819,8 @@ export function SessionViewer({
   });
   const workspaceModel = workspaceTools.model;
   const { models, defaultModel, accounts } = workspaceModel;
-  const { accountId, effort, fastMode, goalOverride } = workspaceModel;
+  const { accountId, effort, fastMode, goalOverride, runPreferences } =
+    workspaceModel;
   const { currentGoal, setEffort, setFastMode } = workspaceModel;
   const { setAccountId, setGoalOverride } = workspaceModel;
   const { pstackMode, setPstackOverride } = workspaceModel;
@@ -1573,10 +1574,7 @@ export function SessionViewer({
           effectiveModel,
           handleModelChange,
           prettyModel,
-          effort,
-          setEffort,
-          fastMode,
-          setFastMode,
+          runPreferences,
           accounts,
           accountId,
           handleAccountChange,
@@ -1818,8 +1816,7 @@ export function SessionViewer({
               models,
               defaultModel,
               model,
-              effort,
-              fastMode,
+              runPreferences,
               accounts,
               accountId,
               standing: { goal: currentGoal, pstackMode },
@@ -1842,8 +1839,6 @@ export function SessionViewer({
               setNoteMode,
               handleCancel,
               handleModelChange,
-              setEffort,
-              setFastMode,
             },
             moreActions: {
               handleAccountChange,
