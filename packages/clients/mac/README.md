@@ -97,6 +97,53 @@ the first-run screen offers with `opensession.defaultServer` in `package.json`
 (or `OS1_CLOUD_URL`); a profile that already worked keeps using it and is never
 asked.
 
+## Single-secret 1Password requests
+
+Agents can request **one field for one HTTPS API call** through
+`opensession-keychain.request_1password`. The secret is read and injected on the
+Mac, not uploaded to Open Session, written to a file, placed in an agent's
+environment, or returned to the model. Only the numeric HTTP status returns.
+Response bodies and headers are discarded, including redirects and errors;
+this first version cannot retrieve API response data for the agent.
+
+Setup:
+
+1. Install the official 1Password CLI (`op`) at `/opt/homebrew/bin/op` or
+   `/usr/local/bin/op`.
+2. Enable **1Password → Settings → Developer → Integrate with 1Password CLI**.
+   Enable Touch ID in 1Password if desired.
+3. Sign in to Open Session in the Mac app. The server must have verified web
+   sign-in enabled; a name-picker identity and machine browser cannot approve.
+4. Give the agent a **secret reference**, such as `op://Work/Example API/token`,
+   and the 1Password account ID or sign-in address. Copy the field's secret
+   reference in 1Password, never its value. No vault search or item enumeration
+   is exposed to the agent.
+5. When requested, view that session and choose **OS → Review 1Password
+   request…**. Review the exact account, field, destination URL, method, header,
+   purpose and optional JSON body. Choose **Approve once** or **Decline**.
+
+1Password may show its own account-level authorization prompt. That grant is
+broader than a field, so the Mac app independently enforces the approved field
+and one API call, even while 1Password's authorization is cached. There is no
+standing access. Closing the review window declines. Requests expire after ten
+minutes or a server restart, are claimed atomically across Macs, and are never
+automatically retried after an error. Requests are only visible to the teammate
+who prompted the agent. Other Open Session windows and organizations cannot
+redirect an approval to their own session.
+
+Only public HTTPS destinations on port 443 are supported. The Mac validates DNS
+answers and rejects private, loopback and tailnet destinations. It sends no
+browser cookies and follows no redirects. Supported secret headers are
+`Authorization: Bearer` and `x-api-key`; the optional JSON body is limited to
+512 characters. Approve only a destination you trust with the credential. Raw
+secret export, shell/environment injection, response downloads, SSH credentials,
+and native iOS/Chrome clients are not part of this feature.
+
+Verification: `bun test ./packages/clients/mac/src/` plus the server
+`onepassword-requests` and route tests. Tests use synthetic secrets, not a real
+vault. Real Touch ID and 1Password account authorization require a configured
+Mac and should be tested without exposing production credentials.
+
 ## Local Tailscale profiles
 
 **OS → Organizations → Tailscale profiles…** binds an organization to a saved

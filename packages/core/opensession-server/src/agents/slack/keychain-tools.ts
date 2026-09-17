@@ -17,6 +17,11 @@
 
 import { createSdkMcpServer, tool } from "../../server/inprocess-mcp";
 import { z } from "zod";
+import { githubLoginFor } from "../../server/shared/user-mappings";
+import {
+  onePasswordRequestSchema,
+  onePasswordRequests,
+} from "../../server/onepassword-requests";
 import {
   listCredentials,
   listGrants,
@@ -36,6 +41,53 @@ function text(s: string) {
 
 export function createKeychainMcpServer(ctx: KeychainToolContext) {
   const tools = [
+    tool(
+      "request_1password",
+      "Request ONE 1Password field for ONE exact HTTPS API request on the prompting teammate's Mac. Use an op://vault/item/[section/]field reference, never a secret value. No vault search, whole-item reads, shell commands, or standing access. The human reviews the account, field, purpose, URL, method and body in OS → Review 1Password request… while viewing this session, then approves once. Requires the Mac app, signed-in web identity, installed op CLI and its desktop integration. Expires in 10 minutes. The value stays on the Mac and is injected directly into the approved HTTPS request. ONLY HTTP status is returned, never the response body or headers, so this cannot retrieve API data for you. Do not use a model-provider endpoint as the destination. On decline/failure do not re-request without the human's go-ahead.",
+      onePasswordRequestSchema.shape,
+      async (args) => {
+        const login = githubLoginFor(ctx.user);
+        if (!login)
+          return text("A verified teammate with a GitHub login is required.");
+        const parsed = onePasswordRequestSchema.safeParse(args);
+        if (!parsed.success)
+          return text(
+            "Invalid request: provide one field reference, account, purpose and exact HTTPS request (body at most 512 characters). Never supply the secret itself.",
+          );
+        try {
+          const request = onePasswordRequests.request(
+            ctx.sessionId,
+            login,
+            parsed.data,
+          );
+          return text(
+            JSON.stringify({
+              ...request,
+              next: "Ask the human to open this session in the Mac app and choose OS → Review 1Password request…. Check onepassword_request_status after they finish.",
+            }),
+          );
+        } catch {
+          return text(
+            "Couldn't create the request. This session may already have a pending request, or the queue is full. Check its status before asking again.",
+          );
+        }
+      },
+    ),
+    tool(
+      "onepassword_request_status",
+      "Check this session's 1Password request. Returns only pending/claimed/completed/declined/failed and an HTTP status when completed. No secrets, response bodies, headers or CLI errors are available. Missing requests expired or were revoked by a server restart.",
+      { requestId: z.string().uuid() },
+      async ({ requestId }) => {
+        const login = githubLoginFor(ctx.user);
+        return text(
+          JSON.stringify(
+            login
+              ? onePasswordRequests.status(requestId, ctx.sessionId, login)
+              : null,
+          ),
+        );
+      },
+    ),
     tool(
       "list_credentials",
       "List the credentials teammates have registered in the keychain — service, owner, target host, and any method/path limits. Secrets are never included. Use this to find out whether the access you need already exists before asking anyone for a token.",

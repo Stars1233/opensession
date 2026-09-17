@@ -47,6 +47,16 @@ Runners → Configure → AWS role ARN** (with an optional external ID). When se
    `AWS_SHARED_CREDENTIALS_FILE` pointer, so `aws` and the SDKs work with no
    extra setup on the Runner.
 
+Interactive `run_on_runner` commands also receive this role, through a
+per-command environment sent over the authenticated Runner channel. Credentials
+are not saved to the machine's AWS profile or included in command logs. This
+requires an updated Runner client; an older client, a failed role assumption,
+or credentials expiring before the command timeout causes a clear error before
+the command starts. Use a shorter timeout if the cached role session cannot
+cover a long command. Runners without a configured role are unchanged. Full
+sessions do not need to be enabled for command access. Internal workspace
+operations do not receive this grant.
+
 The role's trust policy must allow the host's instance role to assume it, and
 may require the external ID:
 

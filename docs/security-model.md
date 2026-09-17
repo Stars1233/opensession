@@ -27,6 +27,12 @@ configuration for the run.
   its per-launch dial-back token (`src/server/routes/run-host-aws.ts`). The
   run's `aws` grant is decided by the server at launch and checked again
   there, so an automation descendant cannot ask its way into the role.
+  The interactive-only Runner MCP also grants the configured role to bounded
+  commands, after checking Runner command permissions. It sends only the
+  assumed role's AWS environment over the authenticated channel, never in
+  the command text or audit log. Clients explicitly advertise support, and
+  failed credential issuance prevents dispatch. Internal workspace probes
+  do not opt into this grant; the MCP is not mounted for unattended runs.
   ([runners.md](runners.md#aws-access-from-a-runner))
 - Each automation has an optional `mcpServers` allowlist (per-automation
   field, settable via the API); runs only see those servers. Example: a
@@ -138,6 +144,38 @@ to perform the approved action. (Dropping the whole server from interactive
 runs was tried and reverted: it blanked Stripe reads for no security gain. The
 money movers were unreachable either way, and Stripe enforces the restricted
 key's write ceiling.)
+
+## Mac 1Password requests
+
+The interactive-only `opensession-keychain` server can request one 1Password
+field for one exact HTTPS API call. The request contains only an `op://` field
+reference, account, purpose and HTTP intent. A ten-minute, memory-only queue
+binds it to the prompting teammate's roster-resolved GitHub login and session.
+Only a verified human web identity can inspect/claim/complete that request;
+name-picker fallback and machine authentication are rejected. Restart revokes
+all pending requests. Atomic claim precedes execution, so two Macs cannot use
+the same request and failures cannot retry it.
+
+Approval starts from the native app menu, not remote-page IPC. A dedicated
+sandboxed, network-disabled, packaged sheet displays the entire intent with
+scrollable details and a default Decline action. Its IPC accepts only the owned
+main frame at the exact packaged page. The native process revalidates and freezes
+the intent, checks the session/organization again after approval and claim, then
+runs the fixed official `op read` command for exactly one field. Its minimal
+environment excludes inherited `OP_SESSION_*`, service-account tokens and shell
+startup configuration. 1Password's account-level biometric authorization is not
+used as a substitute for this per-field/per-call approval.
+
+The credential stays in native-process memory and is injected directly into the
+approved HTTPS request. No browser cookies, redirects, private/loopback/tailnet
+DNS targets, custom ports, arbitrary headers, subprocess error text, or response
+content are forwarded. The agent gets only a fixed outcome and numeric HTTP
+status. This deliberately sacrifices response data: redacting substrings cannot
+prove that an API response won't echo or encode the credential. The feature does
+not place secrets in agent-readable files or environments, export raw values,
+use the legacy keychain broker, or send credentials to the Open Session server or
+model context. The human must trust the approved API destination with the secret;
+Open Session cannot control what that external service does after receipt.
 
 ## Per-user MCP servers (`allowedUsers`)
 
