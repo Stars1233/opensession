@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +32,7 @@ const state = globalThis as typeof globalThis & {
 };
 const priorSnapshots = state.__osSessionsResponseSnapshots;
 
-beforeAll(() => {
+beforeAll(async () => {
   process.env.OPENSESSION_STATE_DIR = home;
   writeFileSync(
     join(home, "config.json"),
@@ -46,10 +47,11 @@ beforeAll(() => {
     }),
   );
   process.env.OPENSESSION_CONFIG = join(home, "config.json");
+  await getConfigAsync();
   priorStore = __setSessionKernelStoreForTest(store);
   state.__osSessionsResponseSnapshots = snapshots;
 });
-afterAll(() => {
+afterAll(async () => {
   for (const ws of sockets) allClients.delete(ws);
   __setSessionKernelStoreForTest(priorStore);
   store.close();
@@ -57,7 +59,10 @@ afterAll(() => {
   if (priorRoot === undefined) delete process.env.OPENSESSION_STATE_DIR;
   else process.env.OPENSESSION_STATE_DIR = priorRoot;
   if (priorConfig === undefined) delete process.env.OPENSESSION_CONFIG;
-  else process.env.OPENSESSION_CONFIG = priorConfig;
+  else {
+    process.env.OPENSESSION_CONFIG = priorConfig;
+    await getConfigAsync();
+  }
   rmSync(home, { recursive: true, force: true });
 });
 

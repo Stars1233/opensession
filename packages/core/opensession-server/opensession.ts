@@ -49,7 +49,11 @@ import {
   sharedCheckoutEditors,
   spaEntry,
 } from "./src/server/frontend-build";
-import { configuredIntegration, configuredServer } from "./src/server/config";
+import {
+  configuredIntegration,
+  configuredServer,
+  getConfigAsync,
+} from "./src/server/config";
 import { portalSignInRedirect } from "./src/server/portal-sign-in";
 import { initHumanAsks } from "./src/server/human-asks";
 import { interactiveMcpServers } from "./src/server/interactive-mcp";
@@ -433,8 +437,6 @@ const server: import("bun").Server<WSClientData> = hotServe({
     // confirmed poisoning self-restarts the process (run-ws.ts tripwire).
     timerPoisonRequestCheck();
     const url = new URL(req.url);
-    const workloadIdentity = await handleWorkloadIdentityRequest(req);
-    if (workloadIdentity) return workloadIdentity;
     // The bare domain root is the ONLY public URL form (os.tella.dev,
     // 2026-07-10 — prefixes dropped) and handlers below match bare
     // paths. Historical prefixes (/opensession, then the pre-rename
@@ -462,6 +464,18 @@ const server: import("bun").Server<WSClientData> = hotServe({
         return Response.redirect(path + url.search, 301);
       }
     }
+
+    // Refresh identity/policy before admission. Liveness must not wait for
+    // configuration storage; nested getters otherwise share this snapshot.
+    if (
+      !(
+        req.method === "GET" &&
+        ["/api/health", "/live", "/ready"].includes(path)
+      )
+    )
+      await getConfigAsync();
+    const workloadIdentity = await handleWorkloadIdentityRequest(req);
+    if (workloadIdentity) return workloadIdentity;
 
     // Cross-site rejection (web-auth.ts crossSiteViolation): browser
     // cross-site mutations and cross-site UI-WS upgrades are refused

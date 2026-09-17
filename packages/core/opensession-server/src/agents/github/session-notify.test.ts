@@ -1,3 +1,4 @@
+import { getConfigAsync } from "../../server/config";
 import {
   afterAll,
   afterEach,
@@ -30,8 +31,9 @@ fs.writeFileSync(
 let store: SessionListStore;
 let priorStore: SessionListStore | undefined;
 
-beforeEach(() => {
+beforeEach(async () => {
   process.env.OPENSESSION_CONFIG = config;
+  await getConfigAsync();
   store = new SessionListStore(":memory:");
   store.markCovered("include");
   priorStore = __setSessionListStoreForTest(store);
@@ -40,9 +42,12 @@ afterEach(() => {
   __setSessionListStoreForTest(priorStore);
   store.close();
 });
-afterAll(() => {
+afterAll(async () => {
   if (priorConfig === undefined) delete process.env.OPENSESSION_CONFIG;
-  else process.env.OPENSESSION_CONFIG = priorConfig;
+  else {
+    process.env.OPENSESSION_CONFIG = priorConfig;
+    await getConfigAsync();
+  }
   fs.rmSync(root, { recursive: true, force: true });
 });
 

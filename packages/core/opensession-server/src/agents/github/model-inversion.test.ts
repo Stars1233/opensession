@@ -1,3 +1,4 @@
+import { getConfigAsync } from "../../server/config";
 import { afterAll, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +12,7 @@ const priorRoot = process.env.OPENSESSION_STATE_DIR;
 const priorConfig = process.env.OPENSESSION_CONFIG;
 process.env.OPENSESSION_STATE_DIR = root;
 process.env.OPENSESSION_CONFIG = join(root, "config.json");
+await getConfigAsync();
 writeFileSync(
   process.env.OPENSESSION_CONFIG,
   JSON.stringify({
@@ -57,13 +59,16 @@ function row(id: string, model: string): UnifiedSession {
   } as UnifiedSession;
 }
 
-afterAll(() => {
+afterAll(async () => {
   __setSessionListStoreForTest(priorStore);
   store.close();
   if (priorRoot === undefined) delete process.env.OPENSESSION_STATE_DIR;
   else process.env.OPENSESSION_STATE_DIR = priorRoot;
   if (priorConfig === undefined) delete process.env.OPENSESSION_CONFIG;
-  else process.env.OPENSESSION_CONFIG = priorConfig;
+  else {
+    process.env.OPENSESSION_CONFIG = priorConfig;
+    await getConfigAsync();
+  }
   rmSync(root, { recursive: true, force: true });
 });
 

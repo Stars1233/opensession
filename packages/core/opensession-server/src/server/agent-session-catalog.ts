@@ -31,7 +31,16 @@
  * reaper treat their checkouts as finished work.
  */
 import { randomUUID } from "node:crypto";
-import { statePath } from "./paths";
+import {
+  agentSessionSourceKey,
+  type AgentSessionKind,
+} from "./agent-session-source";
+export {
+  AGENT_SESSION_STORE_SKIP_FILES,
+  agentSessionSourceDirectory,
+  agentSessionSourceKey,
+  type AgentSessionKind,
+} from "./agent-session-source";
 import {
   CATALOG_DOCUMENT_MAX_SEED_BATCH_BYTES,
   CATALOG_DOCUMENT_PAGE_LIMIT,
@@ -40,8 +49,6 @@ import {
   sessionKernelActorActive,
 } from "./session-kernel";
 import type { LinearSessionFile, SlackSessionFile } from "./types";
-
-export type AgentSessionKind = "slack" | "linear";
 
 export const AGENT_SESSION_CATALOG_NAMESPACES: Record<
   AgentSessionKind,
@@ -79,31 +86,6 @@ type AgentSessionProjection = {
   mtime: string;
   observedAt: number;
 };
-
-/** Bookkeeping files that share the Slack store directory. */
-export const AGENT_SESSION_STORE_SKIP_FILES = new Set([
-  "worktree-channels.json",
-  "message-queue.json",
-  "active-worktrees.json",
-  "prompt-queues.json",
-  "active-at-shutdown.json",
-  "active-runs.json",
-  "processed-events.json",
-  "github-deliveries.json",
-  "event-inbox.json",
-]);
-
-/** The agent-owned store directories, resolved when asked so a test that
- * repoints HOME or the state root sees its own. Only targeted single-file
- * reads and the offline scanner open them. */
-export function agentSessionSourceDirectory(kind: AgentSessionKind): string {
-  return statePath(kind === "slack" ? ".slack-sessions" : ".linear-sessions");
-}
-
-/** The catalog key of a source file: its basename without `.json`. */
-export function agentSessionSourceKey(file: string): string {
-  return file.endsWith(".json") ? file.slice(0, -".json".length) : file;
-}
 
 function catalogAvailable(): boolean {
   // Tests run the catalog on the in-process compatibility store.

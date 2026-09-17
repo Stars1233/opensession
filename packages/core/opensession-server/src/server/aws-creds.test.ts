@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir, userInfo } from "os";
@@ -95,19 +96,20 @@ describe("IMDS mint gate", () => {
     throw new Error("the mint must not spawn anything when it is off");
   };
 
-  function writeConfig(body: unknown) {
+  async function writeConfig(body: unknown) {
     const path = join(dir, "config.json");
     writeFileSync(path, JSON.stringify(body));
     process.env.OPENSESSION_CONFIG = path;
+    await getConfigAsync();
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
     for (const k of ENV_KEYS) delete process.env[k];
     calls.length = 0;
     __resetAgentAwsCacheForTest();
     dir = mkdtempSync(join(tmpdir(), "aws-creds-test-"));
-    writeConfig({});
+    await writeConfig({});
   });
 
   const minted = {
@@ -153,34 +155,34 @@ describe("IMDS mint gate", () => {
     expect(agentAwsCredsEnabled()).toBe(true);
   });
 
-  test("config enables it without any env var", () => {
-    writeConfig({ integrations: { aws: { region: "eu-central-1" } } });
+  test("config enables it without any env var", async () => {
+    await writeConfig({ integrations: { aws: { region: "eu-central-1" } } });
     expect(agentAwsCredsEnabled()).toBe(true);
-    writeConfig({
+    await writeConfig({
       integrations: { aws: { enabled: false, region: "eu-central-1" } },
     });
     expect(agentAwsCredsEnabled()).toBe(false);
   });
 
-  test("untrusted runs get AWS only when the instance opts them in", () => {
-    writeConfig({ integrations: { aws: { region: "eu-central-1" } } });
+  test("untrusted runs get AWS only when the instance opts them in", async () => {
+    await writeConfig({ integrations: { aws: { region: "eu-central-1" } } });
     expect(agentAwsCredsForUntrustedRuns()).toBe(false);
-    writeConfig({
+    await writeConfig({
       integrations: { aws: { region: "eu-central-1", untrustedRuns: true } },
     });
     expect(agentAwsCredsForUntrustedRuns()).toBe(true);
     process.env.AGENT_AWS_UNTRUSTED_RUNS = "false";
     expect(agentAwsCredsForUntrustedRuns()).toBe(false);
     process.env.AGENT_AWS_UNTRUSTED_RUNS = "true";
-    writeConfig({});
+    await writeConfig({});
     expect(agentAwsCredsForUntrustedRuns()).toBe(true);
     process.env.AGENT_AWS_UNTRUSTED_RUNS = "1";
     expect(agentAwsCredsForUntrustedRuns()).toBe(false);
   });
 
-  test("the mint unit runs as the configured user, never a hardcoded one", () => {
+  test("the mint unit runs as the configured user, never a hardcoded one", async () => {
     expect(agentAwsMintUser()).toBe(userInfo().username);
-    writeConfig({ integrations: { aws: { mintUser: "opensession" } } });
+    await writeConfig({ integrations: { aws: { mintUser: "opensession" } } });
     expect(agentAwsMintUser()).toBe("opensession");
     process.env.AGENT_AWS_MINT_USER = "runner";
     expect(agentAwsMintUser()).toBe("runner");

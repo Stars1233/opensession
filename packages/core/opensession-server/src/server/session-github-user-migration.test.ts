@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ process.env.OPENSESSION_CONFIG = join(
   process.env.HOME!,
   "migration-config.json",
 );
+await getConfigAsync();
 await writeFile(
   process.env.OPENSESSION_CONFIG,
   JSON.stringify({
@@ -16,6 +18,7 @@ await writeFile(
     },
   }),
 );
+await getConfigAsync();
 const { SessionKernelStore, __setSessionKernelStoreForTest, sessionMetadata } =
   await import("./session-kernel");
 const { SessionListStore, __setSessionListStoreForTest } =
@@ -56,13 +59,16 @@ beforeAll(async () => {
   }
   await sessionMetadata({ op: "mark_catalog_complete" });
 });
-afterAll(() => {
+afterAll(async () => {
   __setSessionKernelStoreForTest(prior);
   kernel.close();
   __setSessionListStoreForTest(priorIndex);
   index.close();
   if (config === undefined) delete process.env.OPENSESSION_CONFIG;
-  else process.env.OPENSESSION_CONFIG = config;
+  else {
+    process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
+  }
   if (operator === undefined) delete process.env.OPENSESSION_OPERATOR_MIGRATION;
   else process.env.OPENSESSION_OPERATOR_MIGRATION = operator;
 });

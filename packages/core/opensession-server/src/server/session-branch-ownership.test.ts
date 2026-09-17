@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,6 +14,7 @@ const priorWorktrees = process.env.OPENSESSION_WORKTREES_DIR;
 const main = join(root, "main");
 const worktrees = join(root, "worktrees");
 process.env.OPENSESSION_CONFIG = join(root, "config.json");
+await getConfigAsync();
 delete process.env.OPENSESSION_WORKTREES_DIR;
 await writeFile(
   process.env.OPENSESSION_CONFIG,
@@ -29,7 +31,10 @@ async function head(dir: string, ref: string) {
 
 afterAll(async () => {
   if (priorConfig === undefined) delete process.env.OPENSESSION_CONFIG;
-  else process.env.OPENSESSION_CONFIG = priorConfig;
+  else {
+    process.env.OPENSESSION_CONFIG = priorConfig;
+    await getConfigAsync();
+  }
   if (priorWorktrees === undefined)
     delete process.env.OPENSESSION_WORKTREES_DIR;
   else process.env.OPENSESSION_WORKTREES_DIR = priorWorktrees;

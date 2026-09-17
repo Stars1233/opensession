@@ -25,6 +25,28 @@ transcript discovery during a detail lookup remains separate: it can warm the
 Claude transcript-path index asynchronously. These changes do not remove history
 imports or claim that all filesystem I/O in the gateway has been eliminated.
 
+## Configuration snapshots
+
+`getConfig()` reads an asynchronously initialized snapshot, not a synchronous
+file stat on each getter call. Active background readers initiate at most one
+coalesced asynchronous refresh per second. Missing and invalid files retain the
+existing portable-default behavior without repeated synchronous probes.
+
+HTTP and UI WebSocket admission await `getConfigAsync()` before checking
+identity/policy. Liveness endpoints do not wait for configuration storage.
+Successful in-process settings writes publish immediately and fence older
+in-flight reads. External atomic replacements are detected using inode, ctime,
+mtime and size, including replacements preserving mtime and size.
+
+Code that changes the configuration namespace (`OPENSESSION_CONFIG`, or its
+HOME/state-root fallback) must await `getConfigAsync()` before calling typed
+getters. An unloaded namespace throws rather than borrowing another root's
+identity. Tests that directly rewrite a config file must also await that refresh;
+production settings writers publish through `persistRawConfig`.
+
+This removes the per-call config-file storm; it is not a claim that all remaining
+gateway I/O or the exact callback behind the minute-long incident is resolved.
+
 ## Historical GitHub attribution
 
 With GitHub sign-in enabled, preview the missing historical creator links:

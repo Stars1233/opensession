@@ -1502,8 +1502,7 @@ export const runErrors: Map<string, { message: string; at: string }> =
  * `lastRunError` but wrote no transcript line, so for those the banner was the
  * only trace the run had died (bks-019fb757, 2026-07-31).
  *
- * `require` rather than a static import: pi-transcript lazily requires
- * this module back (its own cycle-breaker), and the transcript write must be
+ * A dynamic import breaks the transcript cycle, and the write must be
  * ordered so it lands before the client re-reads the transcript.
  * Never throws unless strict projection ownership requires fail-closed behavior.
  */
@@ -1517,8 +1516,7 @@ async function persistRunFailureNotice(
   strict = false,
 ): Promise<void> {
   try {
-    const m =
-      require("./transcript-persistence") as typeof import("./transcript-persistence");
+    const m = await import("./transcript-persistence");
     const line = m.transcriptLineRunnerNotice(
       `${label}: ${message}`,
       projectionId,

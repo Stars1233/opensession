@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 /**
  * A cold list rebuild reads the catalogs only: the metadata catalog for
  * native rows and agent sidecars, the agent-session projection for Slack and
@@ -112,6 +113,7 @@ beforeAll(async () => {
   process.env.HOME = home;
   process.env.OPENSESSION_STATE_DIR = home;
   process.env.OPENSESSION_CONFIG = join(home, "config.json");
+  await getConfigAsync();
   priorGhBackoff = (await import("./github-limit")).__setGhBackoffForTest(
     Date.now() + 60 * 60_000,
   );

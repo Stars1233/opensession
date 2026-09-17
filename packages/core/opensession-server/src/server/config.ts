@@ -4,8 +4,8 @@
  * Single `~/.opensession/config.json` (dual-read fallback to `~/.backstage/
  * config.json`; path overridable via OPENSESSION_CONFIG, or the deprecated
  * OPENSESSION_CONFIG),
- * read fresh per call with the sandbox/config.ts pattern: tolerant parse,
- * missing/invalid file → portable built-in defaults.
+ * asynchronously loaded snapshots: tolerant parse, missing/invalid file →
+ * portable built-in defaults. Hot getters never inspect the filesystem.
  *
  * Precedence per key: existing env var → config.json → built-in default.
  *
@@ -16,7 +16,7 @@
  */
 
 import { homeDir } from "./paths";
-import { existsSync, readFileSync, statSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { readFile, stat } from "node:fs/promises";
 import { resolve as resolvePath } from "path";
 import { statePath } from "./paths";
@@ -604,56 +604,101 @@ function parseConfig(text: string): OpenSessionConfig {
   }
 }
 
-// Read fresh per call, with an mtime/size guard so hot paths (the REPOS proxy
-// in worktree.ts hits this on every property access) don't re-parse an
-// unchanged file. Missing/unreadable/invalid file = {} = built-in defaults.
-let cache: {
-  path: string;
-  mtimeMs: number;
-  size: number;
-  value: OpenSessionConfig;
-} | null = null;
+// One snapshot per configuration namespace. Switching a test/dev state root must
+// never return another root's identity or policy. A new path requires an awaited
+// getConfigAsync(), just like initial module loading below.
+interface ConfigSnapshot {
+  value?: OpenSessionConfig;
+  fingerprint?: string;
+  revision: number;
+  checkedAt: number;
+  pending?: Promise<OpenSessionConfig>;
+}
+const snapshots = new Map<string, ConfigSnapshot>();
+const CONFIG_REFRESH_MS = 1_000;
 
-/** Raw config.json contents (typed, tolerant). Never throws. */
+function snapshotFor(path: string): ConfigSnapshot {
+  let snapshot = snapshots.get(path);
+  if (!snapshot) {
+    snapshot = { revision: 0, checkedAt: -Infinity };
+    snapshots.set(path, snapshot);
+  }
+  return snapshot;
+}
+
+function refreshConfig(
+  path: string,
+  snapshot: ConfigSnapshot,
+): Promise<OpenSessionConfig> {
+  if (snapshot.pending) return snapshot.pending;
+  const revision = snapshot.revision;
+  snapshot.pending = (async () => {
+    try {
+      const st = await stat(path);
+      // Include inode and ctime: an atomic replacement can preserve size/mtime.
+      const fingerprint = `${st.dev}:${st.ino}:${st.ctimeMs}:${st.mtimeMs}:${st.size}`;
+      if (
+        revision === snapshot.revision &&
+        fingerprint !== snapshot.fingerprint
+      ) {
+        const value = parseConfig(await readFile(path, "utf-8"));
+        // A completed local write wins over an older in-flight disk read.
+        if (revision === snapshot.revision) {
+          snapshot.value = value;
+          snapshot.fingerprint = fingerprint;
+        }
+      }
+    } catch {
+      if (revision === snapshot.revision) {
+        snapshot.value = {};
+        snapshot.fingerprint = undefined;
+      }
+    } finally {
+      snapshot.checkedAt = performance.now();
+      snapshot.pending = undefined;
+    }
+    return snapshot.value!;
+  })();
+  return snapshot.pending;
+}
+
+/** Read the loaded snapshot. No synchronous I/O, including missing-file paths.
+ * Active background consumers notice external edits through at most one
+ * coalesced async refresh per second. Admission boundaries await getConfigAsync
+ * instead, so identity/policy checks do not rely on stale-while-refresh reads.
+ */
 export function getConfig(): OpenSessionConfig {
   const path = configPath();
-  try {
-    const st = statSync(path);
-    if (
-      cache &&
-      cache.path === path &&
-      cache.mtimeMs === st.mtimeMs &&
-      cache.size === st.size
-    ) {
-      return cache.value;
-    }
-    const value = parseConfig(readFileSync(path, "utf-8"));
-    cache = { path, mtimeMs: st.mtimeMs, size: st.size, value };
-    return value;
-  } catch {
-    cache = null;
-    return {};
-  }
+  const snapshot = snapshots.get(path);
+  if (!snapshot?.value)
+    throw new Error(
+      "Configuration is not loaded; await getConfigAsync() after changing its path",
+    );
+  if (performance.now() - snapshot.checkedAt >= CONFIG_REFRESH_MS)
+    void refreshConfig(path, snapshot);
+  return snapshot.value;
 }
 
-/** Gateway-safe config snapshot. Never falls back to synchronous I/O. */
-export async function getConfigAsync(): Promise<OpenSessionConfig> {
+/** Fresh disk snapshot, coalesced with concurrent reads. No sync fallback. */
+export function getConfigAsync(): Promise<OpenSessionConfig> {
   const path = configPath();
-  try {
-    const st = await stat(path);
-    if (
-      cache?.path === path &&
-      cache.mtimeMs === st.mtimeMs &&
-      cache.size === st.size
-    )
-      return cache.value;
-    const value = parseConfig(await readFile(path, "utf-8"));
-    cache = { path, mtimeMs: st.mtimeMs, size: st.size, value };
-    return value;
-  } catch {
-    return {};
-  }
+  return refreshConfig(path, snapshotFor(path));
 }
+
+/** Publish only AFTER a successful atomic config write. Prevents a settings
+ * save or identity revocation from waiting for the background refresh window.
+ */
+export function publishConfigSnapshot(path: string, contents: string): void {
+  const snapshot = snapshotFor(path);
+  snapshot.revision++;
+  snapshot.value = parseConfig(contents);
+  snapshot.fingerprint = undefined;
+  snapshot.checkedAt = performance.now();
+}
+
+// Imports can synchronously consume configuration, but initialization itself
+// must not block the gateway. No watcher, timer, socket or subprocess is started.
+await getConfigAsync();
 
 // ---------------------------------------------------------------------------
 // Typed getters (env var → config.json → portable default)
@@ -957,7 +1002,9 @@ export function updateIdentityConfig(patch: IdentityPatch): void {
   setOrDelete("persona", "name", patch.personaName);
   setOrDelete("branding", "productName", patch.productName);
   setOrDelete("branding", "productMark", patch.productMark);
-  writeFileAtomic(path, JSON.stringify(raw, null, 2) + "\n");
+  const contents = JSON.stringify(raw, null, 2) + "\n";
+  writeFileAtomic(path, contents);
+  publishConfigSnapshot(path, contents);
 }
 
 /**

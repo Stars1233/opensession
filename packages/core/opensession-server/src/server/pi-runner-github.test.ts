@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
@@ -177,6 +178,7 @@ describe("recovered GitHub code-run credentials", () => {
         }),
       );
       process.env.OPENSESSION_CONFIG = config;
+      await getConfigAsync();
       process.env.OPENSESSION_GITHUB_AUTH_STORE = users;
       delete process.env[GITHUB_RUN_AUTH_FILE_ENV];
 
@@ -220,7 +222,7 @@ describe("which credential a run's shell holds", () => {
   // A registered repo with a connected person and no App: the App mint
   // fails closed to an empty token, so "human-token" versus "" tells the
   // two paths apart.
-  function seed(dir: string): string {
+  async function seed(dir: string): Promise<string> {
     const cwd = join(dir, "repo");
     mkdirSync(cwd);
     const config = join(dir, "config.json");
@@ -258,6 +260,7 @@ describe("which credential a run's shell holds", () => {
       }),
     );
     process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
     process.env.OPENSESSION_GITHUB_AUTH_STORE = users;
     delete process.env[GITHUB_RUN_AUTH_FILE_ENV];
     return cwd;
@@ -266,7 +269,7 @@ describe("which credential a run's shell holds", () => {
   test("a code turn a connected person started acts as them", async () => {
     const dir = mkdtempSync(join(tmpdir(), "opensession-run-github-"));
     try {
-      const cwd = seed(dir);
+      const cwd = await seed(dir);
       const env = await runGithubEnv({
         isCode: true,
         ownerTurn: true,
@@ -297,7 +300,7 @@ describe("which credential a run's shell holds", () => {
   test("ask mode never holds a person's token, whoever started it", async () => {
     const dir = mkdtempSync(join(tmpdir(), "opensession-run-github-"));
     try {
-      const cwd = seed(dir);
+      const cwd = await seed(dir);
       const env = await runGithubEnv({
         isCode: false,
         ownerTurn: true,
@@ -319,7 +322,7 @@ describe("which credential a run's shell holds", () => {
   test("automations and machine senders hold the App token, not a person's", async () => {
     const dir = mkdtempSync(join(tmpdir(), "opensession-run-github-"));
     try {
-      const cwd = seed(dir);
+      const cwd = await seed(dir);
       // An unattended run (ownerTurn is false for every unattended kind) and
       // a handoff or worker report into an interactive session (a machine
       // sender makes ownerTurn false) both fall through to the App code set.
@@ -355,7 +358,7 @@ describe("which credential a run's shell holds", () => {
   test("a disconnected or unmapped person falls back to the App token", async () => {
     const dir = mkdtempSync(join(tmpdir(), "opensession-run-github-"));
     try {
-      const cwd = seed(dir);
+      const cwd = await seed(dir);
       const unmapped = await runGithubEnv({
         isCode: true,
         ownerTurn: true,
@@ -388,7 +391,7 @@ describe("which credential a run's shell holds", () => {
   test("a remote host uses only its projected file, never the person store", async () => {
     const dir = mkdtempSync(join(tmpdir(), "opensession-run-github-"));
     try {
-      const cwd = seed(dir);
+      const cwd = await seed(dir);
       const auth = join(dir, "github-auth.json");
       writeFileSync(auth, JSON.stringify({ GH_TOKEN: "projected-token" }));
       process.env[GITHUB_RUN_AUTH_FILE_ENV] = auth;
@@ -406,10 +409,10 @@ describe("which credential a run's shell holds", () => {
     }
   });
 
-  test("a sandboxed owner turn drops the merge guard only for a projected person token", () => {
+  test("a sandboxed owner turn drops the merge guard only for a projected person token", async () => {
     const dir = mkdtempSync(join(tmpdir(), "opensession-run-github-"));
     try {
-      seed(dir);
+      await seed(dir);
       const guard = (ownerTurn: boolean) =>
         runGithubMergeGuard({
           isCode: true,
@@ -476,6 +479,7 @@ describe("agent git identity", () => {
       await import("./pi-runner");
     delete process.env.OPENSESSION_GITHUB_APP_SLUG;
     process.env.OPENSESSION_CONFIG = "/nonexistent/config.json";
+    await getConfigAsync();
     const env = await agentGitIdentityEnv({ name: "Nightly sweep", email: "" });
     expect(env.GIT_AUTHOR_NAME).toBeUndefined();
     // A label identity has no email and gets no trailer.

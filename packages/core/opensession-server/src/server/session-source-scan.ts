@@ -24,22 +24,17 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import {
   AGENT_SESSION_STORE_SKIP_FILES,
-  agentSessionCatalogImportComplete,
   agentSessionSourceDirectory,
   agentSessionSourceKey,
-  markAgentSessionCatalogImportComplete,
-  seedAgentSessionCatalog,
-  type AgentSessionKind,
-  type AgentSessionSource,
-  type LinearSessionSource,
-  type SlackSessionSource,
+} from "./agent-session-source";
+import type {
+  AgentSessionKind,
+  AgentSessionSource,
+  LinearSessionSource,
+  SlackSessionSource,
 } from "./agent-session-catalog";
 import { OPENSESSION_SESSIONS_DIR } from "./paths";
-import {
-  SESSION_METADATA_CATALOG_PAGE_LIMIT,
-  sessionMetadata,
-  type SessionMetadataSeedRow,
-} from "./session-kernel";
+import type { SessionMetadataSeedRow } from "./session-kernel";
 import type { SessionSourceDocuments } from "./sessions";
 import type { NativeSessionFile } from "./types";
 
@@ -224,6 +219,8 @@ export type SessionCatalogSeedOptions = {
 };
 
 async function catalogSessionIds(): Promise<Set<string>> {
+  const { sessionMetadata, SESSION_METADATA_CATALOG_PAGE_LIMIT } =
+    await import("./session-kernel");
   const ids = new Set<string>();
   let afterSessionId = "";
   for (;;) {
@@ -253,6 +250,15 @@ export async function seedSessionCatalogsFromFiles(
   opts: SessionCatalogSeedOptions = {},
 ): Promise<SessionCatalogSeedSummary> {
   assertOfflineSessionSourceScan("seedSessionCatalogsFromFiles");
+  // Only the async operator migration loads runtime catalogs. The synchronous
+  // test scanner remains a leaf, including in compiled runtime dependency graphs.
+  const { sessionMetadata, SESSION_METADATA_CATALOG_PAGE_LIMIT } =
+    await import("./session-kernel");
+  const {
+    agentSessionCatalogImportComplete,
+    markAgentSessionCatalogImportComplete,
+    seedAgentSessionCatalog,
+  } = await import("./agent-session-catalog");
   const startedAt = performance.now();
   const log = opts.log ?? (() => {});
   const markComplete = opts.markComplete !== false;

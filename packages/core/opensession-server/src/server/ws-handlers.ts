@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 /**
  * The UI WebSocket: watch/unwatch sessions, live prompts and queue control,
  * question answers, terminals — plus the create_session flow. Extracted
@@ -617,6 +618,7 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
     // entire dispatch is fenced; the switch body keeps its indentation to
     // avoid a 1500-line re-indent in the shared checkout.
     try {
+      await getConfigAsync();
       // GitHub web sign-in active (web-auth.ts): re-resolve the verified login
       // on every message. A roster rename follows an already-open socket, while
       // removing someone closes it instead of leaving a cached identity active.

@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 import { afterEach, describe, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -20,9 +21,12 @@ const savedClientId = process.env.OPENSESSION_GITHUB_CLIENT_ID;
 const originalFetch = globalThis.fetch;
 const dirs: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   if (savedConfig === undefined) delete process.env.OPENSESSION_CONFIG;
-  else process.env.OPENSESSION_CONFIG = savedConfig;
+  else {
+    process.env.OPENSESSION_CONFIG = savedConfig;
+    await getConfigAsync();
+  }
   if (savedClientId === undefined)
     delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
   else process.env.OPENSESSION_GITHUB_CLIENT_ID = savedClientId;
@@ -55,6 +59,7 @@ describe("GitHub App webhook", () => {
       }),
     );
     process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
     delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
     __setGithubAppKeyPathForTest(keyPath);
     globalThis.fetch = (async (input, init) => {
@@ -81,7 +86,10 @@ describe("GitHub App webhook", () => {
   });
 });
 
-function writeAppIdentity(prefix: string, clientId: string): void {
+async function writeAppIdentity(
+  prefix: string,
+  clientId: string,
+): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   dirs.push(dir);
   const config = join(dir, "config.json");
@@ -95,13 +103,14 @@ function writeAppIdentity(prefix: string, clientId: string): void {
     }),
   );
   process.env.OPENSESSION_CONFIG = config;
+  await getConfigAsync();
   delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
   __setGithubAppKeyPathForTest(keyPath);
 }
 
 describe("App installation directory", () => {
   test("lists every account the App is installed on", async () => {
-    writeAppIdentity(
+    await writeAppIdentity(
       "opensession-github-installations-",
       "Iv-installations-test",
     );
@@ -136,7 +145,7 @@ describe("App installation directory", () => {
   });
 
   test("answers null rather than none when GitHub cannot be reached", async () => {
-    writeAppIdentity(
+    await writeAppIdentity(
       "opensession-github-installations-",
       "Iv-installations-down",
     );
@@ -219,6 +228,7 @@ describe("repository-scoped App installation identity", () => {
     writeFileSync(keyPath, privateKey.export({ format: "pem", type: "pkcs8" }));
     writeOwnerConfig(config, "owner-b");
     process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
     delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
     __setGithubAppKeyPathForTest(keyPath);
     (globalThis as any).__ghAppTokenCache = new Map([
@@ -240,6 +250,7 @@ describe("repository-scoped App installation identity", () => {
     const changedConfig = join(dir, "config-owner-c.json");
     writeOwnerConfig(changedConfig, "owner-c");
     process.env.OPENSESSION_CONFIG = changedConfig;
+    await getConfigAsync();
     expect(githubAppCredentialHealth()).toBe("unchecked");
     expect(requests).toEqual([
       "GET https://api.github.com/app/installations?per_page=100&page=1",
@@ -256,6 +267,7 @@ describe("repository-scoped App installation identity", () => {
     writeFileSync(keyPath, privateKey.export({ format: "pem", type: "pkcs8" }));
     writeOwnerConfig(config, "owner-a");
     process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
     delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
     __setGithubAppKeyPathForTest(keyPath);
     const requests: string[] = [];
@@ -313,6 +325,7 @@ describe("repository-scoped App installation identity", () => {
     // while repository calls still resolve their own installation.
     writeOwnerConfig(config);
     process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
     delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
     __setGithubAppKeyPathForTest(keyPath);
     globalThis.fetch = twoInstallationFetch([]);
@@ -331,6 +344,7 @@ describe("repository-scoped App installation identity", () => {
     writeFileSync(keyPath, privateKey.export({ format: "pem", type: "pkcs8" }));
     writeOwnerConfig(config, "owner-a");
     process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
     delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
     __setGithubAppKeyPathForTest(keyPath);
     const bodies: Array<{

@@ -1,3 +1,4 @@
+import { getConfigAsync } from "./config";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,6 +40,7 @@ beforeAll(async () => {
   );
   priorConfig = process.env.OPENSESSION_CONFIG;
   process.env.OPENSESSION_CONFIG = join(home, "config.json");
+  await getConfigAsync();
   // Close the GitHub gate for the whole file. Without it the PR cache's
   // SWR refresh fires a real `gh` call on first access and replaces the
   // seeded snapshot with live data — a network call from a unit test, and a
@@ -67,7 +69,10 @@ afterAll(async () => {
   if (priorHome === undefined) delete process.env.HOME;
   else process.env.HOME = priorHome;
   if (priorConfig === undefined) delete process.env.OPENSESSION_CONFIG;
-  else process.env.OPENSESSION_CONFIG = priorConfig;
+  else {
+    process.env.OPENSESSION_CONFIG = priorConfig;
+    await getConfigAsync();
+  }
   if (priorGhBackoff !== undefined) {
     (await import("./github-limit")).__setGhBackoffForTest(priorGhBackoff);
   }
