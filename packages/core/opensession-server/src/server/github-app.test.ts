@@ -11,6 +11,7 @@ import {
   githubAppRepositoryToken,
   githubRepositoryMatchesInstallation,
   githubServiceReadOnlyEnv,
+  githubServiceReadReposEnv,
   githubToken,
   listGithubAppInstallations,
   updateGithubAppWebhook,
@@ -379,5 +380,77 @@ describe("repository-scoped App installation identity", () => {
     const env = await githubServiceReadOnlyEnv("owner-a/tool");
     expect(env.GH_TOKEN).toBe("ghs_1_repo:tool");
     expect(Object.keys(env).some((k) => /PUSH_TOKEN/.test(k))).toBe(false);
+  });
+
+  test("a sibling-repository read token is a second, read-only mint", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opensession-github-readrepos-"));
+    dirs.push(dir);
+    const config = join(dir, "config.json");
+    const keyPath = join(dir, "github-app.pem");
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    writeFileSync(keyPath, privateKey.export({ format: "pem", type: "pkcs8" }));
+    writeOwnerConfig(config, "owner-a");
+    process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
+    delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
+    __setGithubAppKeyPathForTest(keyPath);
+    const bodies: Array<{
+      repositories?: string[];
+      permissions: Record<string, string>;
+    }> = [];
+    let refuse = false;
+    const base = twoInstallationFetch([]);
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      if (/access_tokens$/.test(String(input))) {
+        bodies.push(JSON.parse(String(init?.body)));
+        // GitHub refuses the whole mint when the installation cannot see
+        // one of the listed repositories.
+        if (refuse)
+          return Response.json(
+            { message: "Resource not accessible by integration" },
+            { status: 422 },
+          );
+      }
+      return base(input as string, init);
+    }) as typeof fetch;
+
+    const env = await githubServiceReadReposEnv("owner-a/tool", [
+      "owner-a/api",
+      "owner-a/web",
+    ]);
+    expect(env).toEqual({ GH_READ_TOKEN: "ghs_1_repo:tool,api,web" });
+    expect(bodies).toHaveLength(1);
+    // Own repo plus the siblings, every scope read: the second token must
+    // not be able to write anywhere, and never mints without `repositories`.
+    expect(bodies[0].repositories).toEqual(["tool", "api", "web"]);
+    expect(
+      Object.values(bodies[0].permissions).every((v) => v === "read"),
+    ).toBe(true);
+    // The overlay carries only the read token: the primary GH_TOKEN and the
+    // git credential wiring come from the run's own credential env.
+    expect(Object.keys(env)).toEqual(["GH_READ_TOKEN"]);
+
+    // Nothing listed: no mint, no var.
+    expect(await githubServiceReadReposEnv("owner-a/tool", [])).toEqual({});
+    expect(bodies).toHaveLength(1);
+
+    // A refused mint (App not installed on one repo) fails closed to no
+    // token rather than retrying wider.
+    refuse = true;
+    expect(
+      await githubServiceReadReposEnv("owner-a/tool", ["owner-a/private"]),
+    ).toEqual({});
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].repositories).toEqual(["tool", "private"]);
+
+    // A foreign owner never reaches GitHub: one installation, one owner.
+    refuse = false;
+    expect(
+      await githubServiceReadReposEnv("owner-a/tool", ["owner-b/app"]),
+    ).toEqual({});
+    expect(bodies).toHaveLength(2);
   });
 });

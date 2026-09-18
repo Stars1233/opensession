@@ -121,6 +121,12 @@ configuration for the run.
   but it grants no GitHub authority. It matters only when the run already has
   an authorized publication path. See
   [Automation PR credentials and review requests](setup/github.md#automation-pr-credentials-and-review-requests).
+- An automation's `readRepos` (sibling `owner/repo` names under its own
+  owner) gives its runs a second, read-only installation token,
+  `GH_READ_TOKEN`, covering its repo plus those. The primary `GH_TOKEN` is
+  never widened, the mint fails closed when the App is not installed on one
+  of the repositories, and only the names are journaled. See
+  [Who holds which credential](setup/github.md#who-holds-which-credential).
 
 ## Stripe: a third enforcement tier
 

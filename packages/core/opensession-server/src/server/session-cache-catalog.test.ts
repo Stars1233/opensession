@@ -682,5 +682,76 @@ describe("catalog-only list rebuild", () => {
     const again = await seedSessionCatalogsFromFiles();
     expect(again.native.inserted).toBe(0);
     expect(again.native.alreadyComplete).toBe(true);
+
+    // The boot-time seed (unlessComplete) trusts the marks and never reaches
+    // the source files: a file dropped in after completion is not seen, and
+    // the summary reports no scan at all. The operator rescan still walks.
+    fs.writeFileSync(
+      join(sessionsDir, "after-complete.json"),
+      sessionDoc("after-complete", "Written after completion"),
+    );
+    const bootLines: string[] = [];
+    const boot = await seedSessionCatalogsFromFiles({
+      unlessComplete: true,
+      log: (line) => bootLines.push(line),
+    });
+    expect(boot.skipped).toBe(true);
+    expect(boot.native.rows).toEqual([]);
+    expect(boot.native.inserted).toBe(0);
+    expect(bootLines).toHaveLength(1);
+    expect(bootLines[0]).toContain("nothing to scan");
+    expect(
+      await sessionMetadata({ op: "catalog_get", sessionId: "after-complete" }),
+    ).toBeNull();
+    const rescan = await seedSessionCatalogsFromFiles({
+      unlessComplete: false,
+    });
+    expect(rescan.skipped).toBe(false);
+    expect(rescan.native.inserted).toBe(1);
+  });
+
+  test("the boot-time seed scans when any completion marker is missing", async () => {
+    await resetCatalogState();
+    await freshKernelStore();
+    await freshListIndex();
+    const { sessionMetadata } = await import("./session-kernel");
+    const { seedSessionCatalogsFromFiles, sessionCatalogsComplete } =
+      await import("./session-source-scan");
+
+    expect(await sessionCatalogsComplete()).toEqual({
+      metadata: false,
+      slack: false,
+      linear: false,
+    });
+    fs.writeFileSync(
+      join(sessionsDir, "fresh-native.json"),
+      sessionDoc("fresh-native", "Fresh native"),
+    );
+    const first = await seedSessionCatalogsFromFiles({ unlessComplete: true });
+    expect(first.skipped).toBe(false);
+    // Earlier tests left files in the shared sessions dir; the fresh one is
+    // among the rows this run seeded.
+    expect(first.native.inserted).toBeGreaterThanOrEqual(1);
+    expect(
+      await sessionMetadata({ op: "catalog_get", sessionId: "fresh-native" }),
+    ).not.toBeNull();
+    expect(first.native.markedComplete).toBe(true);
+    expect(await sessionCatalogsComplete()).toEqual({
+      metadata: true,
+      slack: true,
+      linear: true,
+    });
+    // Only the metadata mark counts as partial: the agent imports alone do
+    // not make the catalogs the authority, so the seed still runs.
+    await resetCatalogState();
+    await freshKernelStore();
+    await freshListIndex();
+    await sessionMetadata({ op: "mark_catalog_complete" });
+    const partial = await seedSessionCatalogsFromFiles({
+      unlessComplete: true,
+    });
+    expect(partial.skipped).toBe(false);
+    expect(partial.native.alreadyComplete).toBe(true);
+    expect(partial.agents.slack.markedComplete).toBe(true);
   });
 });

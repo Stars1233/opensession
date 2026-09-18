@@ -209,6 +209,25 @@ export async function githubReadRunEnv(
   return githubServiceReadOnlyEnv(repo.ghRepo);
 }
 
+/** The read-only sibling-repository token an automation run holds beside
+ * its primary credential (Automation.readRepos): `GH_READ_TOKEN`, minted for
+ * the run's own repository plus the listed ones with the read set. Empty when
+ * nothing is listed, when the mint is refused (the App is not installed on
+ * one of them; github-app.ts warns), or on a remote host, whose launcher
+ * already projected it into the run-scoped auth file. */
+export async function githubReadReposRunEnv(
+  cwd: string,
+  readRepos: string[] | undefined,
+): Promise<Record<string, string>> {
+  if (!readRepos?.length) return {};
+  if (process.env[GITHUB_RUN_AUTH_FILE_ENV]) return {};
+  const { repoForPathOrNull } = await import("./worktree");
+  const repo = repoForPathOrNull(cwd);
+  if (!repo || repo.host === "codestorage" || !repo.ghRepo) return {};
+  const { githubServiceReadReposEnv } = await import("./github-app");
+  return githubServiceReadReposEnv(repo.ghRepo, readRepos);
+}
+
 /** The GitHub credential one run's shell holds (docs/setup/github.md, "Who
  * holds which credential").
  *
@@ -223,11 +242,33 @@ export async function githubReadRunEnv(
  *   sees a person's token and ignores any launcher-supplied one.
  *
  * A remote host never consults the person store: its launcher already
- * projected the run's credential (githubUserRunEnv is empty there). */
+ * projected the run's credential (githubUserRunEnv is empty there).
+ *
+ * An automation that lists sibling repositories to read (`readRepos`) also
+ * gets `GH_READ_TOKEN` (githubReadReposRunEnv) beside whichever primary
+ * credential the rules above selected; the primary is never widened. */
 export async function runGithubEnv(input: {
   isCode: boolean;
   ownerTurn: boolean;
   /** The person the turn acts for (githubCredentialUser). */
+  user?: string | null;
+  githubKindRun: boolean;
+  launcherEnv?: Record<string, string>;
+  cwd: string;
+  /** Automation.readRepos; only automation runs carry it. */
+  readRepos?: string[];
+}): Promise<Record<string, string>> {
+  const primary = await runPrimaryGithubEnv(input);
+  if (!input.readRepos?.length) return primary;
+  return {
+    ...primary,
+    ...(await githubReadReposRunEnv(input.cwd, input.readRepos)),
+  };
+}
+
+async function runPrimaryGithubEnv(input: {
+  isCode: boolean;
+  ownerTurn: boolean;
   user?: string | null;
   githubKindRun: boolean;
   launcherEnv?: Record<string, string>;
@@ -2219,6 +2260,7 @@ async function* runPiAttempt(
       githubKindRun,
       launcherEnv: opts.githubEnv,
       cwd,
+      readRepos: opts.readRepos,
     });
     const agentGitEnv = await agentGitIdentityEnv(author);
     const mergeGuard = runGithubMergeGuard({
@@ -2508,6 +2550,9 @@ async function* runPiAttempt(
       isRepoLess: !cwdRepo,
       reposNote: opts.reposNote,
       prReviewer: opts.prReviewer,
+      // Only tell the run about a read token it actually holds; a refused
+      // mint already warned in the server log.
+      readRepos: githubEnv.GH_READ_TOKEN ? opts.readRepos : undefined,
       // Same host-awareness as the previous runner runner: code.storage repos get
       // push-the-branch instructions instead of `gh pr create`.
       repoHost: isScratch ? undefined : cwdRepo?.host,

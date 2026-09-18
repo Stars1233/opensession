@@ -4,7 +4,14 @@ Live session-list and maintenance reads use complete central catalog projections
 Missing coverage or an unreadable projection is unavailable, not an empty store
 and not permission to scan files. Seed a legacy installation with
 `bun scripts/seed-session-metadata-catalog.ts` before starting it. This explicit
-operator process may read source files; the gateway cannot.
+operator process may read source files; the gateway cannot. `opensession
+service install` (what `install.sh` runs) and a foreground `opensession start`
+run that seed themselves, after the kernel is up and before the gateway starts,
+so a fresh install boots without a manual step; a compiled binary carries it as
+`opensession seed-session-catalogs`. Once the metadata catalog and both agent
+imports are marked complete the seed exits after checking those markers over
+RPC and reads no source file, so an already-migrated instance pays nothing per
+session; `--rescan` walks the files anyway.
 
 ## Live readers
 

@@ -24,12 +24,17 @@
  * (OPENSESSION_SESSION_KERNEL_URL or _HOST/_PORT, and
  * OPENSESSION_SESSION_KERNEL_TOKEN or OPENSESSION_SESSION_KERNEL_TOKEN_FILE).
  * Re-running is safe. Once every file has a row the catalogs are marked
- * complete; from then on a cold list rebuild pages them instead of scanning.
- * Until they are, a gateway whose list index has lost coverage serves no
- * session list at all (SessionListUnavailableError), so run this before a
+ * complete; from then on a cold list rebuild pages them instead of scanning,
+ * and so does this script: when the metadata catalog and both agent imports
+ * are already marked complete it exits after three RPC calls without reading
+ * a source file, which keeps the seed the installer and a foreground start
+ * run before the gateway (scripts/lib/service.ts seedSessionCatalogs) O(1)
+ * on a migrated instance. `--rescan` walks the files anyway. Until the
+ * catalogs are complete, a gateway whose list index has lost coverage serves
+ * no session list at all (SessionListUnavailableError), so run this before a
  * rollout that rebuilds the index.
  *
- *   bun scripts/seed-session-metadata-catalog.ts [--dry-run] [--no-mark-complete] [--batch 200]
+ *   bun scripts/seed-session-metadata-catalog.ts [--dry-run] [--no-mark-complete] [--rescan] [--batch 200]
  */
 
 export {};
@@ -58,9 +63,16 @@ async function main(): Promise<void> {
     const summary = await seedSessionCatalogsFromFiles({
       dryRun: flag("--dry-run"),
       markComplete: !flag("--no-mark-complete"),
+      unlessComplete: !flag("--rescan"),
       batchSize: Number(value("--batch") ?? 200) || 200,
       log: (line) => console.log(line),
     });
+    if (summary.skipped) {
+      console.log(
+        `[seed-session-catalogs] done in ${summary.ms}ms: catalogs complete, no source scan (--rescan to walk the files anyway)`,
+      );
+      return;
+    }
     console.log(
       `[seed-session-catalogs] done in ${summary.ms}ms: metadata ` +
         `${summary.native.alreadyComplete || summary.native.markedComplete ? "complete" : "NOT complete"}, ` +

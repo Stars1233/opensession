@@ -168,6 +168,12 @@ export interface RunAgentOpts {
    * anyone's review queue. Preserved across model fallback and restart resume.
    */
   prReviewer?: string;
+  /**
+   * Sibling GitHub repositories the run may read through `GH_READ_TOKEN`
+   * (Automation.readRepos; pi-runner runGithubEnv mints the token per turn).
+   * Non-secret names only, so they journal and resume like prReviewer.
+   */
+  readRepos?: string[];
   /** Images attached to the opening message. */
   images?: ImageInput[];
   /** Non-image attachments shipped inline to a host on another machine; the
@@ -2206,6 +2212,7 @@ export async function resumeInterruptedRuns(
               accountStrict: run.accountStrict,
               usageCredits: run.usageCredits,
               prReviewer: run.prReviewer,
+              readRepos: run.readRepos,
               journal: {
                 osSessionId: run.osSessionId,
                 kind: recoveryKind(run.kind, "rerun"),
@@ -2305,6 +2312,7 @@ export async function resumeInterruptedRuns(
             accountStrict: run.accountStrict,
             usageCredits: run.usageCredits,
             prReviewer: run.prReviewer,
+            readRepos: run.readRepos,
             journal: {
               osSessionId: run.osSessionId,
               kind: recoveryKind(run.kind, "resume"),

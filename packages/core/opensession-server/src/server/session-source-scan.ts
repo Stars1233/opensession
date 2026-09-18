@@ -207,16 +207,45 @@ export type SessionCatalogSeedSummary = {
     }
   >;
   ms: number;
+  /** True when `unlessComplete` found every catalog already marked complete
+   *  and the seed exited before scanning any source file. */
+  skipped: boolean;
 };
 
 export type SessionCatalogSeedOptions = {
   /** Report only; write nothing. */
   dryRun?: boolean;
+  /** Exit before scanning when the metadata catalog and both agent imports
+   *  are already marked complete. Completed catalogs no longer require source
+   *  discovery, so the boot-time seed (every install and foreground start)
+   *  sets this and pays three RPC calls instead of a walk over every session
+   *  file; the operator rescan leaves it unset. */
+  unlessComplete?: boolean;
   /** Mark the catalogs complete once every file has a row (default true). */
   markComplete?: boolean;
   batchSize?: number;
   log?: (line: string) => void;
 };
+
+/**
+ * The three completion markers a cold list rebuild needs, read through the
+ * kernel RPC without touching a source file. All true means the catalogs are
+ * the authority and a seed run has nothing left to migrate.
+ */
+export async function sessionCatalogsComplete(): Promise<{
+  metadata: boolean;
+  slack: boolean;
+  linear: boolean;
+}> {
+  const { sessionMetadata } = await import("./session-kernel");
+  const { agentSessionCatalogImportComplete } =
+    await import("./agent-session-catalog");
+  return {
+    metadata: await sessionMetadata({ op: "catalog_complete" }),
+    slack: await agentSessionCatalogImportComplete("slack"),
+    linear: await agentSessionCatalogImportComplete("linear"),
+  };
+}
 
 async function catalogSessionIds(): Promise<Set<string>> {
   const { sessionMetadata, SESSION_METADATA_CATALOG_PAGE_LIMIT } =
@@ -267,6 +296,38 @@ export async function seedSessionCatalogsFromFiles(
     Math.max(1, opts.batchSize ?? 200),
   );
 
+  if (opts.unlessComplete) {
+    const complete = await sessionCatalogsComplete();
+    if (complete.metadata && complete.slack && complete.linear) {
+      log(
+        "[seed-session-catalogs] metadata catalog and slack/linear imports already marked complete; nothing to scan",
+      );
+      const agent = {
+        files: 0,
+        unreadable: [],
+        alreadyComplete: true,
+        markedComplete: false,
+      };
+      return {
+        native: {
+          rows: [],
+          sidecars: 0,
+          mismatched: [],
+          unreadable: [],
+          unversioned: 0,
+          known: 0,
+          inserted: 0,
+          uncovered: [],
+          alreadyComplete: true,
+          markedComplete: false,
+        },
+        agents: { slack: { ...agent }, linear: { ...agent } },
+        ms: Math.round(performance.now() - startedAt),
+        skipped: true,
+      };
+    }
+  }
+
   const nativeScan = scanNativeSessionFiles();
   const alreadyComplete = await sessionMetadata({ op: "catalog_complete" });
   const known = await catalogSessionIds();
@@ -314,6 +375,7 @@ export async function seedSessionCatalogsFromFiles(
       },
     },
     ms: 0,
+    skipped: false,
   };
 
   const agentScans = {

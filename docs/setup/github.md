@@ -142,6 +142,28 @@ its `GH_CONFIG_DIR` is run-scoped, so a missing token fails with "not logged in"
 See [github-authority.md](../github-authority.md) for the credential and
 publication boundaries.
 
+An automation that must read sibling repositories (`readRepos` in its
+config: `owner/repo` names under the same owner as its own repo) additionally
+holds `GH_READ_TOKEN`: a second installation token minted for its own
+repository plus every listed one, with the read permission set only. It is a
+separate token on purpose. One mint carries one permission set for every
+repository it lists, so folding the read repos into the primary mint would
+give the run `contents:write` and `pull_requests:write` on repositories it
+should only read. `GH_TOKEN` stays the one-repository code set, and `gh`
+honors only `GH_TOKEN`, so a script opts in per command:
+`GH_TOKEN=$GH_READ_TOKEN gh pr list --repo owner/name`. The run's
+instructions name the token and the repositories it covers.
+
+The App must be installed on every repository in `readRepos` (organization
+settings, the Open Session App, repository access). GitHub refuses the whole
+mint when the installation cannot see one of them; the server then logs a
+warning naming the repositories and the run gets no `GH_READ_TOKEN` at all.
+It never falls back to a token minted without a repository list. In a
+sandbox the launcher mints the read token on the host and projects it in the
+same private run-scoped file as the primary one. Like the primary token it is
+process-local: never written into git config, remote URLs, session files, or
+the run journal, which stores only the repository names.
+
 A push from a person-started code turn therefore reaches GitHub as that
 person; pushes from every other run reach it as the bot account, and the PR
 webhook sees the bot as the `synchronize` sender. The review automation
@@ -405,7 +427,11 @@ credential. An ordinary automation therefore cannot push or open a GitHub PR.
 Its optional `prReviewer` value is validated, preserved across resume, and
 added to unattended run instructions, but it grants no GitHub authority. The
 reviewer is not added to existing PRs or PRs created from human-steered turns.
-Do not rely on this setting to publish or surface automation work.
+Do not rely on this setting to publish or surface automation work. The
+optional `readRepos` list is validated the same way (same owner, valid names,
+deduped) and preserved across resume; it widens only what the run can read,
+through the separate `GH_READ_TOKEN` described under
+[Who holds which credential](#who-holds-which-credential).
 
 For a PR created by an authorized path, request a GitHub login or `org/team`
 reviewer directly. The reviewer must be a repository collaborator; a requested
