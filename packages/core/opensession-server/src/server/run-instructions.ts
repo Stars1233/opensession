@@ -58,6 +58,10 @@ export function buildRunInstructions(input: {
    *  "codestorage" swaps the PR-flow instructions for push-the-branch ones
    *  (code.storage has no PRs — a pushed branch is the change request). */
   repoHost?: "github" | "codestorage";
+  /** The primary repo is public, or its visibility could not be confirmed
+   *  (treatRepoAsPublic). Per repo, not per session, so the prompt prefix
+   *  stays shared across a repo's sessions. */
+  publicRepo?: boolean;
   /** Untracked instance-local instructions (readLocalInstructions) — appended
    *  verbatim so operator-private guidance never has to live in the tracked
    *  AGENTS.md. */
@@ -161,6 +165,22 @@ export function buildRunInstructions(input: {
         `For a PR this unattended automation creates, request \`${input.prReviewer}\` as reviewer. Never add this automatic reviewer to an existing PR or a human-steered PR. If the request fails, mention it in the final response.`,
       );
     }
+  }
+  // Everything a run publishes to a public repository is readable by anyone,
+  // while its inputs (session context, memory, Slack, Linear, local
+  // instructions, other checkouts) are the organization's private record.
+  // Say so once, in shared text, so no engine or engine prompt has to.
+  if (!input.isAsk && !input.isScratch && input.publicRepo) {
+    parts.push(
+      "## Public repository\nTreat the primary repository as public: its PRs, commits, branch " +
+        "names, comments, and files are readable by anyone. Never put private organization " +
+        "information there: internal hostnames, URLs, or paths, private repositories' names or " +
+        "code, teammate or customer details, secrets, internal plans, or anything from memory, " +
+        "Slack, Linear, local instructions, or the session context. Describe what the change " +
+        "does in terms of this repository alone. The attribution footer and commit trailer from " +
+        "the session context are the only exception. Apply the same rule before writing to any " +
+        "other public repository.",
+    );
   }
 
   const inproc = (input.inProcessMcp || {}) as Record<string, unknown>;

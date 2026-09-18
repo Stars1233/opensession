@@ -109,10 +109,14 @@ import {
 import {
   bashAskPolicyReply,
   mergeGuardDenyReason,
+  privateTermsDenyReason,
   publicationPolicyDenyReason,
   type MergeGuard,
+  type PrivateTermsGuard,
   type PublicationPolicy,
 } from "./command-policy";
+import { privateTerms } from "./config";
+import { treatRepoAsPublic } from "./repo-visibility";
 import {
   appendTranscriptEntries,
   recordEngineSessionOwner,
@@ -1534,6 +1538,9 @@ export function makePiBashTool(input: {
   publicationPolicy?: PublicationPolicy;
   /** Runs without a connected person's code authority cannot merge or approve. */
   mergeGuard?: MergeGuard;
+  /** Public primary repo: publishing commands may not carry configured
+   *  private organization terms (privateTermsDenyReason). */
+  privateTermsGuard?: PrivateTermsGuard;
   /** Immutable Open Session run cancellation. Kept separate from Pi's tool
    * signal because AgentSession.abort() can leave an active tool signal live. */
   runSignal?: AbortSignal;
@@ -1571,6 +1578,10 @@ export function makePiBashTool(input: {
         ? publicationPolicyDenyReason(command, input.publicationPolicy)
         : undefined;
       if (publicationDenial) throw new Error(publicationDenial);
+      const privateTermsDenial = input.privateTermsGuard
+        ? privateTermsDenyReason(command, input.privateTermsGuard)
+        : undefined;
+      if (privateTermsDenial) throw new Error(privateTermsDenial);
       if (input.gated) {
         const reply = bashAskPolicyReply(
           { permission: "bash", metadata: { command } },
@@ -2174,6 +2185,15 @@ async function* runPiAttempt(
         return { cwdRepo: undefined, sharedCheckout: false };
       }
     })();
+    // A run that can publish must know when the whole internet reads what it
+    // publishes. Fails closed: unconfirmed visibility counts as public.
+    const publicRepo =
+      !isAsk && !isScratch && (await treatRepoAsPublic(cwdRepo));
+    const configuredPrivateTerms = privateTerms();
+    const privateTermsGuard: PrivateTermsGuard | undefined =
+      publicRepo && configuredPrivateTerms.length > 0
+        ? { terms: configuredPrivateTerms }
+        : undefined;
     // The person this turn acts for, if any: the sender, unless it is the
     // synthetic auto-continue driver, in which case the author fallback
     // names the session owner (#322). A machine sender (a review handoff, a
@@ -2460,6 +2480,7 @@ async function* runPiAttempt(
               runKind: journal?.kind,
               publicationPolicy: opts.publicationPolicy,
               mergeGuard,
+              privateTermsGuard,
               runSignal: abort.signal,
               onAudit: (event) =>
                 audit({
@@ -2490,6 +2511,7 @@ async function* runPiAttempt(
       // Same host-awareness as the previous runner runner: code.storage repos get
       // push-the-branch instructions instead of `gh pr create`.
       repoHost: isScratch ? undefined : cwdRepo?.host,
+      publicRepo,
       localInstructions: readLocalInstructions(cwd),
       inProcessMcp: opts.inProcessMcp,
       sandboxed: process.env.OPENSESSION_SANDBOX === "1",

@@ -293,6 +293,39 @@ mint sets. Changing and auditing public-intake settings remains a one-time
 human-admin task. See [GitHub authority](github-authority.md) for the
 connected-user and host-private-key implications.
 
+## Private information and public repositories
+
+A run's inputs are the organization's private record: session context, memory,
+Slack and Linear threads, local instructions, other checkouts, and the
+instance config. A public repository's PRs, commits, branch names, comments,
+and files are readable by anyone. Nothing may cross from the first set to the
+second.
+
+The boundary has three layers:
+
+- **Visibility is resolved per repo and fails closed.** `treatRepoAsPublic`
+  (`repo-visibility.ts`) honors an explicit `repos.<id>.public` in
+  `config.json`, otherwise asks GitHub for the repository's visibility with the
+  instance credential. code.storage repos are private to the instance. No
+  token, an API failure, or no GitHub remote all count as public.
+- **Every code run in a public repo gets the `## Public repository` rule** in
+  its shared run instructions (`run-instructions.ts`): describe the change in
+  terms of the repository alone; the attribution footer and `Co-authored-by`
+  trailer are the only session facts allowed through. The rule is per repo, so
+  it does not fragment the prompt cache across a repo's sessions.
+- **`policy.privateTerms` is a server-side tripwire.** List the hostnames,
+  customer names, private repository names, and other terms that must never
+  appear in public. In a public repo, a bash command that publishes text
+  (`git commit`, `tag`, `push`, `branch`, `checkout -b`, `gh pr create`, `edit`,
+  `comment`, `review`, `gh issue`, `gh api`, and so on) is refused before it
+  runs when it contains one of the terms, heredoc and quoted bodies included.
+  Read-only commands stay usable. The list is instance-local configuration:
+  do not commit it to a public repository.
+
+The tripwire is not the boundary. A term list only catches the terms it knows,
+and text that reaches a file before being committed is not scanned. The
+prompt rule and reviewers remain responsible for everything else.
+
 ## GitHub credential scoping (out-of-org writes fail server-side)
 
 The "repositories outside your org require confirmation" rule in AGENTS.md is

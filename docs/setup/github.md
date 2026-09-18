@@ -165,6 +165,13 @@ permissions and rulesets remain the credential boundary. Ask-mode read-only
 checks, unattended command policy, and automation-descendant publication
 restrictions still apply; this does not grant automations human authority.
 
+A public repository adds one more layer. Runs there receive the
+`## Public repository` instruction, and publishing commands are refused when
+they contain a term from `policy.privateTerms`. Pin visibility with
+`repos.<id>.public` when the instance credential cannot read it; unconfirmed
+visibility counts as public. See
+[../security-model.md](../security-model.md#private-information-and-public-repositories).
+
 Threat model: agent bash shares the server's uid, so every credential present
 on an Open Session host should be scoped as if the agent will read and use it
 directly. Do not give runs ambient PATs, SSH keys, or host `gh` logins. The

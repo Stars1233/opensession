@@ -176,6 +176,39 @@ describe("buildRunInstructions", () => {
     expect(prompt).toContain("Desktop tab");
   });
 
+  // A public repository's PRs and commits are readable by anyone, while the
+  // run's inputs (memory, Slack, Linear, session context) are private. The
+  // rule is per repo, never per session, and only code runs can publish.
+  test("tells a public-repo code run what may never leave the session", () => {
+    const prompt = buildRunInstructions({
+      isAsk: false,
+      hasSession: true,
+      publicRepo: true,
+    });
+    expect(prompt).toContain("## Public repository");
+    expect(prompt).toContain(
+      "Treat the primary repository as public: its PRs, commits, branch names, comments, and files are readable by anyone.",
+    );
+    expect(prompt).toContain(
+      "anything from memory, Slack, Linear, local instructions, or the session context",
+    );
+    expect(prompt).toContain(
+      "The attribution footer and commit trailer from the session context are the only exception.",
+    );
+    expect(prompt.indexOf("## Public repository")).toBeGreaterThan(
+      prompt.indexOf("## Pull requests"),
+    );
+
+    for (const input of [
+      { isAsk: false, hasSession: true },
+      { isAsk: false, hasSession: true, publicRepo: false },
+      { isAsk: true, publicRepo: true },
+      { isAsk: false, isScratch: true, publicRepo: true },
+    ]) {
+      expect(buildRunInstructions(input)).not.toContain("## Public repository");
+    }
+  });
+
   test("carries no per-session facts", () => {
     const prompt = buildRunInstructions({
       isAsk: false,
