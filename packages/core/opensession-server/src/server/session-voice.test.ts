@@ -2,6 +2,8 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { sessionVoiceConfig, createSessionVoiceAnswer } from "./session-voice";
 import { handleSessionVoiceRoutes } from "./routes/session-voice";
 import * as voice from "./desk-voice";
+import * as sessionCache from "./session-cache";
+import * as sessions from "./sessions";
 
 const restores: Array<() => void> = [];
 afterEach(() => {
@@ -50,7 +52,13 @@ test("voice route rejects machine and claimed identities before spending or sess
 });
 
 test("voice route bounds and validates offers", async () => {
-  for (const sdp of [null, "", "x".repeat(65537)]) {
+  for (const sdp of [
+    null,
+    "",
+    " \r\n\t",
+    "x".repeat(65537),
+    `${" ".repeat(65536)}x`,
+  ]) {
     const req = new Request("http://localhost/api/sessions/test/voice", {
       method: "POST",
       body: JSON.stringify({ sdp }),
@@ -120,3 +128,105 @@ test("provider failures do not leak response bodies or credentials", async () =>
     ),
   ).rejects.toThrow("OpenAI could not start the voice call (HTTP 403).");
 });
+
+test("voice route preserves the browser SDP byte-for-byte through provider exchange", async () => {
+  const session = spyOn(sessionCache, "findSessionAsync").mockResolvedValue({
+    id: "voice-test",
+    source: "opensession",
+    claudeSessionId: null,
+    branch: null,
+    worktreeDir: null,
+    startedBy: "alice",
+    title: "Voice test",
+    lastActivity: "2026-01-01T00:00:00Z",
+    createdAt: "2026-01-01T00:00:00Z",
+    isRunning: false,
+    transcriptPath: null,
+  });
+  const transcript = spyOn(
+    sessions,
+    "mergedSessionTranscriptAsync",
+  ).mockResolvedValue([]);
+  const key = spyOn(voice, "requireVoiceApiKey").mockResolvedValue(
+    "synthetic-key",
+  );
+  restores.push(
+    () => session.mockRestore(),
+    () => transcript.mockRestore(),
+    () => key.mockRestore(),
+  );
+  // Synthetic SDP with significant CRLF framing, not an actual browser offer.
+  const sdp = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const form = init?.body as FormData;
+        expect(form.get("sdp")).toBe(sdp);
+        return new Response("answer");
+      },
+      { preconnect() {} },
+    ),
+  );
+  restores.push(() => fetcher.mockRestore());
+  const req = new Request("http://example.test/api/sessions/voice-test/voice", {
+    method: "POST",
+    body: JSON.stringify({ sdp }),
+  });
+  const response = await handleSessionVoiceRoutes({
+    req,
+    url: new URL(req.url),
+    path: new URL(req.url).pathname,
+    publicPrefix: "",
+    authUser: { login: "alice", name: "Alice" },
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(response?.status).toBe(200);
+  expect(await response?.json()).toEqual({ sdp: "answer" });
+});
+
+for (const [code, detail] of [
+  [
+    "invalid_offer",
+    " OpenAI rejected the browser's audio connection offer (invalid_offer).",
+  ],
+  [
+    "insufficient_quota",
+    " The voice API account has insufficient quota. Check its billing and limits.",
+  ],
+  ["private-test-key", ""],
+]) {
+  test(`provider diagnostic ${code} only selects safe, fixed copy`, async () => {
+    const key = spyOn(voice, "requireVoiceApiKey").mockResolvedValue(
+      "private-test-key",
+    );
+    const fetcher = spyOn(globalThis, "fetch").mockImplementation(
+      Object.assign(
+        async () =>
+          Response.json(
+            {
+              error: {
+                code,
+                message: "private-test-key and transcript content",
+                param: "private-test-key",
+              },
+            },
+            { status: 400 },
+          ),
+        { preconnect() {} },
+      ),
+    );
+    restores.push(
+      () => key.mockRestore(),
+      () => fetcher.mockRestore(),
+    );
+    await expect(
+      createSessionVoiceAnswer(
+        "offer",
+        new AbortController().signal,
+        "Thread context",
+      ),
+    ).rejects.toThrow(
+      `OpenAI could not start the voice call (HTTP 400).${detail}`,
+    );
+  });
+}

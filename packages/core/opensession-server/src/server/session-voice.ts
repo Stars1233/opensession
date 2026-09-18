@@ -1,6 +1,7 @@
 /** A transcript-aware voice companion. Its sole tool requests tool-less
  * reasoning help, or proposes agent work for spoken human approval in the
  * browser; this transport never executes agent work. */
+import { z } from "zod";
 import { requireVoiceApiKey } from "./desk-voice";
 import {
   SESSION_VOICE_HELP_TOOL,
@@ -79,10 +80,20 @@ export async function createSessionVoiceAnswer(
     signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
   });
   if (!response.ok) {
-    // Do not echo provider bodies or credentials into the browser or logs.
-    await response.body?.cancel();
+    // Only known codes select fixed copy. Never echo provider messages,
+    // parameters, or unknown codes: they may contain request data or secrets.
+    const diagnostic = z
+      .object({ error: z.object({ code: z.string() }) })
+      .safeParse(await response.json().catch(() => null));
+    const code = diagnostic.success ? diagnostic.data.error.code : undefined;
+    const detail =
+      code === "invalid_offer"
+        ? " OpenAI rejected the browser's audio connection offer (invalid_offer)."
+        : code === "insufficient_quota"
+          ? " The voice API account has insufficient quota. Check its billing and limits."
+          : "";
     throw new Error(
-      `OpenAI could not start the voice call (HTTP ${response.status}).`,
+      `OpenAI could not start the voice call (HTTP ${response.status}).${detail}`,
     );
   }
   return response.text();

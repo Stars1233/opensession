@@ -12,9 +12,10 @@ import type { RouteContext } from "./context";
 const offerSchema = z.object({
   sdp: z
     .string()
-    .trim()
     .min(1)
-    .max(64 * 1024),
+    .max(64 * 1024)
+    // SDP is a wire format: trimming removes its required final CRLF.
+    .refine((sdp) => sdp.trim().length > 0),
 });
 // Exactly the tool-less reasoning tiers. `session_agent` is not a helper:
 // agent work only travels the approved, durable outbox path.
