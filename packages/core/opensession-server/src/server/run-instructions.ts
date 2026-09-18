@@ -227,7 +227,8 @@ export function buildRunInstructions(input: {
       (inproc["opensession-charts"]
         ? " `make_chart` validates one and offloads large data."
         : "") +
-      " Live fences: mermaid, math, csv, json, ansi, palette, metrics (`Label: value " +
+      ' Live fences: mermaid (quote labels with punctuation: `A["v1 (beta)"]`, ' +
+      '`-->|"@x"|`), math, csv, json, ansi, palette, metrics (`Label: value ' +
       "(delta)`), choices (a reply per line, click sends), tree, artifact (sandboxed " +
       "HTML), svg, slides (`---`); `> [!NOTE]` is a callout.",
   );
