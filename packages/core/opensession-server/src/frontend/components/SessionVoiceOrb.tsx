@@ -8,7 +8,8 @@ import {
 /**
  * The luminous orb for a session voice call. The microphone deforms and lights
  * its rim, the speaker brightens its core; both read live levels from `levels`
- * every frame, so the orb only stirs when someone is actually talking. Size it
+ * every frame. During startup, a neutral pulse indicates connection progress;
+ * once connected, speech drives its reactions. Size it
  * from the outside (`size-10`, `size-14`); it fills its box.
  *
  * Decorative by default: the status text beside it already says what the call
@@ -17,6 +18,7 @@ import {
 export function SessionVoiceOrb({
   levels,
   active,
+  connecting = false,
   className,
   label,
 }: {
@@ -24,6 +26,8 @@ export function SessionVoiceOrb({
   levels: SessionVoiceOrbLevelsRef;
   /** Whether a call is live. Off, the orb settles into a quiet resting sphere. */
   active: boolean;
+  /** A neutral startup pulse, separate from microphone and playback activity. */
+  connecting?: boolean;
   className?: string;
   /** Accessible name; omitted, the orb is hidden from assistive tech. */
   label?: string;
@@ -33,8 +37,8 @@ export function SessionVoiceOrb({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    return startSessionVoiceOrb(canvas, levels, { active });
-  }, [levels, active]);
+    return startSessionVoiceOrb(canvas, levels, { active, connecting });
+  }, [levels, active, connecting]);
 
   return (
     <div
@@ -43,7 +47,10 @@ export function SessionVoiceOrb({
       aria-label={label}
       aria-hidden={label ? undefined : true}
     >
-      <canvas ref={canvasRef} className="absolute inset-0 size-full" />
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none absolute -inset-1/4 size-[150%]"
+      />
     </div>
   );
 }

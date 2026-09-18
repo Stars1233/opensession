@@ -10,7 +10,7 @@ afterEach(() => {
   for (const restore of restores.splice(0)) restore();
 });
 
-test("voice answers from thread context and can only request help or propose agent work", () => {
+test("voice answers from thread context and can request help or dispatch user-requested agent work", () => {
   const config = sessionVoiceConfig("Thread context");
   expect(config.model).toBe("gpt-realtime");
   expect(config.tools.map((tool) => tool.name)).toEqual(["request_voice_help"]);
@@ -74,7 +74,7 @@ test("voice route bounds and validates offers", async () => {
   }
 });
 
-test("SDP exchange uses the server key and approval-only policy, returns only the answer", async () => {
+test("SDP exchange uses the server key and direct-task policy, returns only the answer", async () => {
   const key = spyOn(voice, "requireVoiceApiKey").mockResolvedValue(
     "private-test-key",
   );
@@ -230,3 +230,14 @@ for (const [code, detail] of [
     );
   });
 }
+
+test("the voice tool describes prompt as the direct task, not a request to propose work", () => {
+  const description =
+    sessionVoiceConfig("").tools[0]!.parameters.properties.prompt.description;
+  expect(description).toContain("task message delivered verbatim");
+  expect(description).toContain("Do not add a delegation preamble");
+  expect(description).toContain("when the user requests work");
+  expect(sessionVoiceConfig("").tools[0]!.description).toContain(
+    "Explicit user requests need no additional approval",
+  );
+});

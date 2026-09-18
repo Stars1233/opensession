@@ -61,6 +61,7 @@ export function SessionVoiceHost({
             <SessionVoiceOrb
               levels={sessionVoice.levels}
               active={call.active && call.state !== "paused"}
+              connecting={call.state === "connecting"}
               className="size-16"
             />
             <div className="min-w-0 flex-1">

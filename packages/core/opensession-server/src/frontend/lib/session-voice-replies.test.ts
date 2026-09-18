@@ -66,7 +66,7 @@ test("rewrites of an already spoken reply are not narrated twice", () => {
   ).toBeNull();
 });
 
-test("an approved question waits for its own queued turn, not the previous run", () => {
+test("a requested task waits for its own queued turn, not the previous run", () => {
   const old = reply("old");
   const tracker = new SessionVoiceAgentReply("Check CI", [old]);
   const earlier = reply("earlier-run", "Previous job completed", 2);
@@ -83,7 +83,7 @@ test("an approved question waits for its own queued turn, not the previous run",
   expect(tracker.take([old, earlier, question, answer], false)).toBeNull();
 });
 
-test("an old identical prompt cannot satisfy a newly approved question", () => {
+test("an old identical prompt cannot satisfy a newly requested task", () => {
   const question = {
     ...reply("old-question", "Check CI", 1),
     type: "user" as const,
@@ -91,4 +91,52 @@ test("an old identical prompt cannot satisfy a newly approved question", () => {
   const old = reply("old-answer", "Old CI result", 2);
   const tracker = new SessionVoiceAgentReply("Check CI", [question, old]);
   expect(tracker.take([question, old], false)).toBeNull();
+});
+
+test("a batched later answer cannot replace the requested turn's answer", () => {
+  const tracker = new SessionVoiceAgentReply("First", []);
+  const entries = [
+    { ...reply("q1", "First", 1), type: "user" as const },
+    reply("a1", "First answer", 2),
+    { ...reply("q2", "Second", 3), type: "user" as const },
+    reply("a2", "Second answer", 4),
+  ];
+  expect(tracker.take(entries, false)).toBe("First answer");
+  expect(tracker.take(entries, false)).toBeNull();
+});
+
+test("a request with no answer never borrows a later turn's result", () => {
+  const tracker = new SessionVoiceAgentReply("First", []);
+  expect(
+    tracker.take(
+      [
+        { ...reply("q1", "First", 1), type: "user" as const },
+        { ...reply("q2", "Second", 2), type: "user" as const },
+        reply("a2", "Second answer", 3),
+      ],
+      false,
+    ),
+  ).toBeNull();
+});
+
+test("a running request retains its delivery anchor when a bounded transcript drops the user entry", () => {
+  const tracker = new SessionVoiceAgentReply("Task", []);
+  tracker.messageId = "delivery";
+  expect(
+    tracker.take(
+      [
+        {
+          ...reply("question", "Task", 1),
+          type: "user",
+          sourceMessageIds: ["delivery"],
+        },
+        reply("answer", "Partial", 2),
+      ],
+      true,
+    ),
+  ).toBeNull();
+  expect(tracker.take([reply("answer", "Finished", 502)], true)).toBeNull();
+  expect(tracker.take([reply("answer", "Finished", 502)], false)).toBe(
+    "Finished",
+  );
 });

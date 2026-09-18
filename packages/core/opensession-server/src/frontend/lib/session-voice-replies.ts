@@ -60,15 +60,21 @@ export class SessionVoiceReplies {
   }
 }
 
-/** Wait for the approved prompt to actually reach the agent, not a reply from
- * an older run that was already in flight when the user approved the queue. */
+/** Wait for the requested task to actually reach the agent, not a reply from
+ * an older run that was already in flight when the task entered the queue. */
 export class SessionVoiceAgentReply {
   private baseline: number;
   private existingUsers: Set<string>;
   private delivered = false;
+  messageId: string | undefined;
+  replyId: string | undefined;
+  private user: TranscriptEntry | undefined;
+  private answer: TranscriptEntry | undefined;
+  private end: TranscriptEntry | undefined;
   constructor(
-    private prompt: string,
+    readonly prompt: string,
     entries: TranscriptEntry[],
+    private claimedUsers = new Set<string>(),
   ) {
     this.baseline = entries.reduce(
       (max, entry) => Math.max(max, entry.seq ?? 0),
@@ -79,18 +85,61 @@ export class SessionVoiceAgentReply {
     );
   }
   take(entries: TranscriptEntry[], busy: boolean): string | null {
-    if (busy || this.delivered) return null;
-    const index = entries.findIndex(
+    if (this.delivered) return null;
+    if (!this.user) {
+      const user = entries.find(
+        (entry) =>
+          entry.type === "user" &&
+          !this.existingUsers.has(entry.id) &&
+          (entry.seq === undefined || entry.seq > this.baseline) &&
+          (this.messageId
+            ? entry.sourceMessageIds?.includes(this.messageId)
+            : !this.claimedUsers.has(entry.id) &&
+              entry.content.trim() === this.prompt.trim()),
+      );
+      if (!user) return null;
+      this.user = user;
+      this.claimedUsers.add(user.id);
+    }
+    const user = this.user;
+    const index = entries.findIndex((entry) => entry.id === user.id);
+    // Keep the anchor across bounded transcript windows. Once matched by its
+    // delivery id, it need not remain among the newest 500 entries.
+    const after =
+      index >= 0
+        ? entries.slice(index + 1)
+        : user.seq !== undefined
+          ? entries.filter(
+              (entry) => entry.seq !== undefined && entry.seq > user.seq!,
+            )
+          : [];
+    // Queue batches are split into adjacent user entries sharing the raw
+    // turn id (-j2, -j3). They share one answer, not separate turns.
+    const turnId = user.id.replace(/-j\d+$/, "");
+    this.end ??= after.find(
       (entry) =>
-        entry.type === "user" &&
-        !this.existingUsers.has(entry.id) &&
-        (entry.seq === undefined || entry.seq > this.baseline) &&
-        entry.content.trim() === this.prompt.trim(),
+        entry.turnBoundary ||
+        (entry.type === "user" && entry.id.replace(/-j\d+$/, "") !== turnId),
     );
-    if (index < 0) return null;
-    const reply = latestReply(entries.slice(index + 1));
-    if (!reply) return null;
+    const endIndex = this.end
+      ? after.findIndex((entry) => entry.id === this.end?.id)
+      : -1;
+    const segment =
+      endIndex >= 0
+        ? after.slice(0, endIndex)
+        : this.end
+          ? after.filter(
+              (entry) =>
+                entry.seq !== undefined &&
+                this.end?.seq !== undefined &&
+                entry.seq < this.end.seq,
+            )
+          : after;
+    this.answer = latestReply(segment) ?? this.answer;
+    if (busy || !this.answer) return null;
+    const reply = this.answer;
     this.delivered = true;
+    this.replyId = reply.id;
     return reply.content;
   }
 }

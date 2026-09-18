@@ -18,7 +18,7 @@ const offerSchema = z.object({
     .refine((sdp) => sdp.trim().length > 0),
 });
 // Exactly the tool-less reasoning tiers. `session_agent` is not a helper:
-// agent work only travels the approved, durable outbox path.
+// user-requested agent work only travels the durable outbox path.
 const helperSchema = z.object({
   model: z.enum(SESSION_VOICE_HELPER_TARGETS),
   prompt: z.string().trim().min(1).max(4000),
@@ -33,7 +33,7 @@ export async function handleSessionVoiceRoutes(
   // Paid voice/helper calls require a human web identity, never a claimed
   // name or machine credential. Helpers reason over the bounded transcript
   // only; this route cannot run tools, write a transcript, or queue agent
-  // work. The client gates the latter on fresh spoken confirmation.
+  // work. The client sends user-requested tasks through the normal outbox.
   if (!ctx.authUser?.login)
     return Response.json(
       { error: "Sign in to start a voice call." },
