@@ -62,7 +62,7 @@ test("helper targets are tool-less; explicit user tasks go directly to the sessi
     "ask one short clarification before dispatching",
   );
   expect(SESSION_VOICE_INSTRUCTIONS).toContain(
-    "Send additional requested tasks while earlier ones are queued or running",
+    "Send additional requested tasks while earlier ones are running",
   );
   expect(SESSION_VOICE_INSTRUCTIONS).toContain("conversation for the hardest");
 });
@@ -92,4 +92,23 @@ test("voice handoff requests direct work without delegation wrappers or changing
   expect(SESSION_VOICE_INSTRUCTIONS).toContain(
     "if they explicitly ask only for a plan, proposal, or explanation, that is the task",
   );
+});
+
+test("clear intent steers without repetition and natural farewells close voice only", () => {
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "without repeating, paraphrasing, or summarizing",
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain("normal steering path");
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "End the call with end_voice_call",
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain('"bye"');
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain('"doei"');
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "Mere thanks need not mean goodbye",
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "finish sending that task before closing",
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain("it does not cancel agent work");
 });

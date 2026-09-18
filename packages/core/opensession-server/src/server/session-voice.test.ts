@@ -13,7 +13,10 @@ afterEach(() => {
 test("voice answers from thread context and can request help or dispatch user-requested agent work", () => {
   const config = sessionVoiceConfig("Thread context");
   expect(config.model).toBe("gpt-realtime");
-  expect(config.tools.map((tool) => tool.name)).toEqual(["request_voice_help"]);
+  expect(config.tools.map((tool) => tool.name)).toEqual([
+    "request_voice_help",
+    "end_voice_call",
+  ]);
   expect(config.tools[0]!.parameters.properties.target.enum).toEqual([
     "luna",
     "terra",
@@ -240,4 +243,12 @@ test("the voice tool describes prompt as the direct task, not a request to propo
   expect(sessionVoiceConfig("").tools[0]!.description).toContain(
     "Explicit user requests need no additional approval",
   );
+});
+
+test("voice has a narrow call-ending tool that cannot cancel agent work", () => {
+  const tool = sessionVoiceConfig("").tools[1];
+  expect(tool.name).toBe("end_voice_call");
+  expect(tool.parameters.properties).toEqual({});
+  expect(tool.parameters.additionalProperties).toBe(false);
+  expect(tool.description).toContain("without cancelling agent work");
 });

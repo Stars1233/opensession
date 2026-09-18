@@ -8,6 +8,7 @@ import {
   ORB_GATE,
   chooseOrbPalette,
   followOrbTint,
+  orbEnergy,
   orbGeometry,
   orbLevelDrive,
   ORB_FRAGMENT_SHADER,
@@ -147,28 +148,39 @@ describe("drawSessionVoiceOrbFallback", () => {
     ).toBe(true);
   });
 
-  test("the speaker grows the accent core and leaves the rim alone", () => {
+  test("either voice swells the body, halo, core and rim by the same amount", () => {
     const quiet = recordingContext();
     drawSessionVoiceOrbFallback(quiet.ctx, frame({}));
-    const loud = recordingContext();
-    drawSessionVoiceOrbFallback(loud.ctx, frame({ output: 1 }));
-    expect(loud.gradients[2].radius).toBeGreaterThan(quiet.gradients[2].radius);
-    expect(loud.gradients[2].stops[0]).toStartWith("rgba(2, 2, 2");
-    expect(loud.strokes[0].alpha).toBeCloseTo(quiet.strokes[0].alpha, 9);
+    const mic = recordingContext();
+    drawSessionVoiceOrbFallback(mic.ctx, frame({ input: 0.7, tint: 1 }));
+    const ai = recordingContext();
+    drawSessionVoiceOrbFallback(ai.ctx, frame({ output: 0.7, tint: 0 }));
+    // Same geometry: the halo starts at, and the body fills, the same radius.
+    expect(mic.gradients[0].radius).toBe(ai.gradients[0].radius);
+    expect(mic.gradients[1].radius).toBe(ai.gradients[1].radius);
+    expect(mic.gradients[1].radius).toBeGreaterThan(quiet.gradients[1].radius);
+    // Each direction paints in its own ink at the same alpha budget.
+    expect(mic.gradients[0].stops[0]).toStartWith("rgba(1, 1, 1");
+    expect(ai.gradients[0].stops[0]).toStartWith("rgba(2, 2, 2");
+    expect(mic.gradients[2].stops[0]).toStartWith("rgba(1, 1, 1");
+    expect(ai.gradients[2].stops[0]).toStartWith("rgba(2, 2, 2");
+    expect(mic.strokes[0].style).toBe("rgba(1, 1, 1, 1)");
+    expect(ai.strokes[0].style).toBe("rgba(2, 2, 2, 1)");
+    expect(mic.ctx.lineWidth).toBe(ai.ctx.lineWidth);
+    expect(mic.ctx.lineWidth).toBeGreaterThan(quiet.ctx.lineWidth);
+    expect(mic.strokes[0].alpha).toBeGreaterThan(quiet.strokes[0].alpha);
   });
 
-  test("the microphone firms the ink rim and leaves the core alone", () => {
-    const quiet = recordingContext();
-    drawSessionVoiceOrbFallback(quiet.ctx, frame({}));
-    const loud = recordingContext();
-    drawSessionVoiceOrbFallback(loud.ctx, frame({ input: 1 }));
-    expect(loud.strokes[0].style).toBe(palette.input.css);
-    expect(loud.strokes[0].alpha).toBeGreaterThan(quiet.strokes[0].alpha);
-    expect(loud.ctx.lineWidth).toBeGreaterThan(quiet.ctx.lineWidth);
-    // The whole orb swells with the mic; the core keeps its share of it.
-    const share = (run: typeof quiet) =>
-      run.gradients[2].radius / run.gradients[1].radius;
-    expect(share(loud)).toBeCloseTo(share(quiet), 9);
+  test("the speaker lifts the core a little further, the microphone the rim", () => {
+    const mic = recordingContext();
+    drawSessionVoiceOrbFallback(mic.ctx, frame({ input: 0.7 }));
+    const ai = recordingContext();
+    drawSessionVoiceOrbFallback(ai.ctx, frame({ output: 0.7 }));
+    expect(ai.gradients[2].radius).toBeGreaterThan(mic.gradients[2].radius);
+    expect(mic.strokes[0].alpha).toBeGreaterThan(ai.strokes[0].alpha);
+    // A modest lift, not a different orb: within a third of each other.
+    expect(ai.gradients[2].radius / mic.gradients[2].radius).toBeLessThan(1.34);
+    expect(mic.strokes[0].alpha / ai.strokes[0].alpha).toBeLessThan(1.34);
   });
 
   test("resets alpha and skips painting an unmeasured canvas", () => {
@@ -210,6 +222,8 @@ describe("createOrbRenderer", () => {
   });
 });
 
+const calmReach = orbGeometry(0, 0, 1).reach;
+
 describe("voice drive and bounds", () => {
   test("ignores room tone but lifts quiet speech", () => {
     for (const level of [0, 0.01, ORB_GATE, -1, Number.NaN])
@@ -218,13 +232,41 @@ describe("voice drive and bounds", () => {
     expect(orbLevelDrive(1)).toBe(1);
     const calm = orbGeometry(0, 0, 1);
     expect(orbGeometry(ORB_GATE, ORB_GATE, 1)).toEqual(calm);
+    expect(calm.pulse).toBe(0);
+    expect(calm.deform).toBeLessThan(calm.body * 0.05);
     const mic = orbGeometry(0.5, 0, 1);
-    const ai = orbGeometry(0, 0.5, 1);
-    expect(mic.deform).toBeGreaterThan(calm.deform * 10);
-    expect(mic.deform).toBeGreaterThan(ai.deform * 5);
-    expect(mic.pulse).toBeGreaterThan(0.03);
-    expect(ai.pulse).toBe(0);
+    expect(mic.deform).toBeGreaterThan(calm.deform * 5);
+    expect(mic.body).toBeGreaterThan(calm.body);
+    expect(mic.pulse).toBeGreaterThan(0.01);
+    // Moderate: lobes stay a fraction of the sphere, even at a shout.
+    const shout = orbGeometry(1, 1, 1);
+    expect(shout.deform).toBeLessThan(shout.body * 0.3);
     expect(orbGeometry(1, 1, 0)).toEqual(orbGeometry(0, 0, 0));
+  });
+
+  test("equal energy in either direction moves the orb identically", () => {
+    for (const level of [0.1, 0.25, 0.5, 0.8, 1]) {
+      for (const active of [0.3, 1]) {
+        const mic = orbGeometry(level, 0, active);
+        const ai = orbGeometry(0, level, active);
+        expect(mic).toEqual(ai);
+        expect(orbGeometry(level, 0, active, 0.4)).toEqual(
+          orbGeometry(0, level, active, 0.4),
+        );
+      }
+    }
+    // Both at once grows the orb only a little past the louder one.
+    const one = orbGeometry(0.6, 0, 1);
+    const both = orbGeometry(0.6, 0.6, 1);
+    expect(both.reach).toBeGreaterThan(one.reach);
+    expect(both.reach - one.reach).toBeLessThan(one.reach - calmReach);
+    expect(orbEnergy(0.7, 0)).toBe(0.7);
+    expect(orbEnergy(0, 0.7)).toBe(0.7);
+    expect(orbEnergy(1, 1)).toBe(1);
+    expect(orbEnergy(0.5, 0.5)).toBe(0.75);
+    expect(ORB_FRAGMENT_SHADER).toContain(
+      "float lvl = u_in + u_out - u_in * u_out;",
+    );
   });
 
   test("even simultaneous full scale voices leave a transparent padded edge", () => {
@@ -257,6 +299,13 @@ describe("voice drive and bounds", () => {
     expect(followOrbTint(0, 1, 0, 16)).toBeCloseTo(
       followOrbTint(followOrbTint(0, 1, 0, 8), 1, 0, 8),
     );
+    // The tint carries the speaker's ink; the shape never depends on it.
+    for (const tint of [0, 0.5, 1]) {
+      const { ctx, gradients } = recordingContext();
+      drawSessionVoiceOrbFallback(ctx, frame({ input: 0.6, tint }));
+      const g = orbGeometry(0.6, 0, 1);
+      expect(gradients[1].radius).toBe((g.body + g.pulse) * 24);
+    }
   });
 
   test("mono and matching accents use semantic link ink to distinguish the agent", () => {

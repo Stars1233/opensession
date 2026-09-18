@@ -176,10 +176,11 @@ or panel does not end it: a floating call panel shows a circular waveform driven
 by the real microphone and speaker levels, with **Return to thread** and
 **End call** controls. The companion keeps discussing the original thread, not
 whatever is on screen. The audio-reactive orb uses a theme-aware shader with a
-lightweight fallback and respects reduced motion. Microphone activity produces
-stronger purple deformation; AI speech lights the core in the accent color (or
-blue when the accent would blend with the user's hue). Its padded, transparent
-canvas keeps the glow and peaks round without square clipping.
+lightweight fallback and respects reduced motion. User and AI speech use the
+same balanced swelling and surface motion: purple for the microphone, and the
+accent color (or blue when needed for contrast) for AI playback. Its padded,
+transparent canvas keeps the glow round without square clipping. During setup,
+a neutral connecting pulse appears before audio is available.
 
 **Pause** mutes the microphone and spoken replies without ending the call.
 **Resume** continues the same voice conversation. No new requests are accepted
@@ -206,9 +207,13 @@ agent. An explicit request goes straight to the agent, without an extra approval
 question. The message contains only the task details and constraints, not a
 "Please propose a task for the agent" preamble. Ambiguous intent gets a short
 clarification; ordinary discussion and unsolicited suggestions do not start work.
-You can send more tasks while earlier ones are running; they use the normal
-durable queue, and their results return to the voice discussion. Tasks may take
-a few minutes. Unsent composer text, quotes, and attachments stay untouched.
+You can send more tasks while earlier ones are running. Each uses the normal
+durable steering path, reaching an active agent at its next supported boundary
+rather than waiting for the previous task to finish. Idle agents start normally;
+normal delivery recovery still applies when steering is unavailable. The
+companion acknowledges briefly without restating your request, and reports
+results when they arrive. Unsent composer text, quotes, and attachments stay
+untouched.
 
 Calls use the same instance-wide OpenAI API key configured in
 **Settings → Preferences → Desk voice**. You do not need to enable Desk's voice
@@ -217,7 +222,7 @@ required. OpenAI API usage for the realtime call and the Luna/Terra helpers is
 billed separately from the session agent; the `conversation` helper uses the
 session model's own provider account like any tool-less one-shot.
 
-`gpt-realtime` handles the transcript discussion itself. Its only tool,
+`gpt-realtime` handles the transcript discussion itself. Its work tool,
 `request_voice_help`, names a target: `luna`, `terra`, `conversation`, or
 `session_agent`. There is no direct tool execution or transcript writer, and it
 cannot change the session model, permissions, or MCP inventory. The server
@@ -238,7 +243,11 @@ Turn detection uses semantic VAD at high eagerness, so a reply starts soon
 after you stop speaking; speaking over a reply interrupts it. Desk voice keeps
 its own longer-waiting setting.
 
-Press the handset or the floating panel's **End call** to end the call. Speaking
+Press the handset or the floating panel's **End call** to end the call. A clear
+spoken farewell, such as "bye" or "doei", also closes it automatically through
+`end_voice_call`, without another confirmation. Quoted farewells, questions
+about the word "bye", and "don't hang up" are not closing requests. Closing
+releases audio, not the agent's work. Speaking
 over a reply stops narration, not the agent's work. Hiding the browser tab,
 closing the page, losing the voice connection, or starting another call also
 releases the microphone. Calls end after three idle minutes (not while paused

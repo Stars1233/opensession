@@ -5,6 +5,7 @@ import {
 import {
   SessionVoiceReplies,
   SessionVoiceAgentReply,
+  sessionVoiceRequests,
 } from "./session-voice-replies";
 import { sessionVoiceContext } from "../../shared/session-voice";
 import { promptOutbox, type PromptOutboxInput } from "./prompt-outbox";
@@ -66,7 +67,7 @@ export class SessionVoiceRuntime {
   private user = "";
   private updates: SessionVoiceReplies | null = null;
   private agentReplies: SessionVoiceAgentReply[] = [];
-  private claimedUsers = new Set<string>();
+  private requests = sessionVoiceRequests();
   private narratedReplies = new Set<string>();
   constructor(private deps: VoiceDependencies = defaults) {}
 
@@ -117,7 +118,7 @@ export class SessionVoiceRuntime {
     this.user = this.deps.currentUser();
     this.updates = new SessionVoiceReplies(source.entries);
     this.agentReplies = [];
-    this.claimedUsers.clear();
+    this.requests = sessionVoiceRequests();
     this.narratedReplies.clear();
     const client = this.deps.createClient({
       sessionId: source.sessionId,
@@ -134,21 +135,25 @@ export class SessionVoiceRuntime {
         const reply = new SessionVoiceAgentReply(
           prompt,
           this.entries,
-          this.claimedUsers,
+          this.requests,
         );
-        const alreadyPending = this.agentReplies.length > 0;
         this.agentReplies.push(reply);
         try {
           // No routed composer closure: this still addresses the original
           // thread when its view has unmounted. The ordinary durable outbox
-          // keeps auth, queueing, permission checks and retry semantics.
+          // keeps auth, permission checks and retry semantics. Every task
+          // steers: an idle agent starts a turn with it, a busy one folds it
+          // into the running turn instead of holding it until that run ends.
           const messageId = this.deps.enqueue({
             sessionId: source.sessionId,
             content: prompt,
             user: this.user,
-            busyMode: this.busy || alreadyPending ? "queue" : undefined,
+            busyMode: "steer",
           });
-          if (messageId) reply.messageId = messageId;
+          if (messageId) {
+            reply.messageId = messageId;
+            this.requests.deliveryIds.add(messageId);
+          }
           return true;
         } catch {
           this.agentReplies = this.agentReplies.filter(
@@ -183,7 +188,7 @@ export class SessionVoiceRuntime {
     this.client = null;
     client?.stop();
     this.agentReplies = [];
-    this.claimedUsers.clear();
+    this.requests = sessionVoiceRequests();
     this.narratedReplies.clear();
     this.publish({ active: false, state: "idle", error: null });
   };
@@ -195,6 +200,9 @@ export class SessionVoiceRuntime {
     if (this.updates?.take(this.entries, this.busy))
       this.client.updateContext(sessionVoiceContext(this.entries));
     const completed = new Map<string, { reply: string; prompts: string[] }>();
+    // Anchor every request first so an earlier one sees a later sibling's
+    // entry as part of the same run rather than as the end of its turn.
+    for (const pending of this.agentReplies) pending.anchor(this.entries);
     this.agentReplies = this.agentReplies.filter((pending) => {
       const reply = pending.take(this.entries, this.busy);
       if (reply === null || !pending.replyId) return true;

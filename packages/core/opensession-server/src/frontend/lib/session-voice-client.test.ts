@@ -498,3 +498,80 @@ test("multiple tasks remain outstanding through pause and narrate each result on
     ),
   ).toBe(false);
 });
+
+test("the farewell tool releases the call once without cancelling submitted tasks", async () => {
+  const h = setup();
+  await h.client.start();
+  propose(h);
+  await tick();
+  const end = {
+    type: "response.function_call_arguments.done",
+    name: "end_voice_call",
+    call_id: "end",
+    arguments: "{}",
+  };
+  h.emit(end);
+  h.emit(end);
+  expect(h.stats().closed).toBe(1);
+  expect(h.stats().stopped).toBe(1);
+  expect(h.states.at(-1)?.[0]).toBe("idle");
+  expect(h.prompts).toHaveLength(1);
+  const sent = h.sent.length;
+  h.client.agentReply("Finished after hanging up");
+  expect(h.sent).toHaveLength(sent);
+});
+
+test.each(["not-json", '{"task":"cancel agent work"}'])(
+  "malformed farewell arguments keep the call open: %s",
+  async (argumentsText) => {
+    const h = setup();
+    await h.client.start();
+    h.emit({
+      type: "response.function_call_arguments.done",
+      name: "end_voice_call",
+      call_id: "end",
+      arguments: argumentsText,
+    });
+    expect(h.stats().closed).toBe(0);
+    expect(h.prompts).toEqual([]);
+  },
+);
+
+test("paused calls ignore farewell tools and raw quoted bye text is not a local hangup trigger", async () => {
+  const h = setup();
+  await h.client.start();
+  speak(h, "What does the word bye mean?");
+  expect(h.stats().closed).toBe(0);
+  h.client.setPaused(true);
+  h.emit({
+    type: "response.function_call_arguments.done",
+    name: "end_voice_call",
+    call_id: "end",
+    arguments: "{}",
+  });
+  expect(h.stats().closed).toBe(0);
+  h.client.setPaused(false);
+  h.emit({
+    type: "response.function_call_arguments.done",
+    name: "end_voice_call",
+    call_id: "end",
+    arguments: "{}",
+  });
+  expect(h.stats().closed).toBe(0);
+});
+
+test("successful task handoffs ask for a short acknowledgement, never a repeated task summary", async () => {
+  const h = setup();
+  await h.client.start();
+  propose(h);
+  await tick();
+  expect(
+    h.sent.some((event) =>
+      event.item?.content?.some(
+        (content) =>
+          content.text.includes('Acknowledge once with at most "On it."') &&
+          content.text.includes("Do not restate or summarize"),
+      ),
+    ),
+  ).toBe(true);
+});
