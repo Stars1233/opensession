@@ -127,6 +127,135 @@ describe("normalizeReviewRules", () => {
   });
 });
 
+describe("independent rule results", () => {
+  const policy: ReviewRule = {
+    name: "Marketing policy",
+    when: { allFilesMatch: ["apps/marketing/**", "content/**"] },
+    then: {
+      result: { verdict: "approve" },
+      note: "Marketing-only change",
+    },
+  };
+
+  it("normalizes standalone verdicts and scores without adding overrides", () => {
+    const { rules, rejected } = normalizeReviewRules([
+      policy,
+      {
+        name: "Score",
+        when: { maxFiles: 5 },
+        then: { result: { score: 9, verdict: "COMMENT" } },
+      },
+    ]);
+    expect(rejected).toEqual([]);
+    expect(rules).toEqual([
+      policy,
+      {
+        name: "Score",
+        when: { maxFiles: 5 },
+        then: { result: { score: 5, verdict: "comment" } },
+      },
+    ]);
+  });
+
+  it("rejects malformed result-only rules", () => {
+    for (const result of [
+      null,
+      "approve",
+      {},
+      { verdict: "yes" },
+      { score: "5" },
+      { score: NaN },
+    ]) {
+      expect(
+        normalizeReviewRules([
+          { name: "Invalid", when: { maxFiles: 5 }, then: { result } },
+        ]),
+      ).toEqual({ rules: [], rejected: ["Invalid"] });
+    }
+  });
+
+  it("preserves a request-changes model result even when the policy approves", () => {
+    const context = ctx({
+      verdict: "request_changes",
+      confidence: 1,
+      risk: "high",
+    });
+    const before = structuredClone(context);
+    const evaluation = applyReviewRules([policy], context);
+    expect(evaluation.original).toEqual({
+      verdict: "request_changes",
+      confidence: 1,
+      risk: "high",
+    });
+    expect(evaluation.final).toEqual(evaluation.original);
+    expect(evaluation.changed).toBe(false);
+    expect(context).toEqual(before);
+    expect(evaluation.applied).toEqual([
+      {
+        name: "Marketing policy",
+        changes: [],
+        result: { verdict: "approve" },
+        note: "Marketing-only change",
+      },
+    ]);
+    expect(ruleScoreSuffixes(evaluation)).toEqual({
+      verdict: "",
+      confidence: "",
+      risk: "",
+    });
+    expect(preflightSkipRule([policy], context)).toBeNull();
+    expect(reviewRulesSection(evaluation)).toBe(
+      "\n\n📏 **Custom rule results**\nIndependent policy results; not the AI verdict or merge approval.\n- **Marketing policy**: approved · Marketing-only change",
+    );
+  });
+
+  it("keeps multiple matching results separate and renders score-only results", () => {
+    const scoreOnly: ReviewRule = {
+      name: "Small change",
+      when: { maxFiles: 5 },
+      then: { result: { score: 4 } },
+    };
+    const dissent: ReviewRule = {
+      name: "Needs attention",
+      when: { minFiles: 1 },
+      then: { result: { verdict: "request_changes", score: 2 } },
+    };
+    const evaluation = applyReviewRules([policy, scoreOnly, dissent], ctx());
+    expect(evaluation.final).toEqual(evaluation.original);
+    expect(evaluation.changed).toBe(false);
+    expect(evaluation.applied.map((r) => [r.name, r.result])).toEqual([
+      ["Marketing policy", { verdict: "approve" }],
+      ["Small change", { score: 4 }],
+      ["Needs attention", { verdict: "request_changes", score: 2 }],
+    ]);
+    expect(reviewRulesSection(evaluation)).toContain("- **Small change**: 4/5");
+    expect(reviewRulesSection(evaluation)).toContain(
+      "- **Needs attention**: changes requested · 2/5",
+    );
+  });
+
+  it("does not report approval for mixed or empty diffs", () => {
+    for (const files of [[], ["apps/marketing/page.tsx", "src/server.ts"]]) {
+      const evaluation = applyReviewRules([policy], ctx({ files }));
+      expect(evaluation.applied).toEqual([]);
+      expect(reviewRulesSection(evaluation)).toBe("");
+    }
+  });
+
+  it("keeps explicit score overrides backward compatible alongside independent results", () => {
+    const evaluation = applyReviewRules([policy, marketing], ctx());
+    expect(evaluation.final).toEqual({
+      verdict: "approve",
+      confidence: 5,
+      risk: "low",
+    });
+    expect(evaluation.applied[0].result).toEqual({ verdict: "approve" });
+    expect(reviewRulesSection(evaluation)).toContain("**Custom rule results**");
+    expect(reviewRulesSection(evaluation)).toContain("**Rules applied**");
+    expect(ruleScoreSuffixes(evaluation).confidence).toBe(" (model 3/5)");
+  });
+});
+
 describe("ruleMatches", () => {
   it("allFilesMatch needs every file to match and at least one file", () => {
     expect(ruleMatches(marketing, ctx())).toBe(true);

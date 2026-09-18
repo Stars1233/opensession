@@ -371,9 +371,7 @@ knobs are versioned with the code they score. Every field is optional:
       "name": "marketing-only",
       "when": { "allFilesMatch": ["apps/marketing/**", "**/*.mdx"] },
       "then": {
-        "confidence": 5,
-        "verdict": "approve",
-        "risk": "low",
+        "result": { "verdict": "approve", "score": 5 },
         "note": "Marketing-only change",
       },
     },
@@ -391,9 +389,23 @@ knobs are versioned with the code they score. Every field is optional:
 }
 ```
 
-`rules` is the deterministic layer on top of the model's verdict. Each rule
-has a `name`, a `when` clause whose conditions are all required, and a `then`
-clause with the outcomes:
+`rules` is the deterministic layer alongside the model's verdict. Each rule
+has a unique `name`, a `when` clause whose conditions are all required, and a
+`then` clause with the outcomes. Up to 50 rules are supported.
+
+Use `then.result` for an **independent custom result**: an optional `verdict`
+(`approve`, `comment`, `request_changes`) and/or a `score` (1-5). Matching rules
+appear by name in a separate "Custom rule results" section, for example
+`marketing-only: approved · 5/5`. Multiple results coexist; they do not
+replace one another or change the AI's quality, risk, verdict, findings, or
+merge/fix-round gates. A custom approval is a policy result, not a GitHub
+approval or permission to merge. Nonmatching rules show no result.
+
+The existing top-level `then.confidence`, `then.verdict`, and `then.risk`
+outcomes still explicitly override the shared model scores. Omit them when
+only an independent result is wanted.
+
+Available conditions and outcomes:
 
 - `when`: `allFilesMatch`, `anyFileMatches`, `noFileMatches` (globs over the
   changed paths), `minChangedLines` / `maxChangedLines`, `minFiles` /
@@ -401,7 +413,8 @@ clause with the outcomes:
   and the model's result: `verdict` (`approve`, `comment`,
   `request_changes`), `minConfidence` / `maxConfidence` (1-5), `risk`
   (`low`, `medium`, `high`). A rule needs at least one condition.
-- `then`: `confidence` sets the 1-5 quality score, `confidenceDelta` adjusts
+- `then`: `result` publishes an independent verdict and/or score;
+  `confidence` sets the 1-5 quality score, `confidenceDelta` adjusts
   it, `minConfidence` floors it, `maxConfidence` caps it; `verdict` replaces
   the verdict; `risk` sets the merge-risk level, `minRisk` raises it,
   `maxRisk` lowers it; `note` is shown on the PR; `skipReview: true` stops

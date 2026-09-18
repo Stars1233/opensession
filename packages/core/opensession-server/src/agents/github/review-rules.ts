@@ -8,7 +8,7 @@
  *       {
  *         "name": "marketing-only",
  *         "when": { "allFilesMatch": ["apps/marketing/**", "**\/*.mdx"] },
- *         "then": { "confidence": 5, "verdict": "approve", "risk": "low",
+ *         "then": { "result": { "verdict": "approve", "score": 5 },
  *                   "note": "Marketing-only change" }
  *       },
  *       {
@@ -35,6 +35,8 @@
  * `confidence` sets, `confidenceDelta` adjusts, `minConfidence` floors,
  * `maxConfidence` caps (all clamped to 1-5); `risk` sets, `minRisk` raises,
  * `maxRisk` lowers; `verdict` replaces; `note` is shown on the PR;
+ * `result` publishes an independent named verdict and/or 1-5 score without
+ * changing model scores, findings, or merge gates;
  * `skipReview` stops the automatic review before it starts (label-forced and
  * manual reviews still run).
  *
@@ -77,7 +79,14 @@ export interface ReviewRuleWhen {
   risk?: RuleRisk[];
 }
 
+/** A named policy result, independent of the model's scores and merge gates. */
+export interface ReviewRuleResult {
+  verdict?: RuleVerdict;
+  score?: number;
+}
+
 export interface ReviewRuleThen {
+  result?: ReviewRuleResult;
   confidence?: number;
   confidenceDelta?: number;
   minConfidence?: number;
@@ -116,7 +125,8 @@ export interface ReviewScores {
 
 export interface AppliedRule {
   name: string;
-  /** Human-readable score changes, e.g. "quality 3 → 5". Empty when the rule only added a note. */
+  result?: ReviewRuleResult;
+  /** Human-readable model score changes; empty for independent results or notes. */
   changes: string[];
   note?: string;
 }
@@ -220,6 +230,18 @@ function normalizeWhen(raw: unknown): ReviewRuleWhen | null {
   return Object.keys(when).length ? when : null;
 }
 
+function normalizeResult(raw: unknown): ReviewRuleResult | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const verdict = enumValue(r.verdict, RULE_VERDICTS);
+  const value = score(r.score);
+  if (verdict === undefined && value === undefined) return undefined;
+  return {
+    ...(verdict ? { verdict } : {}),
+    ...(value !== undefined ? { score: value } : {}),
+  };
+}
+
 function normalizeThen(raw: unknown): ReviewRuleThen | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -230,6 +252,7 @@ function normalizeThen(raw: unknown): ReviewRuleThen | null {
   ) => {
     if (value !== undefined) then[key] = value;
   };
+  set("result", normalizeResult(r.result));
   set("confidence", score(r.confidence));
   set("confidenceDelta", delta(r.confidenceDelta));
   set("minConfidence", score(r.minConfidence));
@@ -405,10 +428,11 @@ export function applyReviewRules(
       );
     if (before.risk !== final.risk)
       changes.push(`risk ${before.risk ?? "none"} → ${final.risk}`);
-    if (!changes.length && !t.note) continue;
+    if (!changes.length && !t.note && !t.result) continue;
     applied.push({
       name: rule.name,
       changes,
+      ...(t.result ? { result: { ...t.result } } : {}),
       ...(t.note ? { note: t.note } : {}),
     });
   }
@@ -452,11 +476,46 @@ export function reviewRulesSection(
   evaluation: ReviewRuleEvaluation | null,
 ): string {
   if (!evaluation?.applied.length) return "";
-  const lines = evaluation.applied.map((r) => {
-    const what = [r.changes.join(", "), r.note].filter(Boolean).join(". ");
-    return `- **${r.name}**${what ? `: ${what}` : ""}`;
-  });
-  return [`\n\n📏 **Rules applied**`, ...lines].join("\n");
+  const results = evaluation.applied.filter((r) => r.result);
+  const adjustments = evaluation.applied.filter(
+    (r) => r.changes.length || !r.result,
+  );
+  const sections: string[] = [];
+  if (results.length) {
+    const labels: Record<RuleVerdict, string> = {
+      approve: "approved",
+      comment: "comment",
+      request_changes: "changes requested",
+    };
+    const lines = results.map((r) => {
+      const result = r.result!;
+      const what = [
+        result.verdict ? labels[result.verdict] : undefined,
+        result.score !== undefined ? `${result.score}/5` : undefined,
+        r.note,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `- **${r.name}**: ${what}`;
+    });
+    sections.push(
+      [
+        "\n\n📏 **Custom rule results**",
+        "Independent policy results; not the AI verdict or merge approval.",
+        ...lines,
+      ].join("\n"),
+    );
+  }
+  if (adjustments.length) {
+    const lines = adjustments.map((r) => {
+      const what = [r.changes.join(", "), r.result ? undefined : r.note]
+        .filter(Boolean)
+        .join(". ");
+      return `- **${r.name}**${what ? `: ${what}` : ""}`;
+    });
+    sections.push(["\n\n📏 **Rules applied**", ...lines].join("\n"));
+  }
+  return sections.join("");
 }
 
 /** Header suffixes: final score with the model's original in parentheses when a rule changed it. */

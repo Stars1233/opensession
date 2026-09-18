@@ -861,8 +861,8 @@ export async function runReview(
       return null;
     }
 
-    // Repo-owned review rules (.os-review.json `rules`): deterministic score
-    // and verdict overrides on top of the model's result. Findings are left
+    // Repo-owned review rules (.os-review.json `rules`): independent policy
+    // results or explicit overrides on top of the model's result. Findings are left
     // alone, so a P0 the model found still blocks the fix-round gates, and the
     // secret-scan cap below still wins over any rule.
     let ruleEval: ReviewRuleEvaluation | null = null;
@@ -878,7 +878,7 @@ export async function runReview(
         parsed.confidence = ruleEval.final.confidence;
         const names = ruleEval.applied.map((r) => r.name);
         console.log(
-          `[github] PR #${pr.number} review rules applied: ${names.join(", ")} (${ruleEval.applied.flatMap((r) => r.changes).join("; ") || "notes only"})`,
+          `[github] PR #${pr.number} review rules applied: ${names.join(", ")} (${ruleEval.applied.flatMap((r) => r.changes).join("; ") || "independent results or notes only"})`,
         );
         audit({
           msg: "review_rules_applied",
@@ -887,6 +887,9 @@ export async function runReview(
           head_sha: pr.headSha,
           rules: names,
           changes: ruleEval.applied.flatMap((r) => r.changes),
+          results: ruleEval.applied
+            .filter((r) => r.result)
+            .map((r) => ({ name: r.name, ...r.result })),
           original: ruleEval.original,
           final: ruleEval.final,
         });
