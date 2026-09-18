@@ -1830,7 +1830,6 @@ export function SessionViewer({
               setTyping,
               setForkFrom,
               handleSend,
-              sendVoice: (text) => handleSend(text, undefined, []),
               setImages,
               setFiles,
               addSessionAttachments,

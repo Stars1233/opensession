@@ -1,26 +1,33 @@
 import { Button } from "../ui/button";
+import { SessionVoiceOrb } from "./SessionVoiceOrb";
+import { SessionVoicePauseButton } from "./SessionVoicePauseButton";
+import type { SessionVoiceLevels } from "../lib/session-voice-audio";
 import {
   SESSION_VOICE_STATUS,
   type SessionVoiceState,
 } from "../lib/session-voice-client";
-import type { SessionVoiceAgentRequest } from "../../shared/session-voice";
 
 export function SessionVoiceStatus({
   state,
+  levels,
   error,
-  proposal,
-  onResolve,
+  onTogglePause,
   onDismiss,
 }: {
   state: SessionVoiceState;
+  levels: SessionVoiceLevels;
   error: string | null;
-  proposal: SessionVoiceAgentRequest | null;
-  onResolve: (approve: boolean) => Promise<void>;
+  onTogglePause: () => void;
   onDismiss: () => void;
 }) {
   return (
-    <div className="rounded-t-lg bg-panel px-4 py-3 text-meta text-dim">
+    <div className="px-3 py-2 text-meta text-dim">
       <div className="flex items-center gap-3">
+        <SessionVoiceOrb
+          levels={levels}
+          active={state !== "idle" && state !== "error" && state !== "paused"}
+          className="size-12"
+        />
         <div className="min-w-0 flex-1" role={error ? "alert" : "status"}>
           {error ? (
             <p>{error}</p>
@@ -30,11 +37,18 @@ export function SessionVoiceStatus({
                 {SESSION_VOICE_STATUS[state]}
               </p>
               <p>
-                Voice stays out of the thread. Agent requests need approval.
+                {state === "paused"
+                  ? "Microphone and replies muted"
+                  : state === "confirming"
+                    ? "Say yes please or no thanks"
+                    : "Voice conversation about this thread"}
               </p>
             </>
           )}
         </div>
+        {!error && state !== "idle" && (
+          <SessionVoicePauseButton state={state} onToggle={onTogglePause} />
+        )}
         {error && (
           <Button
             size="sm"
@@ -46,37 +60,6 @@ export function SessionVoiceStatus({
           </Button>
         )}
       </div>
-      {proposal && (
-        <div
-          className="mt-3 space-y-2"
-          role="group"
-          aria-label="Approve agent request"
-        >
-          <p className="font-medium text-fg">Ask the session agent?</p>
-          <p>{proposal.reason} This may take a few minutes.</p>
-          <p className="max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-surface p-3 text-fg">
-            {proposal.prompt}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="primary"
-              className="phone:min-h-11"
-              onClick={() => void onResolve(true)}
-            >
-              Ask agent
-            </Button>
-            <Button
-              size="sm"
-              variant="soft"
-              className="phone:min-h-11"
-              onClick={() => void onResolve(false)}
-            >
-              Not now
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

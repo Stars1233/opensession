@@ -18,6 +18,7 @@ import { ChipHoverCards } from "./components/ChipHoverCard";
 import { CommandMenuHost } from "./components/CommandMenuHost";
 import { DeferredSettings as Settings } from "./components/DeferredSettings";
 import { DeskOverlay } from "./components/DeskOverlay";
+import { SessionVoiceHost } from "./components/SessionVoiceHost";
 import { DesktopLinkToast } from "./components/DesktopLinkToast";
 import { Feed } from "./components/Feed";
 import { refWebPanel } from "./components/FeedWebPane";
@@ -1922,6 +1923,10 @@ export function AppContent({
                 </button>
               </Tooltip>
             )}
+
+            <SessionVoiceHost
+              onOpenSession={(id) => navigate({ view: "session", id })}
+            />
 
             {/* ⌘J Desk overlay — standing concierge session. */}
             <DeskOverlay

@@ -170,34 +170,77 @@ voice conversation stays separate: spoken questions and answers are not posted
 to the thread and do not run the coding agent. It remembers the voice discussion
 for this call. Starting a new call starts a fresh discussion.
 
-If an answer needs new investigation or work, the voice companion proposes a
-request and warns that the session agent may take a few minutes. Review the
-exact prompt, then choose **Ask agent** or **Not now** in the approval card.
-Only the Ask agent button sends that prompt through the normal durable queue.
-A spoken confirmation alone does not authorize a send. You can keep discussing
-the transcript while it works; the result comes back into the voice discussion.
-Unsent composer text, quotes, and attachments stay untouched.
+The call stays pinned to the thread it started in. Switching to another session
+or panel does not end it: a floating call panel shows a circular waveform driven
+by the real microphone and speaker levels, with **Return to thread** and
+**End call** controls. The companion keeps discussing the original thread, not
+whatever is on screen. The audio-reactive orb uses a theme-aware shader with a
+lightweight fallback and respects reduced motion.
+
+**Pause** mutes the microphone and spoken replies without ending the call.
+**Resume** continues the same voice conversation. Pending, unapproved agent
+requests are cancelled by a pause; work already started continues. Paused calls
+skip the three-minute idle cutoff but still have the thirty-minute maximum.
+
+**Reasoning helpers.** When a question needs more thinking than the realtime
+model can do well while speaking, the companion consults a helper on its own,
+choosing the tier by difficulty; it does not ask permission for this. `luna`
+(`gpt-5.6-luna`) handles quick transcript reasoning, `terra` (`gpt-5.6-terra`)
+deeper analysis, and `conversation` runs the hardest questions on the thread's
+own effective main model: the session's stored model, or the instance
+interactive default when none is set, with a preset's pinned effort applied
+exactly as a normal agent turn would. Every helper is tool-less and bounded to
+the same transcript excerpt plus the spoken question. Helpers cannot read new
+repository state, run commands, edit files, change the session model, or post
+to the thread. The companion says it is checking, keeps talking, and explains
+the answer when it arrives. A failed helper is reported plainly and never
+handed to the session agent instead.
+
+**Agent work.** Only genuinely new investigation, tool use, or repository work,
+or an explicit wish to send the question to the thread, goes to the session
+agent. The companion proposes that request, then the call asks permission
+aloud and listens for a spoken yes or no. Only a fresh spoken yes sends the
+exact proposed prompt through the normal durable queue; no, silence, or an
+unclear answer starts nothing. The companion warns that the agent may take a
+few minutes; you can keep discussing the transcript while it works, and the
+result comes back into the voice discussion. Unsent composer text, quotes, and
+attachments stay untouched.
 
 Calls use the same instance-wide OpenAI API key configured in
 **Settings → Preferences → Desk voice**. You do not need to enable Desk's voice
 mode. A signed-in web identity and a browser with microphone/WebRTC support are
-required. OpenAI API usage is billed separately from the session agent.
+required. OpenAI API usage for the realtime call and the Luna/Terra helpers is
+billed separately from the session agent; the `conversation` helper uses the
+session model's own provider account like any tool-less one-shot.
 
-`gpt-realtime` handles the transcript discussion itself. Its only tool proposes
-an agent request; there is no direct tool execution or transcript writer. It
+`gpt-realtime` handles the transcript discussion itself. Its only tool,
+`request_voice_help`, names a target: `luna`, `terra`, `conversation`, or
+`session_agent`. There is no direct tool execution or transcript writer, and it
 cannot change the session model, permissions, or MCP inventory. The server
 exchanges SDP at `/api/sessions/:id/voice` and supplies a bounded public transcript
-excerpt, excluding reasoning and hidden engine context. The permanent API key
-never reaches the browser. Approved requests use the existing authenticated,
-durable outbox, so normal session safety and automation restrictions still apply.
-No native iOS or Chrome extension behavior changes.
+excerpt, excluding reasoning and hidden engine context. Helper questions post to
+`/api/sessions/:id/voice/helper` with `{ model: "luna" | "terra" | "conversation", prompt }`;
+the route requires a signed-in web identity, accepts exactly those three targets
+(`session_agent` and raw model ids are rejected), runs one bounded, tool-less
+call over the same excerpt, and answers `{ text, model, engineModel }` without
+writing anything. Luna and Terra are stateless low-effort Responses calls;
+`conversation` is a throwaway one-shot Pi session with no local or MCP tools and
+no Open Session transcript. One helper runs per person per session at a time.
+The permanent API key never reaches the browser. Approved agent requests use the
+existing authenticated, durable outbox, so normal session safety and automation
+restrictions still apply. No native iOS or Chrome extension behavior changes.
 
-Press the handset again to end the call. Speaking over a reply stops narration,
-not the agent's work. Leaving the session, hiding the browser, disconnecting, or
-starting another call also releases the microphone. Calls end after three idle
-minutes (not while an approved agent request is pending) or thirty minutes total. Dictation is
-unavailable while a call is active. Use the chat's existing controls for approval
-questions and stopping agent work.
+Turn detection uses semantic VAD at high eagerness, so a reply starts soon
+after you stop speaking; speaking over a reply interrupts it. Desk voice keeps
+its own longer-waiting setting.
+
+Press the handset or the floating panel's **End call** to end the call. Speaking
+over a reply stops narration, not the agent's work. Hiding the browser tab,
+closing the page, losing the voice connection, or starting another call also
+releases the microphone. Calls end after three idle minutes (not while paused
+or while a helper or approved agent request is pending) or thirty minutes total. Dictation is unavailable while a
+call is active. Use the chat's existing controls for approval questions and
+stopping agent work.
 
 ### Desk voice calls
 

@@ -353,7 +353,6 @@ interface ComposerActions {
   handleSend: ComposerProps["onTyping"] extends never
     ? never
     : ComposerProps["actions"]["onSend"];
-  sendVoice: (text: string) => boolean | Promise<boolean>;
   setImages: ComposerProps["actions"]["onImagesChange"];
   setFiles: ComposerProps["actions"]["onFilesChange"];
   addSessionAttachments: ComposerProps["actions"]["onAddAttachments"];
@@ -652,6 +651,7 @@ export function SessionViewerMainRegion({
     !showTerminal;
   const voice = useSessionVoice({
     sessionId: session.id,
+    title: session.title,
     enabled:
       voiceAvailable &&
       focused &&
@@ -660,8 +660,6 @@ export function SessionViewerMainRegion({
       chatVisible,
     busy: isBusy,
     entries,
-    // Isolated sends leave text, quotes, and attachments in the composer.
-    onSend: composer.actions.sendVoice,
   });
 
   return (
@@ -1458,9 +1456,9 @@ export function SessionViewerMainRegion({
                       <>
                         <SessionVoiceStatus
                           state={voice.state}
+                          levels={voice.levels}
                           error={voice.error}
-                          proposal={voice.proposal}
-                          onResolve={voice.resolveProposal}
+                          onTogglePause={voice.togglePause}
                           onDismiss={voice.dismissError}
                         />
                         {attachedComposer}

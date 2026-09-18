@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { sessionVoiceContext } from "./session-voice";
+import {
+  isSessionVoiceHelperTarget,
+  SESSION_VOICE_HELPER_TARGETS,
+  SESSION_VOICE_INSTRUCTIONS,
+  SESSION_VOICE_TARGETS,
+  sessionVoiceContext,
+} from "./session-voice";
 import type { TranscriptEntry } from "@tellahq/opensession-protocol/session";
 
 function entry(
@@ -32,6 +38,29 @@ test("voice context contains the thread's answers and tool results, never hidden
   expect(context.indexOf("retry loop ran")).toBeLessThan(
     context.indexOf("Fixed"),
   );
+});
+
+test("helper targets are the tool-less tiers; only the session agent needs spoken permission", () => {
+  expect([...SESSION_VOICE_HELPER_TARGETS]).toEqual([
+    "luna",
+    "terra",
+    "conversation",
+  ]);
+  expect([...SESSION_VOICE_TARGETS]).toEqual([
+    ...SESSION_VOICE_HELPER_TARGETS,
+    "session_agent",
+  ]);
+  expect(isSessionVoiceHelperTarget("conversation")).toBe(true);
+  expect(isSessionVoiceHelperTarget("session_agent")).toBe(false);
+  // The spoken-permission gate is explained once, for agent work only, and
+  // helper tiers are chosen automatically by difficulty.
+  const [beforeAgent, agentParagraph] = SESSION_VOICE_INSTRUCTIONS.split(
+    "Use session_agent only",
+  );
+  expect(beforeAgent).toContain("do not ask permission");
+  expect(beforeAgent).not.toContain("asks permission aloud");
+  expect(agentParagraph).toContain("asks permission aloud");
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain("conversation for the hardest");
 });
 
 test("voice context is bounded and explicitly marks truncated messages", () => {
