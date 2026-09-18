@@ -1,13 +1,20 @@
 import { describe, expect, it } from "bun:test";
 import {
   applyReviewRules,
+  capPromptRules,
   diffFilePaths,
+  MAX_PROMPT_LENGTH,
+  MAX_PROMPT_RULES,
+  matchingPromptRules,
+  normalizeReviewRuleGroups,
   normalizeReviewRules,
   preflightSkipRule,
   reviewRulesSection,
+  ruleKey,
   ruleMatches,
   ruleNeedsModelResult,
   ruleScoreSuffixes,
+  type PromptRuleOutcome,
   type ReviewRule,
   type ReviewRuleContext,
 } from "./review-rules";
@@ -637,5 +644,193 @@ describe("rendering", () => {
         ),
       ),
     ).toEqual({ verdict: "", confidence: " (rule)", risk: " (rule)" });
+  });
+});
+
+describe("rule groups", () => {
+  it("flattens groups into rules that carry the group name", () => {
+    const { rules, rejected } = normalizeReviewRuleGroups([
+      {
+        name: "Design",
+        rules: [
+          {
+            name: "CSS only",
+            when: { allFilesMatch: ["**/*.css"] },
+            then: { result: { verdict: "approve" } },
+          },
+          { name: "Tone", prompt: "Does new copy sound like us?" },
+        ],
+      },
+    ]);
+    expect(rejected).toEqual([]);
+    expect(rules).toEqual([
+      {
+        name: "CSS only",
+        group: "Design",
+        when: { allFilesMatch: ["**/*.css"] },
+        then: { result: { verdict: "approve" } },
+      },
+      {
+        name: "Tone",
+        group: "Design",
+        when: {},
+        prompt: "Does new copy sound like us?",
+      },
+    ]);
+    expect(rules.map(ruleKey)).toEqual(["Design / CSS only", "Design / Tone"]);
+  });
+
+  it("rejects unnamed, duplicate, and empty groups but keeps the rest", () => {
+    const { rules, rejected } = normalizeReviewRuleGroups([
+      { rules: [{ name: "x", when: { minFiles: 1 }, then: { note: "n" } }] },
+      { name: "Empty", rules: [{ name: "broken", when: {}, then: {} }] },
+      {
+        name: "Ok",
+        rules: [{ name: "a", when: { minFiles: 1 }, then: { note: "n" } }],
+      },
+      {
+        name: "Ok",
+        rules: [{ name: "b", when: { minFiles: 1 }, then: { note: "n" } }],
+      },
+      "nope",
+    ]);
+    expect(rules.map(ruleKey)).toEqual(["Ok / a"]);
+    expect(rejected).toEqual(["#1", "Empty / broken", "Empty", "Ok", "#5"]);
+  });
+
+  it("allows the same rule name in different groups", () => {
+    const { rules, rejected } = normalizeReviewRuleGroups([
+      { name: "A", rules: [{ name: "same", prompt: "p" }] },
+      { name: "B", rules: [{ name: "same", prompt: "p" }] },
+    ]);
+    expect(rejected).toEqual([]);
+    expect(rules.map(ruleKey)).toEqual(["A / same", "B / same"]);
+  });
+});
+
+describe("prompt rules", () => {
+  const tone: ReviewRule = {
+    name: "Tone",
+    group: "Michiel",
+    when: { anyFileMatches: ["apps/marketing/**"] },
+    prompt: "Does new copy sound like us?",
+  };
+  const always: ReviewRule = {
+    name: "Focused",
+    when: {},
+    prompt: "One thing?",
+  };
+
+  it("normalizes a prompt rule with optional conditions and no then", () => {
+    const { rules, rejected } = normalizeReviewRules([
+      { name: "Tone", prompt: "  Does new copy sound like us?  " },
+      { name: "Scoped", when: { minFiles: 2 }, prompt: "p" },
+      { name: "Both", when: { minFiles: 1 }, prompt: "p", then: { note: "n" } },
+      { name: "Blank", prompt: "   " },
+      { name: "Long", prompt: "x".repeat(MAX_PROMPT_LENGTH + 5) },
+    ]);
+    expect(rejected).toEqual(["Both", "Blank"]);
+    expect(rules).toEqual([
+      { name: "Tone", when: {}, prompt: "Does new copy sound like us?" },
+      { name: "Scoped", when: { minFiles: 2 }, prompt: "p" },
+      { name: "Long", when: {}, prompt: "x".repeat(MAX_PROMPT_LENGTH) },
+    ]);
+  });
+
+  it("caps prompt rules per config and reports the dropped ones", () => {
+    const many = Array.from({ length: MAX_PROMPT_RULES + 2 }, (_, i) => ({
+      name: `p${i}`,
+      when: {},
+      prompt: "q",
+    })) as ReviewRule[];
+    const { rules, rejected } = capPromptRules([marketing, ...many]);
+    expect(rules).toHaveLength(MAX_PROMPT_RULES + 1);
+    expect(rejected).toEqual([
+      `p${MAX_PROMPT_RULES}`,
+      `p${MAX_PROMPT_RULES + 1}`,
+    ]);
+  });
+
+  it("matches a prompt rule without conditions on every non-empty diff", () => {
+    expect(ruleMatches(always, ctx())).toBe(true);
+    expect(ruleMatches(always, ctx({ files: [] }))).toBe(true);
+    expect(ruleMatches(tone, ctx({ files: ["src/app.ts"] }))).toBe(false);
+  });
+
+  it("splits matching prompt rules by whether they read the model's result", () => {
+    const late: ReviewRule = {
+      name: "Late",
+      when: { verdict: ["approve"] },
+      prompt: "p",
+    };
+    const c = ctx({ verdict: "approve" });
+    expect(
+      matchingPromptRules([tone, always, late, marketing], c, "before-model"),
+    ).toEqual([tone, always]);
+    expect(
+      matchingPromptRules([tone, always, late, marketing], c, "after-model"),
+    ).toEqual([late]);
+  });
+
+  it("never skips a review and never changes scores", () => {
+    expect(preflightSkipRule([always], ctx())).toBeNull();
+    const out = applyReviewRules([tone, always], ctx());
+    expect(out.applied).toEqual([]);
+    expect(out.changed).toBe(false);
+  });
+
+  it("records scoring outcomes in file order under the rule's group", () => {
+    const outcomes = new Map<string, PromptRuleOutcome>([
+      [
+        "Focused",
+        { result: { verdict: "comment", score: 3 }, note: "Two changes." },
+      ],
+      ["Michiel / Tone", { unavailable: "model unavailable" }],
+    ]);
+    const out = applyReviewRules([always, tone], ctx(), outcomes);
+    expect(out.changed).toBe(false);
+    expect(out.final).toEqual(out.original);
+    expect(out.applied).toEqual([
+      {
+        name: "Focused",
+        changes: [],
+        result: { verdict: "comment", score: 3 },
+        note: "Two changes.",
+      },
+      {
+        name: "Tone",
+        group: "Michiel",
+        changes: [],
+        unavailable: "model unavailable",
+      },
+    ]);
+    expect(reviewRulesSection(out)).toBe(
+      "\n\n📏 **Custom rule results**\nIndependent policy results; not the AI verdict or merge approval.\n- **Focused**: comment · 3/5 · Two changes." +
+        "\n\n📏 **Michiel**\nIndependent policy results; not the AI verdict or merge approval.\n- **Tone**: not evaluated (model unavailable)",
+    );
+  });
+
+  it("renders a group's static and prompt results together, in order", () => {
+    const css: ReviewRule = {
+      name: "CSS only",
+      group: "Michiel",
+      when: { allFilesMatch: ["**/*.css"] },
+      then: { result: { verdict: "approve" }, note: "CSS-only change" },
+    };
+    const outcomes = new Map<string, PromptRuleOutcome>([
+      [
+        "Focused",
+        { result: { verdict: "approve", score: 5 }, note: "One tweak." },
+      ],
+    ]);
+    const out = applyReviewRules(
+      [css, always, migration],
+      ctx({ files: ["styles/site.css"], verdict: "approve", confidence: 5 }),
+      outcomes,
+    );
+    expect(reviewRulesSection(out)).toBe(
+      "\n\n📏 **Michiel**\nIndependent policy results; not the AI verdict or merge approval.\n- **CSS only**: approved · CSS-only change" +
+        "\n\n📏 **Custom rule results**\nIndependent policy results; not the AI verdict or merge approval.\n- **Focused**: approved · 5/5 · One tweak.",
+    );
   });
 });
