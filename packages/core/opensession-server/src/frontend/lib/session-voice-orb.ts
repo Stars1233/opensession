@@ -108,6 +108,17 @@ export function followOrbTint(
   return followLevel(current, mic / total, dtMs, ORB_TINT_MS, ORB_TINT_MS);
 }
 
+/** Startup is visibly alive before either audio stream exists. Reduced motion
+ * keeps a steady glow instead of breathing. This never changes audio levels. */
+export function orbConnectionPulse(
+  seconds: number,
+  reducedMotion: boolean,
+): number {
+  return reducedMotion
+    ? 0.55
+    : 0.55 - 0.45 * Math.cos((Math.PI * 2 * seconds) / 1.4);
+}
+
 /** Linear sRGB-ish 0..1 triple, what the shader and the fallback gradients eat. */
 export type OrbRgb = readonly [number, number, number];
 
@@ -291,11 +302,14 @@ export function orbGeometry(
   input: number,
   output: number,
   active: number,
+  connecting = 0,
 ): OrbGeometry {
   const act = clamp01(active);
   const mic = orbLevelDrive(input);
   const voice = orbLevelDrive(output);
-  const body = ORB_REST_RADIUS * (1 + act * (0.18 * mic + 0.1 * voice));
+  const body =
+    ORB_REST_RADIUS *
+    (1 + act * (0.18 * mic + 0.1 * voice + 0.12 * clamp01(connecting)));
   // A resting orb keeps a hint of surface drift so it reads as alive; the
   // microphone multiplies it into real lobes.
   const deform = ORB_REST_RADIUS * (0.02 + act * (0.38 * mic + 0.04 * voice));
@@ -316,6 +330,8 @@ export interface OrbFrame {
   output: number;
   /** 0 resting .. 1 live, smoothed, so a pause fades the orb down. */
   active: number;
+  /** Neutral startup glow/pulse; zero once connected. */
+  connecting?: number;
   /** Halo color, 0 the agent's hue .. 1 the person's ink. */
   tint: number;
   /** Procedural phase in seconds. Held still under reduced motion. */
@@ -359,6 +375,7 @@ uniform float u_time;
 uniform float u_in;
 uniform float u_out;
 uniform float u_active;
+uniform float u_startup;
 uniform float u_body;
 uniform float u_deform;
 uniform float u_pulse;
@@ -431,7 +448,7 @@ void main() {
   vec3 speakerColor = mix(u_cout, u_cin, u_tint);
   col = mix(col, speakerColor, act * max(u_in, u_out) * 0.85);
   col = mix(col, u_cin, spec * 0.5);
-  alpha += inner * spec * 0.22;
+  alpha += inner * (spec * 0.22 + act * u_startup * 0.4);
 
   // Agent: a fluid field in the accent that floods the body as it speaks,
   // and a core that grows from a glow to most of the sphere.
@@ -456,10 +473,11 @@ void main() {
   // to nothing over u_fade so it can never reach the canvas edge.
   float window = 1.0 - smoothstep(0.0, u_fade, d);
   float halo = exp(-max(d, 0.0) * (11.0 - 5.0 * max(u_in, u_out))) * (1.0 - inner) * act
-    * (0.06 + 0.5 * u_in + 0.4 * u_out) * window;
+    * (0.06 + 0.5 * u_in + 0.4 * u_out + 0.5 * u_startup) * window;
   // Outside the body, use the speaker tint directly, not dim ink diluted
   // by halo opacity a second time.
-  col = mix(col, mix(u_cout, u_cin, u_tint), 1.0 - inner);
+  vec3 haloColor = u_startup > 0.0 ? u_cdim : mix(u_cout, u_cin, u_tint);
+  col = mix(col, haloColor, 1.0 - inner);
   alpha += halo;
 
   alpha = clamp(alpha, 0.0, 1.0);
@@ -483,6 +501,7 @@ export const ORB_UNIFORMS = [
   "u_in",
   "u_out",
   "u_active",
+  "u_startup",
   "u_body",
   "u_deform",
   "u_pulse",
@@ -615,12 +634,18 @@ function createWebglOrbRenderer(
       if (frame.size <= 0) return;
       const u = program.uniforms;
       const active = clamp01(frame.active);
-      const geometry = orbGeometry(frame.input, frame.output, active);
+      const geometry = orbGeometry(
+        frame.input,
+        frame.output,
+        active,
+        frame.connecting,
+      );
       gl.uniform2f(u.u_res, w, h);
       gl.uniform1f(u.u_time, frame.time);
       gl.uniform1f(u.u_in, orbLevelDrive(frame.input));
       gl.uniform1f(u.u_out, orbLevelDrive(frame.output));
       gl.uniform1f(u.u_active, active);
+      gl.uniform1f(u.u_startup, clamp01(frame.connecting ?? 0));
       gl.uniform1f(u.u_body, geometry.body);
       gl.uniform1f(u.u_deform, geometry.deform);
       gl.uniform1f(u.u_pulse, geometry.pulse);
@@ -674,7 +699,7 @@ function rgba([r, g, b]: OrbRgb, alpha: number): string {
  * procedural surface. A lit resting sphere in the dim ink that swells with
  * the microphone, a halo and an accent core that grow with the speaker, and a
  * rim in the person's ink that firms up with the microphone. Nothing here
- * moves on its own. Radii come from `orbGeometry`, so this too stays inside
+ * moves on its own except the neutral connecting pulse. Radii come from `orbGeometry`, so this too stays inside
  * the canvas.
  */
 export function drawSessionVoiceOrbFallback(
@@ -688,7 +713,8 @@ export function drawSessionVoiceOrbFallback(
   const act = clamp01(frame.active);
   const mic = orbLevelDrive(frame.input);
   const voice = orbLevelDrive(frame.output);
-  const geometry = orbGeometry(frame.input, frame.output, act);
+  const connecting = clamp01(frame.connecting ?? 0);
+  const geometry = orbGeometry(frame.input, frame.output, act, connecting);
   const c = size / 2;
   const unit = size / 2;
   const rad = (geometry.body + geometry.pulse) * unit;
@@ -711,9 +737,12 @@ export function drawSessionVoiceOrbFallback(
       palette.output.rgb[2] +
         (palette.input.rgb[2] - palette.output.rgb[2]) * who,
     ];
-    halo.addColorStop(0, rgba(haloRgb, 0.35));
-    halo.addColorStop(1, rgba(haloRgb, 0));
-    ctx.globalAlpha = act * (0.1 + 0.6 * mic + 0.5 * voice);
+    halo.addColorStop(
+      0,
+      rgba(connecting > 0 ? palette.dim.rgb : haloRgb, 0.35),
+    );
+    halo.addColorStop(1, rgba(connecting > 0 ? palette.dim.rgb : haloRgb, 0));
+    ctx.globalAlpha = act * (0.1 + 0.6 * mic + 0.5 * voice + 0.5 * connecting);
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(c, c, ORB_HALO_EDGE * unit, 0, TAU);
@@ -738,8 +767,14 @@ export function drawSessionVoiceOrbFallback(
     return dim + (speaker - dim) * drive;
   };
   const bodyRgb: OrbRgb = [channel(0), channel(1), channel(2)];
-  body.addColorStop(0, rgba(bodyRgb, 0.36 + drive * 0.25));
-  body.addColorStop(1, rgba(bodyRgb, 0.16 + drive * 0.3));
+  body.addColorStop(
+    0,
+    rgba(bodyRgb, 0.36 + drive * 0.25 + act * connecting * 0.4),
+  );
+  body.addColorStop(
+    1,
+    rgba(bodyRgb, 0.16 + drive * 0.3 + act * connecting * 0.4),
+  );
   ctx.globalAlpha = 1;
   ctx.fillStyle = body;
   ctx.beginPath();
@@ -799,6 +834,7 @@ export function createOrbRenderer(
 
 export interface SessionVoiceOrbOptions {
   active: boolean;
+  connecting?: boolean;
 }
 
 /** Cap so a 3x phone display does not allocate a 4x backing store for a 48px orb. */
@@ -836,6 +872,7 @@ export function startSessionVoiceOrb(
   let activeMix = 0;
   let tint = 0;
   let phase = 0;
+  let connectionTime = 0;
   let frameId = 0;
   let lastTick = 0;
   let stopped = false;
@@ -863,7 +900,9 @@ export function startSessionVoiceOrb(
     if (stopped) return;
     const dt = lastTick ? Math.min(now - lastTick, 250) : 16;
     lastTick = now;
-    const target = options.active ? levels.current : REST;
+    const target =
+      options.active && !options.connecting ? levels.current : REST;
+    connectionTime += dt / 1000;
     input = followLevel(input, target.input, dt);
     output = followLevel(output, target.output, dt);
     activeMix = followLevel(
@@ -887,6 +926,10 @@ export function startSessionVoiceOrb(
       input,
       output,
       active: activeMix,
+      connecting:
+        options.active && options.connecting
+          ? orbConnectionPulse(connectionTime, reducedMotion)
+          : 0,
       tint,
       time: phase,
       palette,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ORB_ATTACK_MS,
+  orbConnectionPulse,
   ORB_CANVAS_OVERSCAN,
   ORB_HALO_EDGE,
   ORB_UNIFORMS,
@@ -293,5 +294,34 @@ describe("voice drive and bounds", () => {
         dim: input,
       }),
     ).toBeNull();
+  });
+});
+
+describe("connecting pulse", () => {
+  test("breathes without audio on a 1.4 second cycle, and stays steady with reduced motion", () => {
+    expect(orbConnectionPulse(0, false)).toBeCloseTo(0.1);
+    expect(orbConnectionPulse(0.7, false)).toBe(1);
+    expect(orbConnectionPulse(1.4, false)).toBeCloseTo(0.1);
+    for (const time of [0, 0.35, 0.7, 1.4, 20]) {
+      expect(orbConnectionPulse(time, true)).toBe(0.55);
+      const g = orbGeometry(0, 0, 1, orbConnectionPulse(time, false));
+      expect(g.reach).toBeLessThan(ORB_HALO_EDGE);
+      expect(g.fade).toBeGreaterThan(0);
+    }
+    expect(orbGeometry(0, 0, 1, 1).body).toBeGreaterThan(
+      orbGeometry(0, 0, 1).body,
+    );
+    expect(orbGeometry(0, 0, 0, 1)).toEqual(orbGeometry(0, 0, 0));
+  });
+
+  test("fallback breathes its neutral body and halo without inventing speaker activity", () => {
+    const low = recordingContext();
+    const high = recordingContext();
+    drawSessionVoiceOrbFallback(low.ctx, frame({ connecting: 0.1 }));
+    drawSessionVoiceOrbFallback(high.ctx, frame({ connecting: 1 }));
+    expect(high.gradients[1].radius).toBeGreaterThan(low.gradients[1].radius);
+    expect(high.gradients[1].stops).not.toEqual(low.gradients[1].stops);
+    expect(high.strokes[0].alpha).toBe(0);
+    expect(high.ctx.globalAlpha).toBe(1);
   });
 });

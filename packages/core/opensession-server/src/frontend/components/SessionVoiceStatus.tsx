@@ -26,6 +26,7 @@ export function SessionVoiceStatus({
         <SessionVoiceOrb
           levels={levels}
           active={state !== "idle" && state !== "error" && state !== "paused"}
+          connecting={state === "connecting"}
           className="size-12"
         />
         <div className="min-w-0 flex-1" role={error ? "alert" : "status"}>
