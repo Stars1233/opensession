@@ -70,11 +70,15 @@ import {
 import {
   applyReviewRules,
   diffFilePaths,
+  matchingPromptRules,
   reviewRulesSection,
+  ruleKey,
   ruleScoreSuffixes,
+  type PromptRuleOutcome,
   type ReviewRuleContext,
   type ReviewRuleEvaluation,
 } from "./review-rules";
+import { runPromptRules } from "./review-rule-prompt";
 import {
   loadReviewOptions,
   pathIgnored,
@@ -598,16 +602,53 @@ export async function runReview(
             return null;
           })
         : Promise.resolve(null);
+    // Prompt rules (.os-review.json rules with a `prompt`) are scored the same
+    // way: one tool-less one-shot each over the immutable patch. Rules whose
+    // conditions do not read the model's result start now, alongside the
+    // review; the rest wait for the parsed verdict below.
+    const hasPromptRules = reviewOpts.rules.some((r) => r.prompt);
+    const baseRuleCtx = reviewOpts.rules.length
+      ? await reviewRuleContext(pr, details)
+      : null;
+    const scorePromptRules = (
+      rules: ReturnType<typeof matchingPromptRules>,
+      patch: string | undefined,
+    ): Promise<Map<string, PromptRuleOutcome>> =>
+      patch && rules.length
+        ? runPromptRules({
+            rules,
+            pr: details,
+            patch,
+            model: reviewModel,
+            prNumber: pr.number,
+            ghRepo: pr.ghRepo,
+          }).catch((e) => {
+            console.warn(
+              `[github] prompt rules failed for PR #${pr.number}:`,
+              e,
+            );
+            return new Map<string, PromptRuleOutcome>();
+          })
+        : Promise.resolve(new Map<string, PromptRuleOutcome>());
     let mergeRisk: Promise<MergeRiskResult | null> = Promise.resolve(null);
-    if (!publicReview && reviewOpts.mergeRisk) {
-      mergeRisk = getPrDiff(String(pr.number), pr.ghRepo || undefined)
+    let earlyPromptOutcomes: Promise<Map<string, PromptRuleOutcome>> =
+      Promise.resolve(new Map());
+    let scorerPatch: Promise<string | undefined> = Promise.resolve(undefined);
+    if (!publicReview && (reviewOpts.mergeRisk || hasPromptRules)) {
+      scorerPatch = getPrDiff(String(pr.number), pr.ghRepo || undefined)
         .catch(() => null)
         // A patch for a different head would score code we are not reviewing.
         .then((diff) =>
-          scoreMergeRisk(
-            pr.headSha && diff?.headRefOid !== pr.headSha
-              ? undefined
-              : diff?.patch,
+          pr.headSha && diff?.headRefOid !== pr.headSha
+            ? undefined
+            : diff?.patch,
+        );
+      if (reviewOpts.mergeRisk) mergeRisk = scorerPatch.then(scoreMergeRisk);
+      if (hasPromptRules && baseRuleCtx)
+        earlyPromptOutcomes = scorerPatch.then((patch) =>
+          scorePromptRules(
+            matchingPromptRules(reviewOpts.rules, baseRuleCtx, "before-model"),
+            patch,
           ),
         );
     }
@@ -731,6 +772,12 @@ export async function runReview(
           };
         }
         if (reviewOpts.mergeRisk) mergeRisk = scoreMergeRisk(diff.patch);
+        scorerPatch = Promise.resolve(diff.patch);
+        if (hasPromptRules && baseRuleCtx)
+          earlyPromptOutcomes = scorePromptRules(
+            matchingPromptRules(reviewOpts.rules, baseRuleCtx, "before-model"),
+            diff.patch,
+          );
         const isolated = await runToollessPublicReview(isolatedInput);
         finalResult = {
           bksId,
@@ -866,17 +913,28 @@ export async function runReview(
     // alone, so a P0 the model found still blocks the fix-round gates, and the
     // secret-scan cap below still wins over any rule.
     let ruleEval: ReviewRuleEvaluation | null = null;
-    if (parsed && reviewOpts.rules.length) {
-      ruleEval = applyReviewRules(reviewOpts.rules, {
-        ...(await reviewRuleContext(pr, details)),
+    if (parsed && baseRuleCtx) {
+      const ruleCtx: ReviewRuleContext = {
+        ...baseRuleCtx,
         verdict: parsed.verdict,
         confidence: parsed.confidence,
         risk: risk?.risk,
-      });
+      };
+      const promptOutcomes = await earlyPromptOutcomes;
+      if (hasPromptRules) {
+        const late = await scorePromptRules(
+          matchingPromptRules(reviewOpts.rules, ruleCtx, "after-model"),
+          await scorerPatch,
+        );
+        for (const [key, outcome] of late) promptOutcomes.set(key, outcome);
+      }
+      if (cancellationRequested())
+        return finishCancelled(placeholderId || undefined);
+      ruleEval = applyReviewRules(reviewOpts.rules, ruleCtx, promptOutcomes);
       if (ruleEval.applied.length) {
         parsed.verdict = ruleEval.final.verdict;
         parsed.confidence = ruleEval.final.confidence;
-        const names = ruleEval.applied.map((r) => r.name);
+        const names = ruleEval.applied.map(ruleKey);
         console.log(
           `[github] PR #${pr.number} review rules applied: ${names.join(", ")} (${ruleEval.applied.flatMap((r) => r.changes).join("; ") || "independent results or notes only"})`,
         );
@@ -888,8 +946,12 @@ export async function runReview(
           rules: names,
           changes: ruleEval.applied.flatMap((r) => r.changes),
           results: ruleEval.applied
-            .filter((r) => r.result)
-            .map((r) => ({ name: r.name, ...r.result })),
+            .filter((r) => r.result || r.unavailable)
+            .map((r) => ({
+              name: ruleKey(r),
+              ...r.result,
+              ...(r.unavailable ? { unavailable: r.unavailable } : {}),
+            })),
           original: ruleEval.original,
           final: ruleEval.final,
         });
@@ -924,7 +986,7 @@ export async function runReview(
       ruleEval,
     );
 
-    const rulesApplied = ruleEval?.applied.map((r) => r.name);
+    const rulesApplied = ruleEval?.applied.map(ruleKey);
     const outcome: ReviewResult = {
       verdict: parsed?.verdict,
       confidence: parsed?.confidence,

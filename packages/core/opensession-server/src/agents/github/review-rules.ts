@@ -21,8 +21,25 @@
  *         "when": { "allFilesMatch": ["**\/bun.lock"], "maxChangedLines": 2000 },
  *         "then": { "skipReview": true }
  *       }
+ *     ],
+ *     "groups": [
+ *       {
+ *         "name": "Design",
+ *         "rules": [
+ *           { "name": "CSS only", "when": { "allFilesMatch": ["**\/*.css"] },
+ *             "then": { "result": { "verdict": "approve" } } },
+ *           { "name": "Tone", "when": { "anyFileMatches": ["apps/marketing/**"] },
+ *             "prompt": "Does new copy sound like us: short, direct, no jargon?" }
+ *         ]
+ *       }
  *     ]
  *   }
+ *
+ * `groups` hold rules that report together under the group's name, one line
+ * per matching rule. A rule with a `prompt` instead of `then` is scored by a
+ * separate tool-less model call over the diff (review-rule-prompt.ts) and
+ * publishes an independent verdict, 1-5 score, and one-line reason; its
+ * `when` is optional and can never skip a review or change the model's scores.
  *
  * `when` conditions are ANDed; a rule needs at least one. File conditions match
  * the PR's changed paths with Bun.Glob. `labels`, `baseBranch`, `verdict` and
@@ -101,8 +118,28 @@ export interface ReviewRuleThen {
 
 export interface ReviewRule {
   name: string;
+  /** Group heading this rule reports under; ungrouped rules share one section. */
+  group?: string;
+  /** Empty only for a prompt rule without conditions, which always evaluates. */
   when: ReviewRuleWhen;
-  then: ReviewRuleThen;
+  /** Static outcomes. Absent for prompt rules. */
+  then?: ReviewRuleThen;
+  /** Model-evaluated policy: the question a separate scoring call answers. */
+  prompt?: string;
+}
+
+/** What a prompt rule's scoring call produced, keyed by `ruleKey`. */
+export interface PromptRuleOutcome {
+  result?: ReviewRuleResult;
+  /** The model's one-line reason. */
+  note?: string;
+  /** Why there is no result (model or parse failure); shown instead of a score. */
+  unavailable?: string;
+}
+
+/** Stable identity of a rule across a config: the group-qualified name. */
+export function ruleKey(rule: Pick<ReviewRule, "name" | "group">): string {
+  return rule.group ? `${rule.group} / ${rule.name}` : rule.name;
 }
 
 /** What a rule can see about a PR. Model fields are absent before the review runs. */
@@ -125,10 +162,13 @@ export interface ReviewScores {
 
 export interface AppliedRule {
   name: string;
+  group?: string;
   result?: ReviewRuleResult;
   /** Human-readable model score changes; empty for independent results or notes. */
   changes: string[];
   note?: string;
+  /** A prompt rule that matched but could not be scored. */
+  unavailable?: string;
 }
 
 export interface ReviewRuleEvaluation {
@@ -146,7 +186,11 @@ export interface NormalizedReviewRules {
 }
 
 const MAX_RULES = 50;
+const MAX_GROUPS = 20;
+/** Prompt rules each cost a model call per review; cap them per config. */
+export const MAX_PROMPT_RULES = 10;
 const MAX_NOTE_LENGTH = 200;
+export const MAX_PROMPT_LENGTH = 4000;
 
 function stringList(value: unknown): string[] | undefined {
   const list = Array.isArray(value)
@@ -267,31 +311,109 @@ function normalizeThen(raw: unknown): ReviewRuleThen | null {
   return Object.keys(then).length ? then : null;
 }
 
+function entryName(r: Record<string, unknown> | null, index: number): string {
+  return typeof r?.name === "string" && r.name.trim()
+    ? r.name.trim()
+    : `#${index + 1}`;
+}
+
+function normalizeRule(
+  entry: unknown,
+  index: number,
+  group: string | undefined,
+): { rule: ReviewRule | null; name: string } {
+  const r =
+    entry && typeof entry === "object"
+      ? (entry as Record<string, unknown>)
+      : null;
+  const name = entryName(r, index);
+  if (!r) return { rule: null, name };
+  const when = normalizeWhen(r.when);
+  const base = group ? { name, group } : { name };
+  if (typeof r.prompt === "string" && r.prompt.trim()) {
+    // A prompt rule is model-scored; static outcomes on it would be ambiguous.
+    if (r.then !== undefined) return { rule: null, name };
+    return {
+      rule: {
+        ...base,
+        when: when ?? {},
+        prompt: r.prompt.trim().slice(0, MAX_PROMPT_LENGTH),
+      },
+      name,
+    };
+  }
+  const then = normalizeThen(r.then);
+  if (!when || !then) return { rule: null, name };
+  return { rule: { ...base, when, then }, name };
+}
+
+function normalizeRuleList(
+  raw: unknown,
+  group: string | undefined,
+  seen: Set<string>,
+  rejected: string[],
+): ReviewRule[] {
+  if (!Array.isArray(raw)) return [];
+  const rules: ReviewRule[] = [];
+  raw.slice(0, MAX_RULES).forEach((entry, index) => {
+    const { rule, name } = normalizeRule(entry, index, group);
+    const key = ruleKey({ name, group });
+    if (!rule || seen.has(key)) {
+      rejected.push(key);
+      return;
+    }
+    seen.add(key);
+    rules.push(rule);
+  });
+  return rules;
+}
+
 /** Pure validation: malformed entries are dropped and reported, never thrown. */
 export function normalizeReviewRules(raw: unknown): NormalizedReviewRules {
   const rejected: string[] = [];
-  if (!Array.isArray(raw)) return { rules: [], rejected };
+  const rules = normalizeRuleList(raw, undefined, new Set(), rejected);
+  return { rules, rejected };
+}
+
+/**
+ * `groups`: `[{ name, rules: [...] }]`, flattened to rules that carry their
+ * group name. Names are unique within a group; a group needs a name and at
+ * least one valid rule.
+ */
+export function normalizeReviewRuleGroups(raw: unknown): NormalizedReviewRules {
+  const rejected: string[] = [];
   const rules: ReviewRule[] = [];
+  if (!Array.isArray(raw)) return { rules, rejected };
   const seen = new Set<string>();
-  raw.slice(0, MAX_RULES).forEach((entry, index) => {
-    const r =
+  raw.slice(0, MAX_GROUPS).forEach((entry, index) => {
+    const g =
       entry && typeof entry === "object"
         ? (entry as Record<string, unknown>)
         : null;
-    const name =
-      typeof r?.name === "string" && r.name.trim()
-        ? r.name.trim()
-        : `#${index + 1}`;
-    const when = normalizeWhen(r?.when);
-    const then = normalizeThen(r?.then);
-    if (!r || !when || !then || seen.has(name)) {
+    const name = entryName(g, index);
+    if (!g || typeof g.name !== "string" || !g.name.trim() || seen.has(name)) {
       rejected.push(name);
       return;
     }
     seen.add(name);
-    rules.push({ name, when, then });
+    const members = normalizeRuleList(g.rules, name, new Set(), rejected);
+    if (!members.length) rejected.push(name);
+    rules.push(...members);
   });
   return { rules, rejected };
+}
+
+/** Keep the first `MAX_PROMPT_RULES` prompt rules; report the rest. */
+export function capPromptRules(rules: ReviewRule[]): NormalizedReviewRules {
+  const rejected: string[] = [];
+  let prompts = 0;
+  const kept = rules.filter((rule) => {
+    if (!rule.prompt) return true;
+    if (prompts < MAX_PROMPT_RULES) return (prompts++, true);
+    rejected.push(ruleKey(rule));
+    return false;
+  });
+  return { rules: kept, rejected };
 }
 
 function globMatches(path: string, globs: string[]): boolean {
@@ -366,8 +488,25 @@ export function preflightSkipRule(
   return (
     rules.find(
       (r) =>
-        r.then.skipReview && !ruleNeedsModelResult(r) && ruleMatches(r, ctx),
+        r.then?.skipReview && !ruleNeedsModelResult(r) && ruleMatches(r, ctx),
     ) || null
+  );
+}
+
+/**
+ * Prompt rules whose `when` matches, split by whether they read the model's
+ * result: the rest can score in parallel with the review, these wait for it.
+ */
+export function matchingPromptRules(
+  rules: ReviewRule[],
+  ctx: ReviewRuleContext,
+  phase: "before-model" | "after-model",
+): ReviewRule[] {
+  return rules.filter(
+    (r) =>
+      r.prompt &&
+      ruleNeedsModelResult(r) === (phase === "after-model") &&
+      ruleMatches(r, ctx),
   );
 }
 
@@ -382,6 +521,8 @@ const VERDICT_LABEL = (v: string | undefined) =>
 export function applyReviewRules(
   rules: ReviewRule[],
   ctx: ReviewRuleContext,
+  /** Scoring-call outcomes for prompt rules, by `ruleKey`; absent ones are skipped. */
+  promptOutcomes?: ReadonlyMap<string, PromptRuleOutcome>,
 ): ReviewRuleEvaluation {
   const original: ReviewScores = {
     verdict: ctx.verdict,
@@ -394,6 +535,19 @@ export function applyReviewRules(
   for (const rule of rules) {
     if (!ruleMatches(rule, ctx)) continue;
     const t = rule.then;
+    if (!t) {
+      const outcome = promptOutcomes?.get(ruleKey(rule));
+      if (!outcome) continue;
+      applied.push({
+        name: rule.name,
+        ...(rule.group ? { group: rule.group } : {}),
+        changes: [],
+        ...(outcome.result ? { result: { ...outcome.result } } : {}),
+        ...(outcome.note ? { note: outcome.note } : {}),
+        ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}),
+      });
+      continue;
+    }
     const before: ReviewScores = { ...final };
 
     if (t.confidence !== undefined) final.confidence = t.confidence;
@@ -431,6 +585,7 @@ export function applyReviewRules(
     if (!changes.length && !t.note && !t.result) continue;
     applied.push({
       name: rule.name,
+      ...(rule.group ? { group: rule.group } : {}),
       changes,
       ...(t.result ? { result: { ...t.result } } : {}),
       ...(t.note ? { note: t.note } : {}),
@@ -471,38 +626,52 @@ export function diffFilePaths(patch: string): string[] {
   return paths;
 }
 
-/** Summary-comment section listing the rules that fired and what each changed. */
-export function reviewRulesSection(
-  evaluation: ReviewRuleEvaluation | null,
-): string {
-  if (!evaluation?.applied.length) return "";
-  const results = evaluation.applied.filter((r) => r.result);
-  const adjustments = evaluation.applied.filter(
-    (r) => r.changes.length || !r.result,
-  );
-  const sections: string[] = [];
-  if (results.length) {
-    const labels: Record<RuleVerdict, string> = {
-      approve: "approved",
-      comment: "comment",
-      request_changes: "changes requested",
-    };
-    const lines = results.map((r) => {
-      const result = r.result!;
-      const what = [
-        result.verdict ? labels[result.verdict] : undefined,
-        result.score !== undefined ? `${result.score}/5` : undefined,
+const RESULT_VERDICT_LABEL: Record<RuleVerdict, string> = {
+  approve: "approved",
+  comment: "comment",
+  request_changes: "changes requested",
+};
+
+function resultLine(r: AppliedRule): string {
+  const what = r.unavailable
+    ? `not evaluated (${r.unavailable})`
+    : [
+        r.result?.verdict ? RESULT_VERDICT_LABEL[r.result.verdict] : undefined,
+        r.result?.score !== undefined ? `${r.result.score}/5` : undefined,
         r.note,
       ]
         .filter(Boolean)
         .join(" · ");
-      return `- **${r.name}**: ${what}`;
-    });
+  return `- **${r.name}**: ${what}`;
+}
+
+/**
+ * Summary-comment section listing the rules that fired and what each changed.
+ * Independent results render one block per group (ungrouped ones under
+ * "Custom rule results"), in first-appearance order; score adjustments follow.
+ */
+export function reviewRulesSection(
+  evaluation: ReviewRuleEvaluation | null,
+): string {
+  if (!evaluation?.applied.length) return "";
+  const results = evaluation.applied.filter((r) => r.result || r.unavailable);
+  const adjustments = evaluation.applied.filter(
+    (r) => r.changes.length || (!r.result && !r.unavailable),
+  );
+  const sections: string[] = [];
+  const blocks = new Map<string, AppliedRule[]>();
+  for (const r of results) {
+    const heading = r.group ?? "Custom rule results";
+    const list = blocks.get(heading);
+    if (list) list.push(r);
+    else blocks.set(heading, [r]);
+  }
+  for (const [heading, list] of blocks) {
     sections.push(
       [
-        "\n\n📏 **Custom rule results**",
+        `\n\n📏 **${heading}**`,
         "Independent policy results; not the AI verdict or merge approval.",
-        ...lines,
+        ...list.map(resultLine),
       ].join("\n"),
     );
   }

@@ -447,7 +447,7 @@ async function reviewSkippedByRule(
 ): Promise<boolean> {
   const repo = ref.ghRepo ? repoForFullName(ref.ghRepo) : null;
   const rules = loadReviewOptions(repo?.repo || defaultRepo().repo).rules;
-  if (!rules.some((r) => r.then.skipReview)) return false;
+  if (!rules.some((r) => r.then?.skipReview)) return false;
   try {
     const details =
       preflightDetails?.number === ref.number &&

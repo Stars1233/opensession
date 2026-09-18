@@ -386,12 +386,47 @@ knobs are versioned with the code they score. Every field is optional:
       "then": { "skipReview": true },
     },
   ],
+  "groups": [
+    {
+      "name": "Design",
+      "rules": [
+        {
+          "name": "CSS only",
+          "when": { "allFilesMatch": ["**/*.css"] },
+          "then": { "result": { "verdict": "approve" } },
+        },
+        {
+          "name": "Tone",
+          "when": { "anyFileMatches": ["apps/marketing/**"] },
+          "prompt": "Does copy added in this PR sound like us: short, direct, no jargon?",
+        },
+      ],
+    },
+  ],
 }
 ```
 
 `rules` is the deterministic layer alongside the model's verdict. Each rule
 has a unique `name`, a `when` clause whose conditions are all required, and a
 `then` clause with the outcomes. Up to 50 rules are supported.
+
+`groups` collect rules that report together: each group has a `name` and its
+own `rules` list (names unique within the group), and its matching rules
+render under one heading in the summary comment, one line per rule, for
+example `Design` with `CSS only: approved` and `Tone: approved · 4/5 · ...`.
+Grouped rules support the same `when`, `then`, and `prompt` fields as
+top-level ones and apply after them, in file order. Up to 20 groups.
+
+A rule with a `prompt` instead of `then` is a **prompt rule**: the question is
+put to a separate tool-less model call over the PR's diff, with a clean
+context, and the answer is published as an independent result for that rule:
+a verdict, a 1-5 score, and a one-line reason. `when` is optional on a prompt
+rule (omit it to evaluate every PR) and it may not carry `then`. Prompt rules
+never change the AI's scores, findings, or gates, and cannot skip a review; a
+model or parse failure shows as `not evaluated` for that rule and never blocks
+the review. Each costs one model call per review, so a config keeps at most
+10 prompt rules (extras are dropped with a warning). Every prompt rule's
+outcome is recorded in the audit log (`review_rule_prompt`).
 
 Use `then.result` for an **independent custom result**: an optional `verdict`
 (`approve`, `comment`, `request_changes`) and/or a `score` (1-5). Matching rules
