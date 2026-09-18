@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
+import type { SessionVoiceAgentRequest } from "../../shared/session-voice";
 import {
   SessionVoiceClient,
   type SessionVoiceState,
@@ -31,17 +32,19 @@ interface TestEvent {
   name?: string;
   arguments?: string;
   response?: { status: string };
+  call_id?: string;
 }
 const commandSchema = z.object({
   type: z.string(),
-  response: z
+  item: z
     .object({
-      conversation: z.string(),
-      input: z.array(
-        z.object({ content: z.array(z.object({ text: z.string() })) }),
-      ),
+      type: z.string(),
+      call_id: z.string().optional(),
+      output: z.string().optional(),
+      content: z.array(z.object({ text: z.string() })).optional(),
     })
     .optional(),
+  session: z.object({ instructions: z.string() }).optional(),
 });
 class TestChannel {
   readyState = "open";
@@ -56,7 +59,6 @@ class TestChannel {
 }
 function setup(options?: {
   mic?: () => Promise<TestMicrophone>;
-  onText?: (text: string) => boolean | Promise<boolean>;
   denied?: boolean;
 }) {
   const windowEvents = new EventTarget();
@@ -75,7 +77,7 @@ function setup(options?: {
   const channel = new TestChannel();
   const sent = channel.sent;
   const states: Array<[SessionVoiceState, string | undefined]> = [];
-  const prompts: string[] = [];
+  const proposals: SessionVoiceAgentRequest[] = [];
   install("window", { value: windowEvents });
   install("document", {
     value: Object.assign(documentEvents, {
@@ -133,19 +135,15 @@ function setup(options?: {
   const client = new SessionVoiceClient({
     sessionId: "test-session",
     onState: (state, detail) => states.push([state, detail]),
-    onText:
-      options?.onText ??
-      ((text) => {
-        prompts.push(text);
-        return true;
-      }),
+    context: "Initial thread",
+    onRequest: (request) => proposals.push(request),
   });
   restores.push(() => client.stop());
   return {
     client,
     stream,
     sent,
-    prompts,
+    proposals,
     states,
     windowEvents,
     documentEvents,
@@ -155,78 +153,136 @@ function setup(options?: {
   };
 }
 
-const tick = async () => {
-  await Promise.resolve();
-  await Promise.resolve();
-};
-
-test("spoken turns use the session send callback exactly once and do not execute tools", async () => {
-  const h = setup();
-  await h.client.start();
-  expect(h.states.at(-1)?.[0]).toBe("listening");
-  expect(JSON.parse(h.stats().requestBody)).toEqual({ sdp: "offer" });
-  h.emit({
-    type: "conversation.item.input_audio_transcription.completed",
-    item_id: "one",
-    transcript: " Fix the test ",
-  });
-  h.emit({
-    type: "conversation.item.input_audio_transcription.completed",
-    item_id: "one",
-    transcript: "Fix the test",
-  });
+function propose(h: ReturnType<typeof setup>, callId = "request-one") {
   h.emit({
     type: "response.function_call_arguments.done",
-    name: "bash",
-    arguments: "untrusted",
+    call_id: callId,
+    name: "request_agent_help",
+    arguments: JSON.stringify({
+      prompt: "Check the current CI failure",
+      reason: "The transcript does not include current CI",
+      approved: true,
+    }),
   });
-  await tick();
-  expect(h.prompts).toEqual(["Fix the test"]);
-  expect(h.sent.some((event) => event.type === "response.create")).toBe(false);
-});
+}
 
-test("transcription completion order does not reorder spoken prompts", async () => {
+test("spoken questions stay in the voice conversation, with no thread messages", async () => {
   const h = setup();
   await h.client.start();
-  h.emit({ type: "input_audio_buffer.committed", item_id: "first" });
-  h.emit({ type: "input_audio_buffer.committed", item_id: "second" });
+  h.emit({ type: "input_audio_buffer.speech_started" });
+  h.emit({ type: "input_audio_buffer.speech_stopped" });
   h.emit({
     type: "conversation.item.input_audio_transcription.completed",
-    item_id: "second",
-    transcript: "Second",
+    item_id: "one",
+    transcript: "Why did it change that?",
   });
-  expect(h.prompts).toEqual([]);
-  h.emit({
-    type: "conversation.item.input_audio_transcription.completed",
-    item_id: "first",
-    transcript: "First",
-  });
-  await tick();
-  expect(h.prompts).toEqual(["First", "Second"]);
+  h.emit({ type: "response.created" });
+  h.emit({ type: "output_audio_buffer.started" });
+  h.emit({ type: "response.done", response: { status: "completed" } });
+  h.emit({ type: "output_audio_buffer.stopped" });
+  expect(h.proposals).toEqual([]);
+  expect(h.sent).toEqual([]);
+  expect(h.states.at(-1)?.[0]).toBe("listening");
 });
 
-test("agent replies are spoken out of context and barge-in cancels only narration", async () => {
+test("model requests only propose work; claimed approval cannot send it", async () => {
   const h = setup();
   await h.client.start();
-  h.client.setAgentBusy(true);
-  expect(h.states.at(-1)?.[0]).toBe("working");
-  h.client.setAgentBusy(false);
-  h.client.speak("Fixed it. Tests passed.");
-  const response = h.sent.find(
-    (event) => event.type === "response.create",
-  )?.response;
-  expect(response?.conversation).toBe("none");
-  expect(response?.input[0]?.content[0]?.text).toContain(
-    "Fixed it. Tests passed.",
+  propose(h);
+  propose(h);
+  expect(h.proposals).toHaveLength(1);
+  expect(h.sent).toEqual([]);
+  let sends = 0;
+  const submit = () => {
+    sends++;
+    return true;
+  };
+  expect(await h.client.resolveAgentRequest("wrong-id", true, submit)).toBe(
+    false,
   );
-  expect(h.states.at(-1)?.[0]).toBe("speaking");
+  expect(sends).toBe(0);
+  expect(await h.client.resolveAgentRequest("request-one", true, submit)).toBe(
+    true,
+  );
+  expect(sends).toBe(1);
+  expect(await h.client.resolveAgentRequest("request-one", true, submit)).toBe(
+    false,
+  );
+  expect(sends).toBe(1);
+  expect(h.sent[0]?.item?.output).toContain("normal queue");
+});
+
+test("declining a request never sends a prompt", async () => {
+  const h = setup();
+  await h.client.start();
+  propose(h);
+  let sends = 0;
+  expect(
+    await h.client.resolveAgentRequest("request-one", false, () => {
+      sends++;
+      return true;
+    }),
+  ).toBe(false);
+  expect(sends).toBe(0);
+  expect(h.sent[0]?.item?.output).toContain("declined");
+});
+
+test("tool calls cannot bypass the proposal gate or overlap approved work", async () => {
+  const h = setup();
+  await h.client.start();
+  h.emit({
+    type: "response.function_call_arguments.done",
+    call_id: "bash",
+    name: "bash",
+    arguments: "{}",
+  });
+  expect(h.proposals).toEqual([]);
+  propose(h);
+  await h.client.resolveAgentRequest("request-one", true, () => true);
+  propose(h, "request-two");
+  expect(h.proposals).toHaveLength(1);
+  expect(h.sent.at(-1)?.item?.output).toContain("Only one");
+});
+
+test("fresh thread context updates the voice context without speaking or posting", async () => {
+  const h = setup();
+  await h.client.start();
+  h.client.updateContext("Initial thread");
+  expect(h.sent).toEqual([]);
+  h.client.updateContext("New agent reply in thread");
+  expect(h.sent).toHaveLength(1);
+  expect(h.sent[0]?.session?.instructions).toContain(
+    "New agent reply in thread",
+  );
+  expect(h.sent[0]?.type).toBe("session.update");
+});
+
+test("approved agent results return to the voice discussion", async () => {
+  const h = setup();
+  await h.client.start();
+  h.client.agentReply("Unsolicited reply");
+  expect(h.sent).toEqual([]);
+  propose(h);
+  await h.client.resolveAgentRequest("request-one", true, () => true);
+  h.emit({ type: "response.done", response: { status: "completed" } });
+  h.client.agentReply("CI passes now");
+  expect(
+    h.sent.find((event) => event.item?.type === "message")?.item?.content?.[0]
+      ?.text,
+  ).toContain("CI passes now");
+});
+
+test("barge-in stops speech without starting or stopping the agent", async () => {
+  const h = setup();
+  await h.client.start();
+  h.emit({ type: "response.created" });
   h.emit({ type: "output_audio_buffer.started" });
   h.emit({ type: "input_audio_buffer.speech_started" });
-  expect(h.sent.map((event) => event.type)).toContain("response.cancel");
-  expect(h.sent.map((event) => event.type)).toContain(
+  expect(h.sent.map((event) => event.type)).toEqual([
+    "response.cancel",
     "output_audio_buffer.clear",
-  );
-  expect(h.prompts).toEqual([]);
+  ]);
+  expect(h.proposals).toEqual([]);
 });
 
 test("permission denial never starts a paid call", async () => {
@@ -269,19 +325,31 @@ test.each(["pagehide", "opensession-voice-call-start"])(
     });
     expect(h.stats().stopped).toBe(1);
     expect(h.stats().closed).toBe(1);
-    expect(h.prompts).toEqual([]);
+    expect(h.proposals).toEqual([]);
   },
 );
 
-test("failed prompt delivery stops the call instead of silently dropping words", async () => {
-  const h = setup({ onText: () => false });
+test("failed approved delivery is reported honestly to the voice companion", async () => {
+  const h = setup();
   await h.client.start();
-  h.emit({
-    type: "conversation.item.input_audio_transcription.completed",
-    item_id: "one",
-    transcript: "Hello",
-  });
-  await tick();
-  expect(h.states.at(-1)?.[0]).toBe("error");
-  expect(h.stats().stopped).toBe(1);
+  propose(h);
+  expect(
+    await h.client.resolveAgentRequest("request-one", true, () => false),
+  ).toBe(false);
+  expect(h.sent[0]?.item?.output).toContain("could not be sent");
+});
+
+test("hanging up revokes pending agent approval", async () => {
+  const h = setup();
+  await h.client.start();
+  propose(h);
+  h.client.stop();
+  let sends = 0;
+  expect(
+    await h.client.resolveAgentRequest("request-one", true, () => {
+      sends++;
+      return true;
+    }),
+  ).toBe(false);
+  expect(sends).toBe(0);
 });

@@ -8,12 +8,13 @@ afterEach(() => {
   for (const restore of restores.splice(0)) restore();
 });
 
-test("session speech cannot answer on its own or acquire the Desk's tools", () => {
-  const config = sessionVoiceConfig();
+test("voice answers from thread context and can only propose agent work", () => {
+  const config = sessionVoiceConfig("Thread context");
   expect(config.model).toBe("gpt-realtime");
-  expect(config.tools).toEqual([]);
-  expect(config.tool_choice).toBe("none");
-  expect(config.audio.input.turn_detection.create_response).toBe(false);
+  expect(config.tools.map((tool) => tool.name)).toEqual(["request_agent_help"]);
+  expect(config.instructions).toContain("Thread context");
+  expect(config.tool_choice).toBe("auto");
+  expect(config.audio.input.turn_detection.create_response).toBe(true);
   expect(config.audio.input.turn_detection.interrupt_response).toBe(true);
 });
 
@@ -50,7 +51,7 @@ test("voice route bounds and validates offers", async () => {
   }
 });
 
-test("SDP exchange uses the server key and tool-less policy, returns only the answer", async () => {
+test("SDP exchange uses the server key and approval-only policy, returns only the answer", async () => {
   const key = spyOn(voice, "requireVoiceApiKey").mockResolvedValue(
     "private-test-key",
   );
@@ -68,14 +69,20 @@ test("SDP exchange uses the server key and tool-less policy, returns only the an
   );
   restores.push(() => fetcher.mockRestore());
   expect(
-    await createSessionVoiceAnswer("offer", new AbortController().signal),
+    await createSessionVoiceAnswer(
+      "offer",
+      new AbortController().signal,
+      "Thread context",
+    ),
   ).toBe("answer");
   expect(request?.headers).toEqual({
     Authorization: "Bearer private-test-key",
   });
   const form = request?.body as FormData;
   expect(form.get("sdp")).toBe("offer");
-  expect(JSON.parse(String(form.get("session")))).toEqual(sessionVoiceConfig());
+  expect(JSON.parse(String(form.get("session")))).toEqual(
+    sessionVoiceConfig("Thread context"),
+  );
 });
 
 test("provider failures do not leak response bodies or credentials", async () => {
@@ -91,6 +98,10 @@ test("provider failures do not leak response bodies or credentials", async () =>
   );
   restores.push(() => fetcher.mockRestore());
   await expect(
-    createSessionVoiceAnswer("offer", new AbortController().signal),
+    createSessionVoiceAnswer(
+      "offer",
+      new AbortController().signal,
+      "Thread context",
+    ),
   ).rejects.toThrow("OpenAI could not start the voice call (HTTP 403).");
 });
