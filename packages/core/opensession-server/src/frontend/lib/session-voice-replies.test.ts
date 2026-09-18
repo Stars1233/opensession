@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { SessionVoiceReplies } from "./session-voice-replies";
+import {
+  SessionVoiceReplies,
+  SessionVoiceAgentReply,
+} from "./session-voice-replies";
 import type { TranscriptEntry } from "./types";
 
 function reply(id: string, content = "Done", seq = 1): TranscriptEntry {
@@ -61,4 +64,31 @@ test("rewrites of an already spoken reply are not narrated twice", () => {
   expect(
     tracker.take([reply("new", "Done with linked references", 2)], false),
   ).toBeNull();
+});
+
+test("an approved question waits for its own queued turn, not the previous run", () => {
+  const old = reply("old");
+  const tracker = new SessionVoiceAgentReply("Check CI", [old]);
+  const earlier = reply("earlier-run", "Previous job completed", 2);
+  expect(tracker.take([old, earlier], false)).toBeNull();
+  const question = {
+    ...reply("question", "Check CI", 3),
+    type: "user" as const,
+  };
+  const answer = reply("answer", "CI passes", 4);
+  expect(tracker.take([old, earlier, question, answer], true)).toBeNull();
+  expect(tracker.take([old, earlier, question, answer], false)).toBe(
+    "CI passes",
+  );
+  expect(tracker.take([old, earlier, question, answer], false)).toBeNull();
+});
+
+test("an old identical prompt cannot satisfy a newly approved question", () => {
+  const question = {
+    ...reply("old-question", "Check CI", 1),
+    type: "user" as const,
+  };
+  const old = reply("old-answer", "Old CI result", 2);
+  const tracker = new SessionVoiceAgentReply("Check CI", [question, old]);
+  expect(tracker.take([question, old], false)).toBeNull();
 });
