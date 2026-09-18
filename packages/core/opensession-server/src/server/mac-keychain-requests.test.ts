@@ -1,46 +1,38 @@
 import { describe, expect, test } from "bun:test";
 import {
-  OnePasswordRequests,
-  onePasswordRequestSchema,
-} from "./onepassword-requests";
+  MacKeychainRequests,
+  macKeychainRequestSchema,
+} from "./mac-keychain-requests";
 
 const intent = {
-  account: "my.1password.com",
-  reference: "op://Work/Service/token",
+  account: "demo@example.test",
+  service: "Example API",
   purpose: "Check service authentication",
   url: "https://api.example.com/me",
   method: "GET",
   injection: "bearer",
 };
 
-describe("single-field 1Password requests", () => {
-  test("requires exactly one field, never a vault, whole item, query, or wildcard", () => {
-    for (const reference of [
-      "op://Work",
-      "op://Work/Service",
-      "op://Work/Service/*",
-      "op://Work/Service/token?attribute=type",
-      "op://Work/Service/token/extra/more",
-      "op://Work/Service/%2a",
-      "op://Work/Service/token\nother",
-    ]) {
-      expect(
-        onePasswordRequestSchema.safeParse({ ...intent, reference }).success,
-      ).toBe(false);
-    }
-    for (const reference of [
-      intent.reference,
-      "op://Work/Service/section/token",
-      "op://Work vault/Service API/token",
-    ]) {
-      expect(
-        onePasswordRequestSchema.safeParse({ ...intent, reference }).success,
-      ).toBe(true);
-    }
+describe("single-item macOS Keychain requests", () => {
+  test("requires one exact service and account, never a list or raw value", () => {
+    for (const input of [
+      { ...intent, service: "" },
+      { ...intent, account: "" },
+      { ...intent, service: ["first", "second"] },
+      { ...intent, account: "invalid\nname" },
+      { ...intent, service: "spoof\u202ename" },
+      { ...intent, secret: "NEVER" },
+      { ...intent, reference: "op://Work/API/token" },
+    ])
+      expect(macKeychainRequestSchema.safeParse(input).success).toBe(false);
+    expect(macKeychainRequestSchema.safeParse(intent).success).toBe(true);
     expect(
-      onePasswordRequestSchema.safeParse({ ...intent, secret: "NEVER" })
-        .success,
-    ).toBe(false);
+      macKeychainRequestSchema.safeParse({
+        ...intent,
+        service: "Unicode café",
+        account: "--literal-not-a-flag",
+      }).success,
+    ).toBe(true);
   });
 
   test("rejects unsafe intent before asking", () => {
@@ -52,24 +44,24 @@ describe("single-field 1Password requests", () => {
       "https://api.example.com/#fragment",
     ]) {
       expect(
-        onePasswordRequestSchema.safeParse({ ...intent, url }).success,
+        macKeychainRequestSchema.safeParse({ ...intent, url }).success,
       ).toBe(false);
     }
     for (const extra of [
-      { account: "--debug" },
+      { account: "invalid\0suffix" },
       { method: "CONNECT" },
       { body: "x" },
       { injection: "cookie" },
       { purpose: "trusted\u202eevil" },
     ]) {
       expect(
-        onePasswordRequestSchema.safeParse({ ...intent, ...extra }).success,
+        macKeychainRequestSchema.safeParse({ ...intent, ...extra }).success,
       ).toBe(false);
     }
   });
 
   test("binds metadata, claims and results to the session and verified login", () => {
-    const requests = new OnePasswordRequests();
+    const requests = new MacKeychainRequests();
     const r = requests.request("session-a", "Alice", intent);
     expect(requests.status(r.id, "session-b", "alice")).toBeNull();
     expect(requests.status(r.id, "session-a", "bob")).toBeNull();
@@ -113,7 +105,7 @@ describe("single-field 1Password requests", () => {
   });
 
   test("rejects all free-form output and never projects a claim into model results", () => {
-    const requests = new OnePasswordRequests();
+    const requests = new MacKeychainRequests();
     const r = requests.request("session", "alice", intent);
     const { claim } = requests.claim(r.id, "alice")!;
     for (const outcome of [
@@ -135,13 +127,13 @@ describe("single-field 1Password requests", () => {
 
   test("expires, bounds pending asks, and loses all authority on restart", () => {
     let now = 1000;
-    const requests = new OnePasswordRequests(() => now);
+    const requests = new MacKeychainRequests(() => now);
     const r = requests.request("session", "alice", intent);
     expect(() => requests.request("session", "alice", intent)).toThrow();
     now += 10 * 60_000;
     expect(requests.claim(r.id, "alice")).toBeNull();
     expect(requests.status(r.id, "session", "alice")).toBeNull();
     requests.request("session", "alice", intent);
-    expect(new OnePasswordRequests().pending("session", "alice")).toBeNull();
+    expect(new MacKeychainRequests().pending("session", "alice")).toBeNull();
   });
 });

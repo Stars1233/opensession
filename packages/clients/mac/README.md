@@ -97,52 +97,65 @@ the first-run screen offers with `opensession.defaultServer` in `package.json`
 (or `OS1_CLOUD_URL`); a profile that already worked keeps using it and is never
 asked.
 
-## Single-secret 1Password requests
+## Single-item macOS Keychain access
 
-Agents can request **one field for one HTTPS API call** through
-`opensession-keychain.request_1password`. The secret is read and injected on the
-Mac, not uploaded to Open Session, written to a file, placed in an agent's
-environment, or returned to the model. Only the numeric HTTP status returns.
-Response bodies and headers are discarded, including redirects and errors;
-this first version cannot retrieve API response data for the agent.
+Agents can request **one generic-password item for one HTTPS API call** through
+`opensession-keychain.request_mac_keychain`. This uses Apple's Security framework
+(`SecKeychainFindGenericPassword`), not 1Password, the `op` CLI, or a custom
+credential-authorization dialog. It does not read 1Password vaults, Apple
+Passwords/iCloud items, internet-password items, certificates, or SSH keys.
 
-Setup:
+1. Sign in to Open Session in the Mac app. Verified web sign-in is required;
+   name-picker identities and machine browsers cannot authorize requests.
+2. Give the agent the exact **service** and **account** identifiers of an existing
+   generic-password item in your macOS Keychain, never its value. A display label
+   alone may not be the service identifier. No item enumeration is exposed.
+3. View the requesting session and choose **OS → Keychain requests…**. The native
+   menu shows the item identifiers, purpose and complete HTTP destination/body.
+   Select **Use once…** only if you trust that destination with the credential.
+4. macOS applies the item's existing access controls. If authorization is needed,
+   its native Keychain prompt offers **Allow / Always Allow / Deny**. Choose
+   **Allow** for this access only. Existing permissions, including an earlier
+   **Always Allow**, may permit access without another prompt. The app never
+   changes an item's ACL or silently unlocks a keychain.
 
-1. Install the official 1Password CLI (`op`) at `/opt/homebrew/bin/op` or
-   `/usr/local/bin/op`.
-2. Enable **1Password → Settings → Developer → Integrate with 1Password CLI**.
-   Enable Touch ID in 1Password if desired.
-3. Sign in to Open Session in the Mac app. The server must have verified web
-   sign-in enabled; a name-picker identity and machine browser cannot approve.
-4. Give the agent a **secret reference**, such as `op://Work/Example API/token`,
-   and the 1Password account ID or sign-in address. Copy the field's secret
-   reference in 1Password, never its value. No vault search or item enumeration
-   is exposed to the agent.
-5. When requested, view that session and choose **OS → Review 1Password
-   request…**. Review the exact account, field, destination URL, method, header,
-   purpose and optional JSON body. Choose **Approve once** or **Decline**.
+There is no CLI installation or 1Password integration to configure. The packaged,
+signed `OS Keychain` helper looks up one exact service/account pair, returns the
+value through a private pipe to Electron's main process, and exits. The main
+process injects it into the approved HTTPS request. The value is never returned
+to a renderer, Open Session server, agent environment, or model. Nothing caches
+or writes the value to disk. Only the numeric HTTP status returns; response bodies
+and headers are discarded, even for redirects and errors. This version cannot
+retrieve API response data for the agent.
 
-1Password may show its own account-level authorization prompt. That grant is
-broader than a field, so the Mac app independently enforces the approved field
-and one API call, even while 1Password's authorization is cached. There is no
-standing access. Closing the review window declines. Requests expire after ten
-minutes or a server restart, are claimed atomically across Macs, and are never
-automatically retried after an error. Requests are only visible to the teammate
-who prompted the agent. Other Open Session windows and organizations cannot
-redirect an approval to their own session.
+Each request can execute once, expires after ten minutes or a server restart,
+and is visible only to the teammate who prompted the agent. Claims are atomic
+across Macs, and failure never retries automatically. Canceling the menu declines
+without accessing Keychain. The requesting session and organization are checked
+again before execution. Each use requires a new native menu action even if macOS
+already trusts the helper. The Keychain helper has a two-minute deadline for the
+native prompt; the API request has a thirty-second deadline.
 
-Only public HTTPS destinations on port 443 are supported. The Mac validates DNS
-answers and rejects private, loopback and tailnet destinations. It sends no
-browser cookies and follows no redirects. Supported secret headers are
-`Authorization: Bearer` and `x-api-key`; the optional JSON body is limited to
-512 characters. Approve only a destination you trust with the credential. Raw
-secret export, shell/environment injection, response downloads, SSH credentials,
-and native iOS/Chrome clients are not part of this feature.
+Only public HTTPS destinations on port 443 are supported. Private, loopback and
+tailnet DNS addresses, browser cookies and redirects are refused. Supported
+headers are `Authorization: Bearer` and `x-api-key`; an optional JSON request body
+is limited to 512 characters. Raw secret export and shell/environment injection
+are not supported. Native iOS and Chrome clients do not expose this Mac-only flow.
 
 Verification: `bun test ./packages/clients/mac/src/` plus the server
-`onepassword-requests` and route tests. Tests use synthetic secrets, not a real
-vault. Real Touch ID and 1Password account authorization require a configured
-Mac and should be tested without exposing production credentials.
+`mac-keychain-requests` and route tests. On macOS, the following compiles and tests
+against a newly created disposable keychain, with interaction disabled and no
+changes to the default search list:
+
+```sh
+xcrun swiftc -DKEYCHAIN_TESTING native/KeychainHelper.swift native/KeychainHelperTests.swift \
+  -parse-as-library -framework Security -o /tmp/os-keychain-tests
+/tmp/os-keychain-tests
+```
+
+The release workflow also runs these tests and checks the packaged helper's
+signature. A live **Allow / Always Allow / Deny** prompt still needs verification
+in a signed app on an interactive Mac, using a disposable item.
 
 ## Local Tailscale profiles
 

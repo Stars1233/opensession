@@ -21,11 +21,9 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { execFile } = require("node:child_process");
 const { NativeDictation } = require("./native-dictation");
-const { OnePasswordReview } = require("./onepassword-ui");
-const { showOnePasswordApproval } = require("./onepassword-approval");
-const onePasswordReview = new OnePasswordReview({
+const { MacKeychainReview } = require("./mac-keychain-ui");
+const macKeychainReview = new MacKeychainReview({
   dialog,
-  approve: showOnePasswordApproval,
   context: (target) => {
     if (!target || target.isDestroyed() || !target.isVisible()) return null;
     const pageUrl = target.webContents.getURL();
@@ -1332,8 +1330,8 @@ function buildAppMenu() {
           { role: "about" },
           { label: "Check for Updates…", click: checkForUpdatesFromMenu },
           {
-            label: "Review 1Password request…",
-            click: () => void onePasswordReview.review(activeWindow()),
+            label: "Keychain requests…",
+            click: () => void macKeychainReview.review(activeWindow()),
           },
           { type: "separator" },
           {
