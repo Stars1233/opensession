@@ -43,7 +43,10 @@ export function SessionVoiceOrb({
       aria-label={label}
       aria-hidden={label ? undefined : true}
     >
-      <canvas ref={canvasRef} className="absolute inset-0 size-full" />
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none absolute -inset-1/4 size-[150%]"
+      />
     </div>
   );
 }

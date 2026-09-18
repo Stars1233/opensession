@@ -40,7 +40,7 @@ test("voice context contains the thread's answers and tool results, never hidden
   );
 });
 
-test("helper targets are the tool-less tiers; only the session agent needs spoken permission", () => {
+test("helper targets are tool-less; explicit user tasks go directly to the session agent", () => {
   expect([...SESSION_VOICE_HELPER_TARGETS]).toEqual([
     "luna",
     "terra",
@@ -52,14 +52,18 @@ test("helper targets are the tool-less tiers; only the session agent needs spoke
   ]);
   expect(isSessionVoiceHelperTarget("conversation")).toBe(true);
   expect(isSessionVoiceHelperTarget("session_agent")).toBe(false);
-  // The spoken-permission gate is explained once, for agent work only, and
-  // helper tiers are chosen automatically by difficulty.
-  const [beforeAgent, agentParagraph] = SESSION_VOICE_INSTRUCTIONS.split(
-    "Use session_agent only",
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "An explicit request is sufficient authorization",
   );
-  expect(beforeAgent).toContain("do not ask permission");
-  expect(beforeAgent).not.toContain("asks permission aloud");
-  expect(agentParagraph).toContain("asks permission aloud");
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "without asking for another approval or spoken yes",
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "ask one short clarification before dispatching",
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "Send additional requested tasks while earlier ones are queued or running",
+  );
   expect(SESSION_VOICE_INSTRUCTIONS).toContain("conversation for the hardest");
 });
 
@@ -73,4 +77,19 @@ test("voice context is bounded and explicitly marks truncated messages", () => {
   expect(context).toContain("999:");
   expect(context).toContain('"truncated":true');
   expect(context).not.toContain('"text":"0:');
+});
+
+test("voice handoff requests direct work without delegation wrappers or changing the user's scope", () => {
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "task message delivered verbatim",
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    'Do not add a delegation preamble such as "Please propose a task for the agent"',
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "Keep the reason and conversational acknowledgements out of prompt",
+  );
+  expect(SESSION_VOICE_INSTRUCTIONS).toContain(
+    "if they explicitly ask only for a plan, proposal, or explanation, that is the task",
+  );
 });

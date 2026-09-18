@@ -39,9 +39,7 @@ export function SessionVoiceStatus({
               <p>
                 {state === "paused"
                   ? "Microphone and replies muted"
-                  : state === "confirming"
-                    ? "Say yes please or no thanks"
-                    : "Voice conversation about this thread"}
+                  : "Voice conversation about this thread"}
               </p>
             </>
           )}

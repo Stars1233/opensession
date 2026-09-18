@@ -166,8 +166,9 @@ Open a normal session and press the handset beside the dictation microphone.
 Allow microphone access, then ask about the thread: what happened, why something
 changed, or what an answer means. GPT Realtime answers directly from a bounded
 recent transcript excerpt, including assistant replies and tool results. The
-voice conversation stays separate: spoken questions and answers are not posted
-to the thread and do not run the coding agent. It remembers the voice discussion
+voice conversation stays separate: ordinary discussion is not posted to the
+thread and does not run the coding agent. Explicit tasks and messages you ask
+to send are handed to the agent directly. It remembers the voice discussion
 for this call. Starting a new call starts a fresh discussion.
 
 The call stays pinned to the thread it started in. Switching to another session
@@ -175,11 +176,14 @@ or panel does not end it: a floating call panel shows a circular waveform driven
 by the real microphone and speaker levels, with **Return to thread** and
 **End call** controls. The companion keeps discussing the original thread, not
 whatever is on screen. The audio-reactive orb uses a theme-aware shader with a
-lightweight fallback and respects reduced motion.
+lightweight fallback and respects reduced motion. Microphone activity produces
+stronger purple deformation; AI speech lights the core in the accent color (or
+blue when the accent would blend with the user's hue). Its padded, transparent
+canvas keeps the glow and peaks round without square clipping.
 
 **Pause** mutes the microphone and spoken replies without ending the call.
-**Resume** continues the same voice conversation. Pending, unapproved agent
-requests are cancelled by a pause; work already started continues. Paused calls
+**Resume** continues the same voice conversation. No new requests are accepted
+while paused; work already queued or started continues. Paused calls
 skip the three-minute idle cutoff but still have the thirty-minute maximum.
 
 **Reasoning helpers.** When a question needs more thinking than the realtime
@@ -198,13 +202,13 @@ handed to the session agent instead.
 
 **Agent work.** Only genuinely new investigation, tool use, or repository work,
 or an explicit wish to send the question to the thread, goes to the session
-agent. The companion proposes that request, then the call asks permission
-aloud and listens for a spoken yes or no. Only a fresh spoken yes sends the
-exact proposed prompt through the normal durable queue; no, silence, or an
-unclear answer starts nothing. The companion warns that the agent may take a
-few minutes; you can keep discussing the transcript while it works, and the
-result comes back into the voice discussion. Unsent composer text, quotes, and
-attachments stay untouched.
+agent. An explicit request goes straight to the agent, without an extra approval
+question. The message contains only the task details and constraints, not a
+"Please propose a task for the agent" preamble. Ambiguous intent gets a short
+clarification; ordinary discussion and unsolicited suggestions do not start work.
+You can send more tasks while earlier ones are running; they use the normal
+durable queue, and their results return to the voice discussion. Tasks may take
+a few minutes. Unsent composer text, quotes, and attachments stay untouched.
 
 Calls use the same instance-wide OpenAI API key configured in
 **Settings → Preferences → Desk voice**. You do not need to enable Desk's voice
@@ -226,7 +230,7 @@ call over the same excerpt, and answers `{ text, model, engineModel }` without
 writing anything. Luna and Terra are stateless low-effort Responses calls;
 `conversation` is a throwaway one-shot Pi session with no local or MCP tools and
 no Open Session transcript. One helper runs per person per session at a time.
-The permanent API key never reaches the browser. Approved agent requests use the
+The permanent API key never reaches the browser. User-requested agent tasks use the
 existing authenticated, durable outbox, so normal session safety and automation
 restrictions still apply. No native iOS or Chrome extension behavior changes.
 
@@ -238,7 +242,7 @@ Press the handset or the floating panel's **End call** to end the call. Speaking
 over a reply stops narration, not the agent's work. Hiding the browser tab,
 closing the page, losing the voice connection, or starting another call also
 releases the microphone. Calls end after three idle minutes (not while paused
-or while a helper or approved agent request is pending) or thirty minutes total. Dictation is unavailable while a
+or while a helper or agent request is pending) or thirty minutes total. Dictation is unavailable while a
 call is active. Use the chat's existing controls for approval questions and
 stopping agent work.
 

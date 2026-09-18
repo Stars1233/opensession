@@ -201,15 +201,6 @@ function propose(
   });
   h.emit({ type: "response.done", response: { status: "completed" } });
 }
-function question(h: ReturnType<typeof setup>, callId = "request-one") {
-  h.emit({
-    type: "response.created",
-    response: { id: "question", metadata: { voiceApproval: callId } },
-  });
-  h.emit({ type: "output_audio_buffer.started", response_id: "question" });
-  h.emit({ type: "response.done", response: { status: "completed" } });
-  h.emit({ type: "output_audio_buffer.stopped", response_id: "question" });
-}
 function speak(h: ReturnType<typeof setup>, text: string, id = "spoken-one") {
   h.emit({ type: "input_audio_buffer.speech_started", item_id: id });
   h.emit({ type: "input_audio_buffer.speech_stopped", item_id: id });
@@ -236,66 +227,17 @@ test("ordinary voice questions never send thread messages or invoke helpers", as
   expect(h.sent).toEqual([]);
 });
 
-test("a tool request asks aloud but cannot authorize itself", async () => {
+test("an explicit task tool call sends immediately and deduplicates repeated call events", async () => {
   const h = setup();
   await h.client.start();
   propose(h);
-  const confirmation = h.sent.find(
-    (event) => event.type === "response.create",
-  )?.response;
-  expect(confirmation?.metadata?.voiceApproval).toBe("request-one");
-  expect(confirmation?.tool_choice).toBe("none");
-  expect(confirmation?.instructions).toContain("Say yes please");
-  expect(h.prompts).toEqual([]);
-  expect(h.helpers).toEqual([]);
-});
-
-test("only fresh speech after the confirmation plays can approve", async () => {
-  const h = setup();
-  await h.client.start();
   propose(h);
-  speak(h, "yes", "before-question");
-  h.emit({
-    type: "conversation.item.input_audio_transcription.completed",
-    item_id: "fabricated",
-    transcript: "yes",
-  });
-  expect(h.prompts).toEqual([]);
-  question(h);
-  speak(h, "Yes, please!", "after-question");
   await tick();
   expect(h.prompts).toEqual(["Explain the retry change"]);
-  h.emit({
-    type: "conversation.item.input_audio_transcription.completed",
-    item_id: "after-question",
-    transcript: "yes",
-  });
-  speak(h, "yes", "another-yes");
-  expect(h.prompts).toHaveLength(1);
+  expect(h.sent.some((event) => event.response?.metadata?.voiceApproval)).toBe(
+    false,
+  );
 });
-
-test.each(["No thanks", "Yes, but don't send it", "What did the test do?"])(
-  "%s does not authorize work and consumes the proposal",
-  async (text) => {
-    const h = setup();
-    await h.client.start();
-    propose(h);
-    question(h);
-    speak(h, text);
-    await tick();
-    speak(h, "yes", "later");
-    await tick();
-    expect(h.prompts).toEqual([]);
-    expect(h.helpers).toEqual([]);
-    expect(
-      h.sent.some(
-        (event) =>
-          event.item?.content?.[0]?.text.includes("nothing was sent") ||
-          event.item?.content?.[0]?.text.includes("Nothing was sent"),
-      ),
-    ).toBe(true);
-  },
-);
 
 test.each(["luna", "terra", "conversation"])(
   "automatically consults %s without approval or waking the session agent",
@@ -341,7 +283,6 @@ test("unknown tools cannot propose or perform work", async () => {
     name: "bash",
     arguments: "{}",
   });
-  question(h, "bad");
   speak(h, "yes");
   await tick();
   expect(h.prompts).toEqual([]);
@@ -358,13 +299,12 @@ test("thread updates change context without posting or speaking", async () => {
   expect(h.sent[0]?.session?.instructions).toContain("New agent reply");
 });
 
-test("approved agent results come back to the voice discussion", async () => {
+test("requested agent results come back to the voice discussion", async () => {
   const h = setup();
   await h.client.start();
   h.client.agentReply("Unsolicited");
   expect(h.sent).toEqual([]);
   propose(h);
-  question(h);
   speak(h, "yes please");
   await tick();
   h.client.agentReply("CI passes now");
@@ -432,16 +372,15 @@ test.each(["pagehide", "opensession-voice-call-start"])(
   },
 );
 
-test("hanging up revokes spoken approval", async () => {
+test("hanging up prevents late task calls and results", async () => {
   const h = setup();
   await h.client.start();
-  propose(h);
-  question(h);
   h.client.stop();
-  speak(h, "yes");
+  propose(h);
+  h.client.agentReply("Late result");
   await tick();
   expect(h.prompts).toEqual([]);
-  expect(h.helpers).toEqual([]);
+  expect(h.sent).toEqual([]);
 });
 
 test("pause mutes both directions without closing the call, and resume restores them", async () => {
@@ -460,21 +399,17 @@ test("pause mutes both directions without closing the call, and resume restores 
   expect(h.stats().fetches).toBe(1);
 });
 
-test("pause revokes an unapproved task and blocks late helper requests", async () => {
+test("pause blocks new task and helper calls, including replay after resume", async () => {
   const h = setup();
   await h.client.start();
-  propose(h);
-  question(h);
   h.client.setPaused(true);
-  speak(h, "yes");
+  propose(h);
   propose(h, "luna", "late-helper");
   await tick();
+  h.client.setPaused(false);
+  propose(h);
   expect(h.prompts).toEqual([]);
   expect(h.helpers).toEqual([]);
-  h.client.setPaused(false);
-  speak(h, "yes", "after-resume");
-  await tick();
-  expect(h.prompts).toEqual([]);
 });
 
 test("a helper finishing during pause waits to speak until resume", async () => {
@@ -502,4 +437,64 @@ test("a helper finishing during pause waits to speak until resume", async () => 
   expect(
     h.sent.filter((event) => event.type === "response.create"),
   ).toHaveLength(before + 1);
+});
+
+test("a direct task is forwarded without its reason or a confirmation wrapper", async () => {
+  const h = setup();
+  await h.client.start();
+  const prompt =
+    "Adjust the voice orb.\n- Increase microphone reactivity.\n- Preserve reduced motion.";
+  h.emit({
+    type: "response.function_call_arguments.done",
+    call_id: "request-one",
+    name: "request_voice_help",
+    arguments: JSON.stringify({
+      target: "session_agent",
+      prompt,
+      reason: "Make speaking activity easier to see",
+    }),
+  });
+  h.emit({ type: "response.done", response: { status: "completed" } });
+  await tick();
+  expect(h.prompts).toEqual([prompt]);
+});
+
+test("multiple tasks remain outstanding through pause and narrate each result once", async () => {
+  const h = setup();
+  await h.client.start();
+  for (let i = 0; i < 3; i++) {
+    propose(h, "session_agent", `request-${i}`);
+    await tick();
+    h.emit({ type: "response.done", response: { status: "completed" } });
+  }
+  expect(h.prompts).toHaveLength(3);
+  h.client.agentReply("First result");
+  h.emit({ type: "response.done", response: { status: "completed" } });
+  expect(h.states.at(-1)?.[0]).toBe("working");
+  h.client.setPaused(true);
+  const responses = h.sent.filter(
+    (event) => event.type === "response.create",
+  ).length;
+  h.client.agentReply("Combined result", "Second and third tasks", 2);
+  expect(
+    h.sent.filter((event) => event.type === "response.create"),
+  ).toHaveLength(responses);
+  h.client.setPaused(false);
+  expect(
+    h.sent.filter((event) => event.type === "response.create"),
+  ).toHaveLength(responses + 1);
+  for (const result of ["First result", "Combined result"])
+    expect(
+      h.sent.filter((event) => event.item?.content?.[0]?.text.includes(result)),
+    ).toHaveLength(1);
+  h.client.agentReply("Unsolicited extra");
+  h.client.stop();
+  h.client.agentReply("Stale result");
+  expect(
+    h.sent.some((event) =>
+      /Unsolicited extra|Stale result/.test(
+        event.item?.content?.[0]?.text ?? "",
+      ),
+    ),
+  ).toBe(false);
 });

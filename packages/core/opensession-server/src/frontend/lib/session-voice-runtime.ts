@@ -21,13 +21,13 @@ interface VoiceDependencies {
   createClient: (
     options: ConstructorParameters<typeof SessionVoiceClient>[0],
   ) => VoiceClient;
-  enqueue: (input: PromptOutboxInput) => void;
+  enqueue: (input: PromptOutboxInput) => string | void;
   currentUser: () => string;
 }
 const defaults: VoiceDependencies = {
   createClient: (options) => new SessionVoiceClient(options),
   enqueue: (input) => {
-    promptOutbox.enqueue(input);
+    return promptOutbox.enqueue(input).clientId;
   },
   currentUser: getCurrentUser,
 };
@@ -65,7 +65,9 @@ export class SessionVoiceRuntime {
   private busy = false;
   private user = "";
   private updates: SessionVoiceReplies | null = null;
-  private agentReply: SessionVoiceAgentReply | null = null;
+  private agentReplies: SessionVoiceAgentReply[] = [];
+  private claimedUsers = new Set<string>();
+  private narratedReplies = new Set<string>();
   constructor(private deps: VoiceDependencies = defaults) {}
 
   getSnapshot = () => this.snapshot;
@@ -114,7 +116,9 @@ export class SessionVoiceRuntime {
     this.busy = source.busy;
     this.user = this.deps.currentUser();
     this.updates = new SessionVoiceReplies(source.entries);
-    this.agentReply = null;
+    this.agentReplies = [];
+    this.claimedUsers.clear();
+    this.narratedReplies.clear();
     const client = this.deps.createClient({
       sessionId: source.sessionId,
       context: sessionVoiceContext(source.entries),
@@ -127,20 +131,29 @@ export class SessionVoiceRuntime {
           this.deps.currentUser() !== this.user
         )
           return false;
-        this.agentReply = new SessionVoiceAgentReply(prompt, this.entries);
+        const reply = new SessionVoiceAgentReply(
+          prompt,
+          this.entries,
+          this.claimedUsers,
+        );
+        const alreadyPending = this.agentReplies.length > 0;
+        this.agentReplies.push(reply);
         try {
           // No routed composer closure: this still addresses the original
           // thread when its view has unmounted. The ordinary durable outbox
           // keeps auth, queueing, permission checks and retry semantics.
-          this.deps.enqueue({
+          const messageId = this.deps.enqueue({
             sessionId: source.sessionId,
             content: prompt,
             user: this.user,
-            busyMode: this.busy ? "queue" : undefined,
+            busyMode: this.busy || alreadyPending ? "queue" : undefined,
           });
+          if (messageId) reply.messageId = messageId;
           return true;
         } catch {
-          this.agentReply = null;
+          this.agentReplies = this.agentReplies.filter(
+            (pending) => pending !== reply,
+          );
           return false;
         }
       },
@@ -169,7 +182,9 @@ export class SessionVoiceRuntime {
     const client = this.client;
     this.client = null;
     client?.stop();
-    this.agentReply = null;
+    this.agentReplies = [];
+    this.claimedUsers.clear();
+    this.narratedReplies.clear();
     this.publish({ active: false, state: "idle", error: null });
   };
   togglePause = () => this.client?.setPaused(this.snapshot.state !== "paused");
@@ -179,10 +194,24 @@ export class SessionVoiceRuntime {
     if (!this.client || !this.snapshot.active) return;
     if (this.updates?.take(this.entries, this.busy))
       this.client.updateContext(sessionVoiceContext(this.entries));
-    const reply = this.agentReply?.take(this.entries, this.busy);
-    if (reply) {
-      this.agentReply = null;
-      this.client.agentReply(reply);
+    const completed = new Map<string, { reply: string; prompts: string[] }>();
+    this.agentReplies = this.agentReplies.filter((pending) => {
+      const reply = pending.take(this.entries, this.busy);
+      if (reply === null || !pending.replyId) return true;
+      const group = completed.get(pending.replyId);
+      if (group) group.prompts.push(pending.prompt);
+      else completed.set(pending.replyId, { reply, prompts: [pending.prompt] });
+      return false;
+    });
+    for (const [id, { reply, prompts }] of completed) {
+      // A later transcript batch can expose another delivery in a turn whose
+      // shared answer was already narrated. Retire that request silently.
+      this.client.agentReply(
+        this.narratedReplies.has(id) ? null : reply,
+        prompts.join("\n\n"),
+        prompts.length,
+      );
+      this.narratedReplies.add(id);
     }
   }
 

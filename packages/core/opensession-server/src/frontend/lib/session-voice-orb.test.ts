@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
   ORB_ATTACK_MS,
+  ORB_CANVAS_OVERSCAN,
+  ORB_HALO_EDGE,
+  ORB_UNIFORMS,
+  ORB_GATE,
+  chooseOrbPalette,
+  followOrbTint,
+  orbGeometry,
+  orbLevelDrive,
   ORB_FRAGMENT_SHADER,
   ORB_RELEASE_MS,
   clamp01,
@@ -65,16 +73,7 @@ describe("parseCssColor", () => {
 
 describe("fragment shader", () => {
   test("declares every uniform the renderer uploads", () => {
-    for (const name of [
-      "u_res",
-      "u_time",
-      "u_in",
-      "u_out",
-      "u_active",
-      "u_cin",
-      "u_cout",
-      "u_cdim",
-    ]) {
+    for (const name of ORB_UNIFORMS) {
       expect(ORB_FRAGMENT_SHADER).toContain(
         `uniform ${name === "u_res" ? "vec2" : name.startsWith("u_c") ? "vec3" : "float"} ${name};`,
       );
@@ -130,6 +129,7 @@ const frame = (over: Partial<OrbFrame>): OrbFrame => ({
   output: 0,
   active: 1,
   time: 0.5,
+  tint: 0,
   palette,
   ...over,
 });
@@ -151,8 +151,8 @@ describe("drawSessionVoiceOrbFallback", () => {
     drawSessionVoiceOrbFallback(quiet.ctx, frame({}));
     const loud = recordingContext();
     drawSessionVoiceOrbFallback(loud.ctx, frame({ output: 1 }));
-    expect(loud.gradients[1].radius).toBeGreaterThan(quiet.gradients[1].radius);
-    expect(loud.gradients[1].stops[0]).toStartWith("rgba(2, 2, 2");
+    expect(loud.gradients[2].radius).toBeGreaterThan(quiet.gradients[2].radius);
+    expect(loud.gradients[2].stops[0]).toStartWith("rgba(2, 2, 2");
     expect(loud.strokes[0].alpha).toBeCloseTo(quiet.strokes[0].alpha, 9);
   });
 
@@ -166,7 +166,7 @@ describe("drawSessionVoiceOrbFallback", () => {
     expect(loud.ctx.lineWidth).toBeGreaterThan(quiet.ctx.lineWidth);
     // The whole orb swells with the mic; the core keeps its share of it.
     const share = (run: typeof quiet) =>
-      run.gradients[1].radius / run.gradients[0].radius;
+      run.gradients[2].radius / run.gradients[1].radius;
     expect(share(loud)).toBeCloseTo(share(quiet), 9);
   });
 
@@ -205,6 +205,93 @@ describe("createOrbRenderer", () => {
   test("returns nothing when no context can be had", () => {
     expect(
       createOrbRenderer(canvas, { webgl: () => null, canvas2d: () => null }),
+    ).toBeNull();
+  });
+});
+
+describe("voice drive and bounds", () => {
+  test("ignores room tone but lifts quiet speech", () => {
+    for (const level of [0, 0.01, ORB_GATE, -1, Number.NaN])
+      expect(orbLevelDrive(level)).toBe(0);
+    expect(orbLevelDrive(0.25)).toBeGreaterThan(0.4);
+    expect(orbLevelDrive(1)).toBe(1);
+    const calm = orbGeometry(0, 0, 1);
+    expect(orbGeometry(ORB_GATE, ORB_GATE, 1)).toEqual(calm);
+    const mic = orbGeometry(0.5, 0, 1);
+    const ai = orbGeometry(0, 0.5, 1);
+    expect(mic.deform).toBeGreaterThan(calm.deform * 10);
+    expect(mic.deform).toBeGreaterThan(ai.deform * 5);
+    expect(mic.pulse).toBeGreaterThan(0.03);
+    expect(ai.pulse).toBe(0);
+    expect(orbGeometry(1, 1, 0)).toEqual(orbGeometry(0, 0, 0));
+  });
+
+  test("even simultaneous full scale voices leave a transparent padded edge", () => {
+    expect(ORB_CANVAS_OVERSCAN).toBe(1.5);
+    for (const input of [0, 0.1, 0.5, 1]) {
+      for (const output of [0, 0.1, 0.5, 1]) {
+        for (const active of [0, 0.5, 1]) {
+          const g = orbGeometry(input, output, active);
+          expect(g.body - g.deform - g.pulse).toBeGreaterThan(0);
+          expect(g.reach).toBeCloseTo(g.body + g.deform + g.pulse);
+          expect(g.fade).toBeGreaterThan(0.07);
+          expect(g.reach + g.fade).toBe(ORB_HALO_EDGE);
+          expect(g.reach + g.fade).toBeLessThan(1);
+        }
+      }
+    }
+    expect(ORB_FRAGMENT_SHADER).toContain("smoothstep(0.0, u_fade, d)");
+    expect(ORB_FRAGMENT_SHADER).toContain("vec4(col * alpha, alpha)");
+  });
+
+  test("handover follows independent inputs smoothly and holds the last tint in silence", () => {
+    const mic = followOrbTint(0, 0.6, 0, 16);
+    expect(mic).toBeGreaterThan(0);
+    expect(mic).toBeLessThan(0.1);
+    expect(followOrbTint(mic, 0, 0, 1000)).toBe(mic);
+    expect(followOrbTint(1, 0, 0.6, 16)).toBeCloseTo(1 - mic);
+    expect(followOrbTint(0, 0.6, 0, 5000)).toBe(1);
+    expect(followOrbTint(1, 0, 0.6, 5000)).toBe(0);
+    expect(followOrbTint(0.5, 1, 1, 16)).toBe(0.5);
+    expect(followOrbTint(0, 1, 0, 16)).toBeCloseTo(
+      followOrbTint(followOrbTint(0, 1, 0, 8), 1, 0, 8),
+    );
+  });
+
+  test("mono and matching accents use semantic link ink to distinguish the agent", () => {
+    const input = { css: "rgb(230, 230, 230)", rgb: [0.9, 0.9, 0.9] as const };
+    const blue = { css: "rgb(25, 100, 255)", rgb: [0.1, 0.4, 1] as const };
+    expect(
+      chooseOrbPalette({
+        input,
+        output: input,
+        outputFallback: blue,
+        dim: input,
+      })?.output,
+    ).toBe(blue);
+    expect(
+      chooseOrbPalette({
+        input,
+        output: blue,
+        outputFallback: null,
+        dim: input,
+      })?.output,
+    ).toBe(blue);
+    expect(
+      chooseOrbPalette({
+        input,
+        output: { css: "rgb(230, 230, 230)", rgb: [0.9, 0.9, 0.9] },
+        outputFallback: blue,
+        dim: input,
+      })?.output,
+    ).toBe(blue);
+    expect(
+      chooseOrbPalette({
+        input: null,
+        output: blue,
+        outputFallback: blue,
+        dim: input,
+      }),
     ).toBeNull();
   });
 });
