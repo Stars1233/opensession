@@ -43,6 +43,28 @@ describe("review options", () => {
     expect(normalizeReviewOptions({ mergeRisk: "no" }).mergeRisk).toBe(true);
   });
 
+  it("parses custom rules and drops malformed entries", () => {
+    expect(REVIEW_OPTION_DEFAULTS.rules).toEqual([]);
+    expect(normalizeReviewOptions({ rules: "nope" }).rules).toEqual([]);
+    const o = normalizeReviewOptions({
+      rules: [
+        {
+          name: "marketing-only",
+          when: { allFilesMatch: ["apps/marketing/**"] },
+          then: { confidence: 5, verdict: "approve", note: "Marketing" },
+        },
+        { name: "broken", when: {}, then: { confidence: 5 } },
+      ],
+    });
+    expect(o.rules).toEqual([
+      {
+        name: "marketing-only",
+        when: { allFilesMatch: ["apps/marketing/**"] },
+        then: { confidence: 5, verdict: "approve", note: "Marketing" },
+      },
+    ]);
+  });
+
   it("ranks severities with unknowns as least severe", () => {
     expect(severityRank("P0")).toBe(0);
     expect(severityRank("high")).toBe(0);

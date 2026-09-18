@@ -323,6 +323,72 @@ Prompts and `pr-info.ts` defaults are config-driven (they interpolate the
 default repo's `ghRepo`, or the PR's own repo when threaded) — no code edits
 needed to point the PR agent at your repos.
 
+## Review options and rules
+
+A repository tunes its own reviews with `.os-review.json` at its root, so the
+knobs are versioned with the code they score. Every field is optional:
+
+```jsonc
+{
+  "ignoreGlobs": ["**/*.lock", "generated/**"], // never post findings here
+  "minInlineSeverity": "P3", // post inline comments at or above this
+  "summaryOnlyOverFiles": 80, // giant PRs get a summary, no inline noise
+  "skipKeywords": ["[skip-review]"], // in the PR title: no automatic review
+  "testOnBase": true, // new tests must fail on the merge base
+  "secretScan": true, // TruffleHog scan of the PR's added lines
+  "mergeRisk": true, // separate diff-only merge-risk score
+  "rules": [
+    {
+      "name": "marketing-only",
+      "when": { "allFilesMatch": ["apps/marketing/**", "**/*.mdx"] },
+      "then": {
+        "confidence": 5,
+        "verdict": "approve",
+        "risk": "low",
+        "note": "Marketing-only change",
+      },
+    },
+    {
+      "name": "migration-needs-human",
+      "when": { "anyFileMatches": ["**/migrations/**"] },
+      "then": { "maxConfidence": 3, "minRisk": "medium" },
+    },
+    {
+      "name": "lockfile-only",
+      "when": { "allFilesMatch": ["**/bun.lock"] },
+      "then": { "skipReview": true },
+    },
+  ],
+}
+```
+
+`rules` is the deterministic layer on top of the model's verdict. Each rule
+has a `name`, a `when` clause whose conditions are all required, and a `then`
+clause with the outcomes:
+
+- `when`: `allFilesMatch`, `anyFileMatches`, `noFileMatches` (globs over the
+  changed paths), `minChangedLines` / `maxChangedLines`, `minFiles` /
+  `maxFiles`, `labels` (any of, case-insensitive), `baseBranch` (globs),
+  and the model's result: `verdict` (`approve`, `comment`,
+  `request_changes`), `minConfidence` / `maxConfidence` (1-5), `risk`
+  (`low`, `medium`, `high`). A rule needs at least one condition.
+- `then`: `confidence` sets the 1-5 quality score, `confidenceDelta` adjusts
+  it, `minConfidence` floors it, `maxConfidence` caps it; `verdict` replaces
+  the verdict; `risk` sets the merge-risk level, `minRisk` raises it,
+  `maxRisk` lowers it; `note` is shown on the PR; `skipReview: true` stops
+  the automatic review before it starts.
+
+Rules apply in file order after the model's verdict is parsed, and the
+summary comment shows the model's original score next to the rule-adjusted
+one (`quality 5/5 (model 3/5)`) with a "Rules applied" section naming each
+rule. Rules never remove findings, so a P0 the model found still counts as
+blocking for the fix-round gates, and the secret scan's cap wins over any
+rule. Skip rules read the repo's main checkout and only gate the automatic
+path; label-forced and manual reviews still run. Rules that read the model's
+result cannot skip. Public-fork PRs use the base checkout's file, so a
+contributor cannot score their own PR. Every applied or skipping rule is
+recorded in the audit log (`review_rules_applied`, `review_skipped_by_rule`).
+
 ## Automation PR credentials and review requests
 
 Ordinary `code` automations can edit an isolated worktree, but currently receive
