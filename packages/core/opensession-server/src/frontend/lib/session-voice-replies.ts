@@ -59,3 +59,38 @@ export class SessionVoiceReplies {
     return reply.content;
   }
 }
+
+/** Wait for the approved prompt to actually reach the agent, not a reply from
+ * an older run that was already in flight when the user approved the queue. */
+export class SessionVoiceAgentReply {
+  private baseline: number;
+  private existingUsers: Set<string>;
+  private delivered = false;
+  constructor(
+    private prompt: string,
+    entries: TranscriptEntry[],
+  ) {
+    this.baseline = entries.reduce(
+      (max, entry) => Math.max(max, entry.seq ?? 0),
+      0,
+    );
+    this.existingUsers = new Set(
+      entries.filter((entry) => entry.type === "user").map((entry) => entry.id),
+    );
+  }
+  take(entries: TranscriptEntry[], busy: boolean): string | null {
+    if (busy || this.delivered) return null;
+    const index = entries.findIndex(
+      (entry) =>
+        entry.type === "user" &&
+        !this.existingUsers.has(entry.id) &&
+        (entry.seq === undefined || entry.seq > this.baseline) &&
+        entry.content.trim() === this.prompt.trim(),
+    );
+    if (index < 0) return null;
+    const reply = latestReply(entries.slice(index + 1));
+    if (!reply) return null;
+    this.delivered = true;
+    return reply.content;
+  }
+}

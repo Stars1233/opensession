@@ -58,6 +58,10 @@ export function buildRunInstructions(input: {
    *  "codestorage" swaps the PR-flow instructions for push-the-branch ones
    *  (code.storage has no PRs — a pushed branch is the change request). */
   repoHost?: "github" | "codestorage";
+  /** The primary repo is public, or its visibility could not be confirmed
+   *  (treatRepoAsPublic). Per repo, not per session, so the prompt prefix
+   *  stays shared across a repo's sessions. */
+  publicRepo?: boolean;
   /** Untracked instance-local instructions (readLocalInstructions) — appended
    *  verbatim so operator-private guidance never has to live in the tracked
    *  AGENTS.md. */
@@ -162,6 +166,22 @@ export function buildRunInstructions(input: {
       );
     }
   }
+  // Everything a run publishes to a public repository is readable by anyone,
+  // while its inputs (session context, memory, Slack, Linear, local
+  // instructions, other checkouts) are the organization's private record.
+  // Say so once, in shared text, so no engine or engine prompt has to.
+  if (!input.isAsk && !input.isScratch && input.publicRepo) {
+    parts.push(
+      "## Public repository\nTreat the primary repository as public: its PRs, commits, branch " +
+        "names, comments, and files are readable by anyone. Never put private organization " +
+        "information there: internal hostnames, URLs, or paths, private repositories' names or " +
+        "code, teammate or customer details, secrets, internal plans, or anything from memory, " +
+        "Slack, Linear, local instructions, or the session context. Describe what the change " +
+        "does in terms of this repository alone. The attribution footer and commit trailer from " +
+        "the session context are the only exception. Apply the same rule before writing to any " +
+        "other public repository.",
+    );
+  }
 
   const inproc = (input.inProcessMcp || {}) as Record<string, unknown>;
   // One guidance line per mounted internal server. Every MCP tool hides
@@ -227,7 +247,8 @@ export function buildRunInstructions(input: {
       (inproc["opensession-charts"]
         ? " `make_chart` validates one and offloads large data."
         : "") +
-      " Live fences: mermaid, math, csv, json, ansi, palette, metrics (`Label: value " +
+      ' Live fences: mermaid (quote labels with punctuation: `A["v1 (beta)"]`, ' +
+      '`-->|"@x"|`), math, csv, json, ansi, palette, metrics (`Label: value ' +
       "(delta)`), choices (a reply per line, click sends), tree, artifact (sandboxed " +
       "HTML), svg, slides (`---`); `> [!NOTE]` is a callout.",
   );

@@ -3,10 +3,18 @@ import {
   SessionVoiceClient,
   type SessionVoiceState,
 } from "../lib/session-voice-client";
-import { SessionVoiceReplies } from "../lib/session-voice-replies";
+import {
+  SessionVoiceReplies,
+  SessionVoiceAgentReply,
+} from "../lib/session-voice-replies";
+import {
+  sessionVoiceContext,
+  type SessionVoiceAgentRequest,
+} from "../../shared/session-voice";
 import type { TranscriptEntry } from "../lib/types";
 
-/** Voice is bound to the visible session, not the reusable composer lifetime. */
+/** The call discusses the thread without writing to it. Only approval of an
+ * explicit proposal can invoke the existing session send path. */
 export function useSessionVoice({
   sessionId,
   enabled,
@@ -24,14 +32,21 @@ export function useSessionVoice({
   const requested = requestedSession === sessionId;
   const [state, setState] = useState<SessionVoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [proposal, setProposal] = useState<SessionVoiceAgentRequest | null>(
+    null,
+  );
   const clientRef = useRef<SessionVoiceClient | null>(null);
-  const repliesRef = useRef<SessionVoiceReplies | null>(null);
-  const sendText = useEffectEvent((text: string) => enabled && onSend(text));
+  const updatesRef = useRef<SessionVoiceReplies | null>(null);
+  const agentReplyRef = useRef<SessionVoiceAgentReply | null>(null);
   const startCall = useEffectEvent(() => {
-    repliesRef.current = new SessionVoiceReplies(entries);
+    updatesRef.current = new SessionVoiceReplies(entries);
+    agentReplyRef.current = null;
     const client = new SessionVoiceClient({
       sessionId,
-      onText: (text) => sendText(text),
+      context: sessionVoiceContext(entries),
+      onRequest: (request) => {
+        if (clientRef.current === client) setProposal(request);
+      },
       onState: (next, detail) => {
         if (clientRef.current !== client) return;
         setState(next);
@@ -41,13 +56,13 @@ export function useSessionVoice({
     });
     clientRef.current = client;
     void client.start();
-    client.setAgentBusy(busy);
     return client;
   });
 
   useEffect(() => {
     if (!requested || !enabled) {
       setRequestedSession(null);
+      setProposal(null);
       setState("idle");
       return;
     }
@@ -60,10 +75,31 @@ export function useSessionVoice({
 
   useEffect(() => {
     if (!requested) return;
-    clientRef.current?.setAgentBusy(busy);
-    const reply = repliesRef.current?.take(entries, busy);
-    if (reply) clientRef.current?.speak(reply);
+    if (updatesRef.current?.take(entries, busy))
+      clientRef.current?.updateContext(sessionVoiceContext(entries));
+    const reply = agentReplyRef.current?.take(entries, busy);
+    if (reply) {
+      agentReplyRef.current = null;
+      clientRef.current?.agentReply(reply);
+    }
   }, [requested, busy, entries]);
+
+  async function resolveProposal(approve: boolean) {
+    const client = clientRef.current;
+    if (!enabled || !client || !proposal) return;
+    setProposal(null);
+    if (approve)
+      agentReplyRef.current = new SessionVoiceAgentReply(
+        proposal.prompt,
+        entries,
+      );
+    const accepted = await client.resolveAgentRequest(
+      proposal.callId,
+      approve,
+      onSend,
+    );
+    if (clientRef.current === client && !accepted) agentReplyRef.current = null;
+  }
 
   function toggle() {
     if (!enabled && !requested) return;
@@ -75,6 +111,8 @@ export function useSessionVoice({
     state,
     active: requested,
     error,
+    proposal,
+    resolveProposal,
     toggle,
     dismissError: () => setError(null),
   };

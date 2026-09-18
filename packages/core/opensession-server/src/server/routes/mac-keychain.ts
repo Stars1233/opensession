@@ -2,21 +2,21 @@ import { z } from "zod";
 import type { RouteContext } from "./context";
 import { readRequestTextWithinLimit } from "../shared/bounded-body";
 import {
-  onePasswordOutcomeSchema,
-  onePasswordRequests,
-} from "../onepassword-requests";
+  macKeychainOutcomeSchema,
+  macKeychainRequests,
+} from "../mac-keychain-requests";
 
 const completion = z
   .object({
     claim: z.string().uuid(),
-    outcome: onePasswordOutcomeSchema,
+    outcome: macKeychainOutcomeSchema,
   })
   .strict();
 
-export async function handleOnePasswordRoutes(
+export async function handleMacKeychainRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
-  if (!ctx.path.startsWith("/api/onepassword/")) return undefined;
+  if (!ctx.path.startsWith("/api/mac-keychain/")) return undefined;
   const reply = (data: object, status = 200) =>
     Response.json(data, {
       status,
@@ -28,15 +28,15 @@ export async function handleOnePasswordRoutes(
     ("automation" in identity && identity.automation === true)
   ) {
     return reply(
-      { error: "Sign in as a teammate to review 1Password requests" },
+      { error: "Sign in as a teammate to review macOS Keychain requests" },
       401,
     );
   }
   // No claimed identity fallback, including instances with web sign-in disabled.
   // A name picker or an agent's machine browser cannot approve local access.
-  if (ctx.path === "/api/onepassword/pending" && ctx.req.method === "GET") {
+  if (ctx.path === "/api/mac-keychain/pending" && ctx.req.method === "GET") {
     return reply({
-      request: onePasswordRequests.pending(
+      request: macKeychainRequests.pending(
         ctx.url.searchParams.get("sessionId") || "",
         identity.login,
       ),
@@ -51,12 +51,12 @@ export async function handleOnePasswordRoutes(
     return reply({ error: "Cross-origin approval is not allowed" }, 403);
   }
   const match = ctx.path.match(
-    /^\/api\/onepassword\/([a-f0-9-]{36})\/(claim|complete)$/,
+    /^\/api\/mac-keychain\/([a-f0-9-]{36})\/(claim|complete)$/,
   );
   if (!match || ctx.req.method !== "POST")
     return reply({ error: "Not found" }, 404);
   if (match[2] === "claim") {
-    const claim = onePasswordRequests.claim(match[1]!, identity.login);
+    const claim = macKeychainRequests.claim(match[1]!, identity.login);
     return claim ? reply(claim) : reply({ error: "Request unavailable" }, 409);
   }
   // The fixed schema deliberately rejects text, headers, bodies, stderr, etc.
@@ -65,7 +65,7 @@ export async function handleOnePasswordRoutes(
     .catch(() => null);
   const body = completion.safeParse(input);
   if (!body.success) return reply({ error: "Invalid result" }, 400);
-  const ok = onePasswordRequests.finish(
+  const ok = macKeychainRequests.finish(
     match[1]!,
     identity.login,
     body.data.claim,

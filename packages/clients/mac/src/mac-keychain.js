@@ -2,6 +2,7 @@ const { execFile } = require("node:child_process");
 const { access } = require("node:fs/promises");
 const { constants } = require("node:fs");
 const { homedir } = require("node:os");
+const path = require("node:path");
 const { lookup } = require("node:dns/promises");
 const { BlockList, isIP } = require("node:net");
 const https = require("node:https");
@@ -49,7 +50,7 @@ function validateIntent(value) {
       (k) =>
         ![
           "account",
-          "reference",
+          "service",
           "purpose",
           "url",
           "method",
@@ -57,12 +58,8 @@ function validateIntent(value) {
           "body",
         ].includes(k),
     ) ||
-    !printable(value.account, 100) ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/.test(value.account) ||
-    !printable(value.reference, 300) ||
-    !/^op:\/\/[^/?#%\\*]+\/[^/?#%\\*]+\/(?:[^/?#%\\*]+\/)?[^/?#%\\*]+$/.test(
-      value.reference,
-    ) ||
+    !printable(value.account, 300) ||
+    !printable(value.service, 300) ||
     !printable(value.purpose, 240) ||
     !printable(value.url, 500) ||
     !["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"].includes(value.method) ||
@@ -89,38 +86,32 @@ function validateIntent(value) {
   return Object.freeze({ ...value, url: url.href });
 }
 
-async function findOp() {
-  for (const binary of ["/opt/homebrew/bin/op", "/usr/local/bin/op"]) {
-    try {
-      await access(binary, constants.X_OK);
-      return binary;
-    } catch {}
+async function findHelper() {
+  if (process.platform !== "darwin" || !process.resourcesPath) {
+    throw new Error("Keychain access requires the packaged Mac app.");
   }
-  throw new Error(
-    "Install the 1Password CLI and enable its desktop integration.",
-  );
+  const binary = path.join(process.resourcesPath, "os-keychain");
+  await access(binary, constants.X_OK);
+  return binary;
 }
 
-async function readField(
+async function readPassword(
   intent,
-  { findBinary = findOp, execute = execFile } = {},
+  { findBinary = findHelper, execute = execFile } = {},
 ) {
   const binary = await findBinary();
   return new Promise((resolve, reject) => {
     execute(
       binary,
-      ["read", "--no-newline", "--account", intent.account, intent.reference],
+      [intent.service, intent.account],
       {
         timeout: 120_000,
         maxBuffer: 16 * 1024,
         encoding: "utf8",
-        env: {
-          HOME: homedir(),
-          PATH: "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-          LANG: "en_US.UTF-8",
-          OP_BIOMETRIC_UNLOCK_ENABLED: "true",
-        },
-        // No shell, inherited OP_SESSION/service tokens, file output, or stdin.
+        cwd: homedir(),
+        env: { HOME: homedir(), PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8" },
+        // Use our signed helper, not /usr/bin/security or a shell. No inherited
+        // DYLD_* injection, credentials, startup files, or raw-value arguments.
       },
       (error, stdout) => {
         if (
@@ -129,8 +120,8 @@ async function readField(
           !stdout ||
           /[\r\n\x00]/.test(stdout)
         ) {
-          // execFile errors include stdout/stderr. Never propagate those objects.
-          reject(new Error("1Password access failed or was cancelled."));
+          // execFile errors contain stdout/stderr. Never forward the error object.
+          reject(new Error("Keychain access failed or was denied."));
         } else resolve(stdout);
       },
     );
@@ -188,7 +179,7 @@ function sendRequest(
 
 async function executeIntent(
   intent,
-  { read = readField, send = sendRequest } = {},
+  { read = readPassword, send = sendRequest } = {},
 ) {
   try {
     const checked = validateIntent(intent);
@@ -208,7 +199,7 @@ async function executeIntent(
 module.exports = {
   validateIntent,
   publicAddress,
-  readField,
+  readPassword,
   sendRequest,
   executeIntent,
 };

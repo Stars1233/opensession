@@ -1,4 +1,4 @@
-const { validateIntent, executeIntent } = require("./onepassword");
+const { validateIntent, executeIntent } = require("./mac-keychain");
 
 function reviewOptions(record, origin) {
   const intent = validateIntent(record.intent);
@@ -10,41 +10,34 @@ function reviewOptions(record, origin) {
           (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
         );
   return {
-    type: "warning",
-    title: "1Password request",
-    message: "Use one 1Password secret?",
     detail: [
       `Open Session: ${origin}`,
       `Session: ${record.sessionId}`,
       `Requested by: ${record.login}`,
       "",
       `Purpose: ${intent.purpose}`,
-      `1Password account: ${intent.account}`,
-      `Single field: ${intent.reference}`,
+      `Keychain service: ${JSON.stringify(intent.service)}`,
+      `Keychain account: ${JSON.stringify(intent.account)}`,
       "",
       `${intent.method} ${intent.url}`,
       `Secret header: ${intent.injection === "bearer" ? "Authorization: Bearer" : "x-api-key"}`,
       `JSON body (quoted): ${body}`,
       "",
-      "Approve only a destination you trust with this secret. The Mac sends the field directly to this URL once. Redirects are not followed.",
-      "Only the HTTP status returns to the agent. The secret, response body and headers never go to Open Session or the AI provider.",
-      "1Password may separately authorize account access. This approval still reads only the field above.",
+      "Only HTTP status returns to the agent. No redirects.",
+      "macOS may ask to access this Keychain item.",
+      "Choose Allow for one-time access, not Always Allow.",
     ].join("\n"),
-    buttons: ["Decline", "Approve once"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
   };
 }
 
 // Only a native menu click calls review(). There is no renderer IPC for reading
 // secrets or invoking this approval UI. Dependencies make the whole chain
-// testable without a real account, network request, or 1Password installation.
-class OnePasswordReview {
+// testable without a real account, network request, or Keychain access.
+class MacKeychainReview {
   constructor({
     dialog,
     context,
-    approve = (target, options) => dialog.showMessageBox(target, options),
+    approve = require("./mac-keychain-menu").showKeychainRequestMenu,
     execute = executeIntent,
   }) {
     this.dialog = dialog;
@@ -63,7 +56,7 @@ class OnePasswordReview {
         await this.dialog.showMessageBox(target, {
           message: "Open a session first",
           detail:
-            "View the requesting session in the Mac app, then choose Review 1Password request again.",
+            "View the requesting session in the Mac app, then choose Keychain requests again.",
         });
         return;
       }
@@ -74,7 +67,7 @@ class OnePasswordReview {
       };
       const api = async (route, body) => {
         const response = await target.webContents.session.fetch(
-          `${origin}/api/onepassword/${route}`,
+          `${origin}/api/mac-keychain/${route}`,
           {
             method: body === undefined ? "GET" : "POST",
             credentials: "include",
@@ -93,7 +86,7 @@ class OnePasswordReview {
       if (!stillHere()) return;
       if (!request) {
         await this.dialog.showMessageBox(target, {
-          message: "No pending 1Password request",
+          message: "No pending macOS Keychain request",
           detail:
             "Requests expire after 10 minutes and are visible only to the signed-in teammate who prompted the agent.",
         });
@@ -117,13 +110,13 @@ class OnePasswordReview {
       const { claim } = await api(`${request.id}/claim`, {});
       if (typeof claim !== "string" || !/^[a-f0-9-]{36}$/.test(claim))
         throw new Error("Invalid claim");
-      // Navigation, sign-out, or expiry while claiming must not unlock 1Password.
+      // Navigation, sign-out, or expiry while claiming must not unlock macOS Keychain.
       const outcome =
         response === 1 && stillHere() && request.expiresAt > Date.now()
           ? await this.execute(intent)
           : { status: "declined" };
       // executeIntent returns only a closed result shape. Never attach an error,
-      // CLI output, response text, or any part of the secret to this POST.
+      // helper output, response text, or any part of the secret to this POST.
       await api(`${request.id}/complete`, { claim, outcome });
       if (stillHere())
         await this.dialog.showMessageBox(target, {
@@ -135,13 +128,13 @@ class OnePasswordReview {
                 : "Request failed",
           detail:
             outcome.status === "failed"
-              ? "Check that the op CLI is installed and 1Password → Settings → Developer → Integrate with 1Password CLI is enabled. Access may also have been cancelled, or the destination may be unavailable. The request is spent; no automatic retry was made."
+              ? "Keychain access may have been denied, the service/account may not match an existing generic-password item, or the destination may be unavailable. The request is spent; no automatic retry was made."
               : "No secret or response content was sent to the agent.",
         });
     } catch {
       if (target && !target.isDestroyed())
         await this.dialog.showMessageBox(target, {
-          message: "1Password request unavailable",
+          message: "macOS Keychain request unavailable",
           detail:
             "Check your Open Session sign-in and connection. The request may have expired or been reviewed on another Mac. If execution already started, it will not be retried automatically.",
         });
@@ -151,4 +144,4 @@ class OnePasswordReview {
   }
 }
 
-module.exports = { OnePasswordReview, reviewOptions };
+module.exports = { MacKeychainReview, reviewOptions };

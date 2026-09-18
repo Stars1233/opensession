@@ -3,6 +3,19 @@ Default to Bun instead of Node.js.
 Keep instance-private operator instructions in an untracked `AGENTS.local.md` or
 `CLAUDE.local.md`, never in this file.
 
+## Public repository
+
+This repository is public. Everything that lands here is readable by anyone:
+commits, branch names, PR titles and bodies, review comments, issues, code,
+docs, tests, fixtures, and screenshots. Never put private organization
+information in any of them: internal hostnames, URLs, or paths, private
+repositories' names or code, teammate or customer details, secrets, internal
+plans, or anything taken from memory, Slack, Linear, local instructions, or
+the session context. Describe what a change does in terms of this repository
+alone. The session attribution footer and the `Co-authored-by` trailer are the
+only exception. Use placeholder names (`acme`, `example.test`) in examples and
+tests.
+
 ## Publishing to repositories
 
 Repositories owned by your own organization are fair game, including public

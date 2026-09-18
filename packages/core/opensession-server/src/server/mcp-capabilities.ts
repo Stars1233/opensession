@@ -69,7 +69,7 @@ export const INTERNAL_MCP_CAPABILITIES = {
     summary:
       "Borrow a teammate's credential for a stated purpose, with their approval.",
     guidance:
-      "Request temporary access to a teammate's credential with their approval when ambient credentials cannot satisfy the task. For 1Password on their Mac, `request_1password` asks for one field and one HTTPS API call, approved in the native app. Only HTTP status returns; the secret never enters the session or model context. Supply an op:// field reference, never the value.",
+      "Borrow a teammate's credential with their approval when ambient access is insufficient. `request_mac_keychain` uses Apple's native prompt for one macOS Keychain service/account and one HTTPS call. Only HTTP status returns, never secret values or response content. This does not access 1Password vaults.",
   },
   "opensession-publish": {
     summary: "Publish a directory as a durable internal web app.",

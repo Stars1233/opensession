@@ -1459,6 +1459,8 @@ export function SessionViewerMainRegion({
                         <SessionVoiceStatus
                           state={voice.state}
                           error={voice.error}
+                          proposal={voice.proposal}
+                          onResolve={voice.resolveProposal}
                           onDismiss={voice.dismissError}
                         />
                         {attachedComposer}

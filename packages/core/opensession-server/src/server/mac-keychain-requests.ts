@@ -9,11 +9,13 @@ const printable = (max: number) =>
     .max(max)
     .regex(/^[^\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]+$/);
 
-export const onePasswordRequestSchema = z
+export const macKeychainRequestSchema = z
   .object({
-    account: printable(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/),
-    reference: printable(300).regex(
-      /^op:\/\/[^/?#%\\*]+\/[^/?#%\\*]+\/(?:[^/?#%\\*]+\/)?[^/?#%\\*]+$/,
+    service: printable(300).describe(
+      "Exact generic-password service name in macOS Keychain, not a 1Password reference.",
+    ),
+    account: printable(300).describe(
+      "Exact account name of that Keychain item.",
     ),
     purpose: printable(240),
     url: printable(500)
@@ -41,8 +43,8 @@ export const onePasswordRequestSchema = z
     message: "GET and HEAD cannot have a body",
   });
 
-export type OnePasswordIntent = z.infer<typeof onePasswordRequestSchema>;
-export const onePasswordOutcomeSchema = z.discriminatedUnion("status", [
+export type MacKeychainIntent = z.infer<typeof macKeychainRequestSchema>;
+export const macKeychainOutcomeSchema = z.discriminatedUnion("status", [
   z
     .object({
       status: z.literal("completed"),
@@ -51,19 +53,19 @@ export const onePasswordOutcomeSchema = z.discriminatedUnion("status", [
     .strict(),
   z.object({ status: z.enum(["declined", "failed"]) }).strict(),
 ]);
-type Outcome = z.infer<typeof onePasswordOutcomeSchema>;
+type Outcome = z.infer<typeof macKeychainOutcomeSchema>;
 type Record = {
   id: string;
   sessionId: string;
   login: string;
-  intent: OnePasswordIntent;
+  intent: MacKeychainIntent;
   expiresAt: number;
   status: "pending" | "claimed" | Outcome["status"];
   claim?: string;
   httpStatus?: number;
 };
 
-export class OnePasswordRequests {
+export class MacKeychainRequests {
   private records = new Map<string, Record>();
   constructor(private now = Date.now) {}
 
@@ -77,7 +79,7 @@ export class OnePasswordRequests {
     this.prune();
     if (!sessionId || !login)
       throw new Error("A verified teammate is required");
-    const intent = onePasswordRequestSchema.parse(input);
+    const intent = macKeychainRequestSchema.parse(input);
     if (this.records.size >= 100) throw new Error("Too many pending requests");
     if (
       [...this.records.values()].some(
@@ -86,7 +88,9 @@ export class OnePasswordRequests {
           ["pending", "claimed"].includes(r.status),
       )
     ) {
-      throw new Error("This session already has a pending 1Password request");
+      throw new Error(
+        "This session already has a pending macOS Keychain request",
+      );
     }
     const record: Record = {
       id: crypto.randomUUID(),
@@ -119,7 +123,7 @@ export class OnePasswordRequests {
       : null;
   }
 
-  // Claim is atomic and precedes the CLI invocation. A second Mac, retry, or
+  // Claim is atomic and precedes the native helper invocation. A second Mac, retry, or
   // double-click cannot execute the same approval twice, even after failure.
   claim(id: string, login: string) {
     this.prune();
@@ -133,7 +137,7 @@ export class OnePasswordRequests {
 
   finish(id: string, login: string, claim: string, input: unknown): boolean {
     this.prune();
-    const outcome = onePasswordOutcomeSchema.safeParse(input);
+    const outcome = macKeychainOutcomeSchema.safeParse(input);
     const r = this.records.get(id);
     if (
       !outcome.success ||
@@ -166,4 +170,4 @@ export class OnePasswordRequests {
   }
 }
 
-export const onePasswordRequests = new OnePasswordRequests();
+export const macKeychainRequests = new MacKeychainRequests();

@@ -108,6 +108,10 @@ export interface RepoSection {
   sharedCheckout?: boolean;
   /** Worktree publication preference; absent = pull-request. */
   publicationMode?: RepoPublicationMode;
+  /** Pins the repository's visibility for the public-repository rules
+   *  (repo-visibility.ts). Absent = ask GitHub, and treat an unconfirmed
+   *  answer as public. */
+  public?: boolean;
   /** Marks this repo as the instance default (see defaultRepo()). */
   default?: boolean;
   /** PNG served as the repo's tile icon (absolute path, or relative to the
@@ -201,6 +205,10 @@ export interface PolicySection {
   githubWriteOwners?: string[];
   /** Bot accounts trusted to attach PRs to sessions via attribution footers. */
   githubBotLogins?: string[];
+  /** Private organization terms (hostnames, customer names, private repo
+   *  names) that a publishing command in a public repository may never
+   *  contain; see privateTermsDenyReason in command-policy.ts. */
+  privateTerms?: string[];
 }
 
 /** Persona copy in prompt builders. */
@@ -280,6 +288,8 @@ export interface Repo {
   sharedCheckout?: boolean;
   /** Worktree publication preference; absent = pull-request. */
   publicationMode?: RepoPublicationMode;
+  /** Pinned visibility (see RepoSection.public). */
+  public?: boolean;
   /** Instance default repo (defaultRepo()). */
   default?: boolean;
   /** Tile-icon PNG path (see RepoSection.icon). */
@@ -401,6 +411,7 @@ function parseRepoSection(v: unknown): RepoSection | undefined {
     csRepo: str(o.csRepo),
     sharedCheckout: bool(o.sharedCheckout),
     publicationMode,
+    public: bool(o.public),
     default: bool(o.default),
     icon: str(o.icon),
     iconSource,
@@ -574,6 +585,7 @@ function parseConfig(text: string): OpenSessionConfig {
         automationDeniedTools: strArray(policy.automationDeniedTools),
         githubWriteOwners: strArray(policy.githubWriteOwners),
         githubBotLogins: strArray(policy.githubBotLogins),
+        privateTerms: strArray(policy.privateTerms),
       });
     }
     const organization = obj(raw.organization);
@@ -854,6 +866,7 @@ export function configuredRepos(
           csRepo: entry.csRepo,
           sharedCheckout: entry.sharedCheckout,
           publicationMode: entry.publicationMode,
+          public: entry.public,
           default: entry.default,
           icon: entry.icon,
           iconSource: entry.iconSource,
@@ -1048,6 +1061,12 @@ export function githubWriteOwners(): string[] {
         .filter(Boolean),
     ),
   ];
+}
+
+/** Private organization terms a public repository may never receive
+ *  (policy.privateTerms; see privateTermsDenyReason). */
+export function privateTerms(): string[] {
+  return getConfig().policy?.privateTerms || [];
 }
 
 export function githubBotLogins(): string[] {

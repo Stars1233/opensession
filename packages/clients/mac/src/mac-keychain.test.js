@@ -3,67 +3,53 @@ const { EventEmitter } = require("node:events");
 const {
   validateIntent,
   publicAddress,
-  readField,
+  readPassword,
   sendRequest,
   executeIntent,
-} = require("./onepassword");
+} = require("./mac-keychain");
 
 const intent = {
-  account: "my.1password.com",
-  reference: "op://Work/Example/token",
+  account: "demo@example.test",
+  service: "Example API",
   purpose: "Check authentication",
   url: "https://api.example.com/me",
   method: "GET",
   injection: "bearer",
 };
 
-describe("1Password native secret boundary", () => {
-  test("reads one field with fixed arguments and a non-inherited environment", async () => {
-    const old = process.env.OP_SERVICE_ACCOUNT_TOKEN;
-    process.env.OP_SERVICE_ACCOUNT_TOKEN = "must-not-inherit";
-    try {
-      const secret = await readField(intent, {
-        findBinary: async () => "/opt/homebrew/bin/op",
-        execute: (binary, args, options, callback) => {
-          expect(binary).toBe("/opt/homebrew/bin/op");
-          expect(args).toEqual([
-            "read",
-            "--no-newline",
-            "--account",
-            intent.account,
-            intent.reference,
-          ]);
-          expect(options.env.OP_BIOMETRIC_UNLOCK_ENABLED).toBe("true");
-          expect(Object.keys(options.env).sort()).toEqual([
-            "HOME",
-            "LANG",
-            "OP_BIOMETRIC_UNLOCK_ENABLED",
-            "PATH",
-          ]);
-          expect(options.shell).toBeUndefined();
-          expect(options.maxBuffer).toBe(16 * 1024);
-          expect(options.timeout).toBe(120_000);
-          callback(null, "FAKE_SECRET");
-        },
-      });
-      expect(secret).toBe("FAKE_SECRET");
-    } finally {
-      if (old === undefined) delete process.env.OP_SERVICE_ACCOUNT_TOKEN;
-      else process.env.OP_SERVICE_ACCOUNT_TOKEN = old;
-    }
+describe("macOS Keychain native secret boundary", () => {
+  test("reads one exact service/account with only the packaged helper and a minimal environment", async () => {
+    const secret = await readPassword(intent, {
+      findBinary: async () => "/test/resources/os-keychain",
+      execute: (binary, args, options, callback) => {
+        expect(binary).toBe("/test/resources/os-keychain");
+        expect(args).toEqual([intent.service, intent.account]);
+        expect(Object.keys(options.env).sort()).toEqual([
+          "HOME",
+          "LANG",
+          "PATH",
+        ]);
+        expect(options.env.PATH).toBe("/usr/bin:/bin");
+        expect(options.shell).toBeUndefined();
+        expect(options.maxBuffer).toBe(16 * 1024);
+        expect(options.timeout).toBe(120_000);
+        callback(null, "FAKE_SECRET");
+      },
+    });
+    expect(secret).toBe("FAKE_SECRET");
   });
 
-  test("CLI errors, multiline fields and network errors never reach the caller", async () => {
+  test("Helper errors, multiline values and network errors never reach the caller", async () => {
     await expect(
-      readField(intent, {
-        findBinary: async () => "/test/op",
+      readPassword(intent, {
+        findBinary: async () => "/test/resources/os-keychain",
         execute: (_binary, _args, _options, callback) =>
           callback(new Error("FAKE_SECRET"), "FAKE_SECRET"),
       }),
-    ).rejects.toThrow("1Password access failed or was cancelled.");
+    ).rejects.toThrow("Keychain access failed or was denied.");
     await expect(
-      readField(intent, {
-        findBinary: async () => "/test/op",
+      readPassword(intent, {
+        findBinary: async () => "/test/resources/os-keychain",
         execute: (_binary, _args, _options, callback) =>
           callback(null, "injected\r\nHeader: value"),
       }),
@@ -85,12 +71,12 @@ describe("1Password native secret boundary", () => {
     ).toEqual({ status: "failed" });
   });
 
-  test("independently rejects whole-item reads, flags and unsafe targets", () => {
+  test("independently rejects missing identifiers and unsafe targets", () => {
     for (const extra of [
-      { reference: "op://Work/Example" },
-      { reference: "op://Work/Example/*" },
-      { reference: "op://Work/Example/token?x=y" },
-      { account: "--account=evil" },
+      { service: "" },
+      { account: "" },
+      { account: "invalid\naccount" },
+      { service: ["first", "second"] },
       { url: "http://api.example.com" },
       { url: "https://a:b@api.example.com" },
       { url: "https://127.0.0.1/" },
