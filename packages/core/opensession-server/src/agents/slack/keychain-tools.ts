@@ -1,10 +1,11 @@
 /**
  * opensession-keychain — borrow a teammate's credential for a stated purpose.
  *
- * Three tools, no secret-handling among them: list what exists, ask an owner
+ * No tool handles secret values: list what exists, ask an owner
  * for a scoped grant, list this session's grants. Approved calls go through
  * the broker (routes/keychain.ts) with the credential injected server-side, so
  * the model never holds the secret and cannot leak one it never had.
+ * Mac requests instead resolve one Keychain item locally and return status only.
  *
  * Interactive runs ONLY — same boundary as opensession-humans. An ask is a DM
  * to a teammate carrying a model-authored "purpose" string; letting untrusted
@@ -19,9 +20,9 @@ import { createSdkMcpServer, tool } from "../../server/inprocess-mcp";
 import { z } from "zod";
 import { githubLoginFor } from "../../server/shared/user-mappings";
 import {
-  onePasswordRequestSchema,
-  onePasswordRequests,
-} from "../../server/onepassword-requests";
+  macKeychainRequestSchema,
+  macKeychainRequests,
+} from "../../server/mac-keychain-requests";
 import {
   listCredentials,
   listGrants,
@@ -42,20 +43,20 @@ function text(s: string) {
 export function createKeychainMcpServer(ctx: KeychainToolContext) {
   const tools = [
     tool(
-      "request_1password",
-      "Request ONE 1Password field for ONE exact HTTPS API request on the prompting teammate's Mac. Use an op://vault/item/[section/]field reference, never a secret value. No vault search, whole-item reads, shell commands, or standing access. The human reviews the account, field, purpose, URL, method and body in OS → Review 1Password request… while viewing this session, then approves once. Requires the Mac app, signed-in web identity, installed op CLI and its desktop integration. Expires in 10 minutes. The value stays on the Mac and is injected directly into the approved HTTPS request. ONLY HTTP status is returned, never the response body or headers, so this cannot retrieve API data for you. Do not use a model-provider endpoint as the destination. On decline/failure do not re-request without the human's go-ahead.",
-      onePasswordRequestSchema.shape,
+      "request_mac_keychain",
+      "Request ONE generic-password item from the prompting teammate's macOS Keychain for ONE exact HTTPS API call. Supply the item's exact service and account identifiers, never its value. This uses Apple's Keychain access prompt, not 1Password and not a vault-wide grant. No listing, shell commands, ACL changes, or raw secret export. The human opens this session in the Mac app, chooses OS → Keychain requests…, inspects the destination and selects Use once. macOS controls whether access needs Allow / Always Allow / Deny; recommend Allow, never Always Allow. Existing item permissions may allow access without another prompt. Requests expire after 10 minutes and can execute only once. Only HTTP status returns; no response data, headers or secret values enter model context. Do not use a model-provider endpoint as the destination. After a decline/failure do not retry without the human's go-ahead.",
+      macKeychainRequestSchema.shape,
       async (args) => {
         const login = githubLoginFor(ctx.user);
         if (!login)
           return text("A verified teammate with a GitHub login is required.");
-        const parsed = onePasswordRequestSchema.safeParse(args);
+        const parsed = macKeychainRequestSchema.safeParse(args);
         if (!parsed.success)
           return text(
-            "Invalid request: provide one field reference, account, purpose and exact HTTPS request (body at most 512 characters). Never supply the secret itself.",
+            "Invalid request: provide one Keychain service, account, purpose and exact HTTPS request (body at most 512 characters). Never supply the secret itself.",
           );
         try {
-          const request = onePasswordRequests.request(
+          const request = macKeychainRequests.request(
             ctx.sessionId,
             login,
             parsed.data,
@@ -63,7 +64,7 @@ export function createKeychainMcpServer(ctx: KeychainToolContext) {
           return text(
             JSON.stringify({
               ...request,
-              next: "Ask the human to open this session in the Mac app and choose OS → Review 1Password request…. Check onepassword_request_status after they finish.",
+              next: "Ask the human to open this session in the Mac app and choose OS → Keychain requests…. Check mac_keychain_request_status after they finish.",
             }),
           );
         } catch {
@@ -74,15 +75,15 @@ export function createKeychainMcpServer(ctx: KeychainToolContext) {
       },
     ),
     tool(
-      "onepassword_request_status",
-      "Check this session's 1Password request. Returns only pending/claimed/completed/declined/failed and an HTTP status when completed. No secrets, response bodies, headers or CLI errors are available. Missing requests expired or were revoked by a server restart.",
+      "mac_keychain_request_status",
+      "Check this session's macOS Keychain request. Returns only pending/claimed/completed/declined/failed and an HTTP status when completed. No secrets, response bodies, headers or helper errors are available. Missing requests expired or were revoked by a server restart.",
       { requestId: z.string().uuid() },
       async ({ requestId }) => {
         const login = githubLoginFor(ctx.user);
         return text(
           JSON.stringify(
             login
-              ? onePasswordRequests.status(requestId, ctx.sessionId, login)
+              ? macKeychainRequests.status(requestId, ctx.sessionId, login)
               : null,
           ),
         );

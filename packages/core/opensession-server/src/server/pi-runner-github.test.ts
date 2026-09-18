@@ -9,6 +9,7 @@ import { mergeGuardDenyReason } from "./command-policy";
 import { humanPrompter } from "./session-actors";
 import {
   githubCodeRunEnv,
+  githubReadReposRunEnv,
   githubReadRunEnv,
   runGithubEnv,
   runGithubMergeGuard,
@@ -212,6 +213,46 @@ describe("recovered GitHub code-run credentials", () => {
       const env = await githubCodeRunEnv("/remote/unregistered/repo");
       expect(env.GH_TOKEN).toBe("projected-service-token");
       expect(env.GIT_CONFIG_VALUE_2).toBe("git@github.com:");
+      // No read token in the file means none in the shell, whatever the
+      // run's automation lists: a remote host never mints on its own.
+      const withReadRepos = await runGithubEnv({
+        isCode: true,
+        ownerTurn: false,
+        githubKindRun: false,
+        cwd: "/remote/unregistered/repo",
+        readRepos: ["tellahq/api"],
+      });
+      expect(withReadRepos.GH_TOKEN).toBe("projected-service-token");
+      expect(withReadRepos.GH_READ_TOKEN).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a projected read token rides beside the primary one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opensession-projected-github-"));
+    try {
+      const auth = join(dir, "github-auth.json");
+      writeFileSync(
+        auth,
+        JSON.stringify({
+          GH_TOKEN: "projected-service-token",
+          GH_READ_TOKEN: "projected-read-token",
+        }),
+      );
+      process.env[GITHUB_RUN_AUTH_FILE_ENV] = auth;
+
+      const env = await runGithubEnv({
+        isCode: true,
+        ownerTurn: false,
+        githubKindRun: false,
+        cwd: "/remote/unregistered/repo",
+        readRepos: ["tellahq/api"],
+      });
+      expect(env.GH_TOKEN).toBe("projected-service-token");
+      expect(env.GITHUB_TOKEN).toBe("projected-service-token");
+      expect(env.GH_READ_TOKEN).toBe("projected-read-token");
+      expect(env.GIT_CONFIG_VALUE_2).toBe("git@github.com:");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -292,6 +333,30 @@ describe("which credential a run's shell holds", () => {
         cwd,
       });
       expect(nudged.GH_TOKEN).toBe("human-token");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a refused sibling-repository mint leaves the primary credential alone", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opensession-run-github-"));
+    try {
+      const cwd = await seed(dir);
+      // No App key here, so both mints fail closed: the run keeps the
+      // (empty) repository-scoped credential and its git wiring, and simply
+      // has no GH_READ_TOKEN rather than a wider or a person's token.
+      const env = await runGithubEnv({
+        isCode: true,
+        ownerTurn: false,
+        githubKindRun: false,
+        cwd,
+        readRepos: ["tellahq/api", "tellahq/web"],
+      });
+      expect(env.GH_TOKEN).toBe("");
+      expect(env.GH_READ_TOKEN).toBeUndefined();
+      expect(env.GIT_CONFIG_VALUE_2).toBe("git@github.com:");
+      expect(Object.values(env)).not.toContain("human-token");
+      expect(await githubReadReposRunEnv(cwd, undefined)).toEqual({});
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

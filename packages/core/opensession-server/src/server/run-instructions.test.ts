@@ -75,6 +75,33 @@ describe("buildRunInstructions", () => {
     expect(interactiveSource).not.toContain("prReviewer:");
   });
 
+  test("names the read token and the sibling repositories it covers", async () => {
+    const prompt = buildRunInstructions({
+      isAsk: false,
+      hasSession: true,
+      readRepos: ["tellahq/api", "tellahq/web"],
+    });
+    expect(prompt).toContain("## Cross-repository reads");
+    expect(prompt).toContain(
+      "`GH_READ_TOKEN` in the shell is a read-only GitHub token covering this repository and `tellahq/api`, `tellahq/web`.",
+    );
+    expect(prompt).toContain("GH_TOKEN=$GH_READ_TOKEN gh pr list --repo");
+    expect(
+      buildRunInstructions({ isAsk: false, hasSession: true }),
+    ).not.toContain("GH_READ_TOKEN");
+
+    // Only automations carry the list; an interactive turn never mints a
+    // second token.
+    const automationSource = await Bun.file(
+      new URL("./automations.ts", import.meta.url),
+    ).text();
+    const interactiveSource = await Bun.file(
+      new URL("./run-session.ts", import.meta.url),
+    ).text();
+    expect(automationSource).toContain("readRepos: automation.readRepos");
+    expect(interactiveSource).not.toContain("readRepos:");
+  });
+
   test("names the model worker sessions must use", () => {
     const prompt = buildRunInstructions({
       isAsk: false,

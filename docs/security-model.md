@@ -121,6 +121,12 @@ configuration for the run.
   but it grants no GitHub authority. It matters only when the run already has
   an authorized publication path. See
   [Automation PR credentials and review requests](setup/github.md#automation-pr-credentials-and-review-requests).
+- An automation's `readRepos` (sibling `owner/repo` names under its own
+  owner) gives its runs a second, read-only installation token,
+  `GH_READ_TOKEN`, covering its repo plus those. The primary `GH_TOKEN` is
+  never widened, the mint fails closed when the App is not installed on one
+  of the repositories, and only the names are journaled. See
+  [Who holds which credential](setup/github.md#who-holds-which-credential).
 
 ## Stripe: a third enforcement tier
 
@@ -145,37 +151,47 @@ runs was tried and reverted: it blanked Stripe reads for no security gain. The
 money movers were unreachable either way, and Stripe enforces the restricted
 key's write ceiling.)
 
-## Mac 1Password requests
+## Mac Keychain requests
 
-The interactive-only `opensession-keychain` server can request one 1Password
-field for one exact HTTPS API call. The request contains only an `op://` field
-reference, account, purpose and HTTP intent. A ten-minute, memory-only queue
-binds it to the prompting teammate's roster-resolved GitHub login and session.
-Only a verified human web identity can inspect/claim/complete that request;
-name-picker fallback and machine authentication are rejected. Restart revokes
-all pending requests. Atomic claim precedes execution, so two Macs cannot use
-the same request and failures cannot retry it.
+The interactive-only `opensession-keychain` server can request one macOS Keychain
+generic-password item for one exact HTTPS API call. Requests carry only the
+service/account identifiers, purpose and HTTP intent. A ten-minute, memory-only
+queue binds each to the prompting teammate's roster-resolved GitHub login and
+session. Verified human web identity is required; name-picker fallback and machine
+authentication are rejected. Restart revokes pending requests. Atomic claim
+precedes execution, so two Macs cannot execute the same request and failures do
+not retry it.
 
-Approval starts from the native app menu, not remote-page IPC. A dedicated
-sandboxed, network-disabled, packaged sheet displays the entire intent with
-scrollable details and a default Decline action. Its IPC accepts only the owned
-main frame at the exact packaged page. The native process revalidates and freezes
-the intent, checks the session/organization again after approval and claim, then
-runs the fixed official `op read` command for exactly one field. Its minimal
-environment excludes inherited `OP_SESSION_*`, service-account tokens and shell
-startup configuration. 1Password's account-level biometric authorization is not
-used as a substitute for this per-field/per-call approval.
+Execution starts only through the native app menu. The full intent appears in a
+native menu; selecting **Use once** dispatches an exact service/account lookup to
+the packaged, signed `OS Keychain` helper. No remote-page IPC can read credentials
+or trigger execution. The Mac revalidates and freezes the intent and checks the
+session/organization again after selection and claim. The helper directly calls
+Apple's `SecKeychainFindGenericPassword`, never `/usr/bin/security`, a shell, or
+1Password. macOS supplies its own item-access prompt and enforces the item's ACL.
+**Allow** grants that access once; **Always Allow** changes subsequent behavior.
+Existing trusted-application permissions may suppress prompts. The app neither
+changes ACLs nor forces prompts by disturbing the user's Keychain settings. Every
+request still requires an explicit native menu action, including when Keychain
+already trusts the helper.
 
-The credential stays in native-process memory and is injected directly into the
-approved HTTPS request. No browser cookies, redirects, private/loopback/tailnet
-DNS targets, custom ports, arbitrary headers, subprocess error text, or response
-content are forwarded. The agent gets only a fixed outcome and numeric HTTP
-status. This deliberately sacrifices response data: redacting substrings cannot
-prove that an API response won't echo or encode the credential. The feature does
-not place secrets in agent-readable files or environments, export raw values,
-use the legacy keychain broker, or send credentials to the Open Session server or
-model context. The human must trust the approved API destination with the secret;
-Open Session cannot control what that external service does after receipt.
+The helper receives only service/account identifiers, a minimal environment with
+no inherited dynamic-library injection variables or credentials, and a two-minute
+deadline. It returns the value through a private pipe to Electron's main process
+and exits. The value never goes to a renderer, server, agent-readable file,
+environment, or model context. The main process injects it into one approved HTTPS
+request with a thirty-second deadline. No browser cookies, redirects,
+private/loopback/tailnet DNS targets, custom ports, arbitrary headers, helper error
+text, or response content are forwarded. The model receives only a fixed outcome
+and numeric HTTP status. This deliberately sacrifices response data: substring
+redaction cannot prove an API won't echo or encode the credential. The human must
+trust the approved API destination with the secret; Open Session cannot control
+that service after receipt.
+
+This replaces the earlier CLI-based 1Password path. It does not offer 1Password
+vault access, item enumeration, raw export, Apple Passwords/iCloud access, or
+Keychain mutation. Native tests use a new disposable keychain with interaction
+disabled, never the default search list or real user credentials.
 
 ## Per-user MCP servers (`allowedUsers`)
 

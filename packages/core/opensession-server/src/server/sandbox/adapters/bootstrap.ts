@@ -2336,6 +2336,21 @@ function makeRemoteLauncher(
             spec.mode === "code"
               ? await githubServiceCredentialEnv(registeredRepo.ghRepo)
               : await githubServiceReadOnlyEnv(registeredRepo.ghRepo);
+          // An automation listing sibling repositories to read gets the
+          // read-only GH_READ_TOKEN beside its primary token (same private
+          // file; projectedGithubRunEnv lifts it into the shell). A refused
+          // mint leaves it out rather than widening anything.
+          if (githubAuth.GH_TOKEN && automationProfile && spec.readRepos) {
+            const { githubServiceReadReposEnv } =
+              await import("../../github-app");
+            githubAuth = {
+              ...githubAuth,
+              ...(await githubServiceReadReposEnv(
+                registeredRepo.ghRepo,
+                spec.readRepos,
+              )),
+            };
+          }
         }
       }
       const githubAuthPath = `${dir}/github-auth.json`;

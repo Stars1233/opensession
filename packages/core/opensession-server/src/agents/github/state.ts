@@ -46,6 +46,8 @@ export interface LastReviewState {
   /** Time to recover every user if the change is wrong. */
   recovery?: "minutes" | "hours" | "days" | "irreversible";
   riskFactors?: string[];
+  /** Names of the `.os-review.json` rules that changed this verdict or its scores. */
+  rules?: string[];
   findings: number;
   /** P0/P1 findings (request_changes counts as a floor of 1). */
   blocking: number;

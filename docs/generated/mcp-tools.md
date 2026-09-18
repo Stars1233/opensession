@@ -220,13 +220,13 @@ List all of Assistant's automations (routines): scheduled, event- and webhook-tr
 
 ### `create_automation`
 
-`mcp__opensession-admin__create_automation` · input: `name` (string, required), `prompt` (string, required), `schedule` (string), `mode` ("ask" | "code"), `repo` (string), `mcpServers` (string[]), `sandbox` (boolean), `model` (string), `accountId` (string), `accountStrict` (boolean), `usageCredits` (boolean), `prReviewer` (string), `owner` (string), `workspaceId` (string)
+`mcp__opensession-admin__create_automation` · input: `name` (string, required), `prompt` (string, required), `schedule` (string), `mode` ("ask" | "code"), `repo` (string), `mcpServers` (string[]), `sandbox` (boolean), `model` (string), `accountId` (string), `accountStrict` (boolean), `usageCredits` (boolean), `prReviewer` (string), `readRepos` (string[]), `owner` (string), `workspaceId` (string)
 
 Create a new automation (routine). Provide a clear prompt describing the task. Set `repo` to the repository it works in, or it runs against the instance default. Use a 5-field UTC cron `schedule` for recurring jobs (omit for manual/webhook only). Pick mode 'ask' for read-only or 'code' if it must edit and commit files. Ordinary automations receive no GitHub credential, so code mode alone cannot push or open a GitHub PR. Set sandbox true to use a fresh disposable Executor. Sandboxed automations require an explicit mcpServers list, a pinned accountId, a supported model, and a configured qualified provider.
 
 ### `update_automation`
 
-`mcp__opensession-admin__update_automation` · input: `id` (string, required), `name` (string), `prompt` (string), `schedule` (string), `mode` ("ask" | "code"), `enabled` (boolean), `repo` (string), `mcpServers` (string[]), `sandbox` (boolean), `model` (string), `fallbackModel` (string), `accountId` (string), `accountStrict` (boolean), `usageCredits` (boolean), `prReviewer` (string), `owner` (string), `workspaceId` (string)
+`mcp__opensession-admin__update_automation` · input: `id` (string, required), `name` (string), `prompt` (string), `schedule` (string), `mode` ("ask" | "code"), `enabled` (boolean), `repo` (string), `mcpServers` (string[]), `sandbox` (boolean), `model` (string), `fallbackModel` (string), `accountId` (string), `accountStrict` (boolean), `usageCredits` (boolean), `prReviewer` (string), `readRepos` (string[]), `owner` (string), `workspaceId` (string)
 
 Update an existing automation by id. Only provided fields change. Use enabled to pause/resume.
 
@@ -450,17 +450,17 @@ Borrow a teammate's credential for a stated purpose, with their approval.
 - **Runs** interactive
 - **Condition** Needs a session id.
 
-### `request_1password`
+### `request_mac_keychain`
 
-`mcp__opensession-keychain__request_1password` · input: `account` (string, required), `reference` (string, required), `purpose` (string, required), `url` (string, required), `method` ("GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE", required), `injection` ("bearer" | "x-api-key", required), `body` (string)
+`mcp__opensession-keychain__request_mac_keychain` · input: `service` (string, required), `account` (string, required), `purpose` (string, required), `url` (string, required), `method` ("GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE", required), `injection` ("bearer" | "x-api-key", required), `body` (string)
 
-Request ONE 1Password field for ONE exact HTTPS API request on the prompting teammate's Mac. Use an op://vault/item/[section/]field reference, never a secret value. No vault search, whole-item reads, shell commands, or standing access. The human reviews the account, field, purpose, URL, method and body in OS → Review 1Password request… while viewing this session, then approves once. Requires the Mac app, signed-in web identity, installed op CLI and its desktop integration. Expires in 10 minutes. The value stays on the Mac and is injected directly into the approved HTTPS request. ONLY HTTP status is returned, never the response body or headers, so this cannot retrieve API data for you. Do not use a model-provider endpoint as the destination. On decline/failure do not re-request without the human's go-ahead.
+Request ONE generic-password item from the prompting teammate's macOS Keychain for ONE exact HTTPS API call. Supply the item's exact service and account identifiers, never its value. This uses Apple's Keychain access prompt, not 1Password and not a vault-wide grant. No listing, shell commands, ACL changes, or raw secret export. The human opens this session in the Mac app, chooses OS → Keychain requests…, inspects the destination and selects Use once. macOS controls whether access needs Allow / Always Allow / Deny; recommend Allow, never Always Allow. Existing item permissions may allow access without another prompt. Requests expire after 10 minutes and can execute only once. Only HTTP status returns; no response data, headers or secret values enter model context. Do not use a model-provider endpoint as the destination. After a decline/failure do not retry without the human's go-ahead.
 
-### `onepassword_request_status`
+### `mac_keychain_request_status`
 
-`mcp__opensession-keychain__onepassword_request_status` · input: `requestId` (string, required)
+`mcp__opensession-keychain__mac_keychain_request_status` · input: `requestId` (string, required)
 
-Check this session's 1Password request. Returns only pending/claimed/completed/declined/failed and an HTTP status when completed. No secrets, response bodies, headers or CLI errors are available. Missing requests expired or were revoked by a server restart.
+Check this session's macOS Keychain request. Returns only pending/claimed/completed/declined/failed and an HTTP status when completed. No secrets, response bodies, headers or helper errors are available. Missing requests expired or were revoked by a server restart.
 
 ### `list_credentials`
 

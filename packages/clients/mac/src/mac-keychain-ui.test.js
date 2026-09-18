@@ -1,9 +1,9 @@
 const { expect, test } = require("bun:test");
-const { OnePasswordReview, reviewOptions } = require("./onepassword-ui");
+const { MacKeychainReview, reviewOptions } = require("./mac-keychain-ui");
 
 const intent = {
-  account: "my.1password.com",
-  reference: "op://Work/API/token",
+  account: "demo@example.test",
+  service: "Example API",
   purpose: "Check authentication",
   url: "https://api.example.com/me",
   method: "GET",
@@ -37,12 +37,16 @@ function harness({ approve = 1, claimFails = false, navigate = false } = {}) {
       },
     },
   };
-  const reviewer = new OnePasswordReview({
+  const reviewer = new MacKeychainReview({
+    approve: async (_target, options) => {
+      dialogs.push(options);
+      if (navigate) moved = true;
+      return { response: approve };
+    },
     dialog: {
       showMessageBox: async (_target, options) => {
         dialogs.push(options);
-        if (navigate) moved = true;
-        return { response: approve };
+        return { response: 0 };
       },
     },
     context: () =>
@@ -69,18 +73,15 @@ function harness({ approve = 1, claimFails = false, navigate = false } = {}) {
   };
 }
 
-test("native prompt defaults to decline and shows exact field, account, purpose, destination and scope", () => {
+test("request selection shows exact service, account, purpose and destination before Apple authorization", () => {
   const options = reviewOptions(
     { sessionId: "session-test", login: "alice", intent },
     "https://os.example.com",
   );
-  expect(options.defaultId).toBe(0);
-  expect(options.cancelId).toBe(0);
-  expect(options.buttons).toEqual(["Decline", "Approve once"]);
   for (const value of Object.values(intent))
     expect(options.detail.toLowerCase()).toContain(value.toLowerCase());
-  expect(options.detail).toContain("Only the HTTP status returns");
-  expect(options.detail).toContain("account access");
+  expect(options.detail).toContain("Only HTTP status returns");
+  expect(options.detail).toContain("Allow for one-time access");
 });
 
 test("approves once, claims before execution and posts only the fixed result", async () => {
@@ -97,7 +98,7 @@ test("approves once, claims before execution and posts only the fixed result", a
   }
 });
 
-test("decline, concurrent claims, expiry and navigation never unlock 1Password", async () => {
+test("decline, concurrent claims, expiry and navigation never unlock macOS Keychain", async () => {
   for (const options of [
     { approve: 0 },
     { claimFails: true },
