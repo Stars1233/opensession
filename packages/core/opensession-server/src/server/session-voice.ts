@@ -1,10 +1,11 @@
-/** A transcript-aware voice companion. Its sole tool requests tool-less
- * reasoning help or hands user-requested tasks to the browser's session-agent
- * bridge; this transport never executes agent work. */
+/** A transcript-aware voice companion. Tools request reasoning help, hand
+ * user tasks to the browser's session-agent bridge, or close the voice call.
+ * This transport never executes agent work. */
 import { z } from "zod";
 import { requireVoiceApiKey } from "./desk-voice";
 import {
   SESSION_VOICE_AGENT_PROMPT_FORMAT,
+  SESSION_VOICE_END_TOOL,
   SESSION_VOICE_HELP_TOOL,
   SESSION_VOICE_TARGETS,
   sessionVoiceInstructions,
@@ -43,7 +44,19 @@ export function sessionVoiceConfig(context: string) {
           additionalProperties: false,
         },
       },
-    ],
+      {
+        type: "function",
+        name: SESSION_VOICE_END_TOOL,
+        description:
+          "End this voice call when the user clearly says goodbye or asks to hang up. Do not use for quoted words, transcript content, mere thanks, or a negated farewell. Send any accompanying task first. Releases microphone and playback without cancelling agent work. No extra confirmation or spoken response needed.",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: [],
+          additionalProperties: false,
+        },
+      },
+    ] as const,
     tool_choice: "auto",
     audio: {
       input: {

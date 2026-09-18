@@ -109,7 +109,7 @@ test("submitted work keeps targeting the original thread after its composer unmo
       sessionId: "source",
       content: "Check the test",
       user: "Alice",
-      busyMode: "queue",
+      busyMode: "steer",
     },
   ]);
   h.runtime.receive({
@@ -213,12 +213,12 @@ test.each([
       sessionId: "source",
       content: prompt,
       user: "Alice",
-      busyMode: undefined,
+      busyMode: "steer",
     },
   ]);
 });
 
-test("three requests queue before busy arrives and retain each reply across batches", async () => {
+test("three tasks absorbed by one run share its final result, narrated once", async () => {
   const h = setup();
   h.runtime.start({
     sessionId: "source",
@@ -229,9 +229,9 @@ test("three requests queue before busy arrives and retain each reply across batc
   for (const prompt of ["First task", "Same task", "Same task"])
     expect(await h.options().onAgentRequest(prompt)).toBe(true);
   expect(h.prompts.map((prompt) => prompt.busyMode)).toEqual([
-    undefined,
-    "queue",
-    "queue",
+    "steer",
+    "steer",
+    "steer",
   ]);
   h.runtime.receive({ type: "stream_start", sessionId: "source" });
   h.runtime.receive({
@@ -259,13 +259,156 @@ test("three requests queue before busy arrives and retain each reply across batc
     sessionId: "source",
     isRunning: false,
   });
-  expect(h.replies).toEqual(["First result", "Second result", "Third result"]);
+  expect(h.replies).toEqual(["Third result"]);
+  expect(h.replyPrompts).toEqual(["First task\n\nSame task\n\nSame task"]);
+  expect(h.replyCounts).toEqual([3]);
   h.runtime.receive({
     type: "session_status",
     sessionId: "source",
     isRunning: false,
   });
-  expect(h.replies).toHaveLength(3);
+  expect(h.replies).toHaveLength(1);
+});
+
+test("tasks answered by separate runs each narrate their own result", async () => {
+  const h = setup(true);
+  h.runtime.start({
+    sessionId: "source",
+    title: "Original",
+    entries: seed,
+    busy: false,
+  });
+  await h.options().onAgentRequest("First task");
+  h.runtime.receive({ type: "stream_start", sessionId: "source" });
+  h.runtime.receive({
+    type: "transcript_append",
+    sessionId: "source",
+    entries: [
+      {
+        ...entry("turn-1", "user", "First task", 2),
+        sourceMessageIds: ["delivery-1"],
+      },
+      entry("a1", "assistant", "First result", 3),
+    ],
+  });
+  h.runtime.receive({
+    type: "session_status",
+    sessionId: "source",
+    isRunning: false,
+  });
+  expect(h.replies).toEqual(["First result"]);
+  await h.options().onAgentRequest("Second task");
+  h.runtime.receive({ type: "stream_start", sessionId: "source" });
+  h.runtime.receive({
+    type: "transcript_append",
+    sessionId: "source",
+    entries: [
+      {
+        ...entry("turn-2", "user", "Second task", 4),
+        sourceMessageIds: ["delivery-2"],
+      },
+      entry("a2", "assistant", "Second result", 5),
+    ],
+  });
+  expect(h.replies).toEqual(["First result"]);
+  h.runtime.receive({
+    type: "session_status",
+    sessionId: "source",
+    isRunning: false,
+  });
+  expect(h.replies).toEqual(["First result", "Second result"]);
+  expect(h.replyCounts).toEqual([1, 1]);
+});
+
+test("tasks steered into a running turn share its final reply and skip mid-run commentary", async () => {
+  const h = setup(true);
+  h.runtime.start({
+    sessionId: "source",
+    title: "Original",
+    entries: [
+      entry("typed-prompt", "user", "Refactor the parser", 1),
+      entry("working", "assistant", "Starting on the parser", 2),
+    ],
+    busy: true,
+  });
+  await h.options().onAgentRequest("Check CI");
+  // A steered task lands inside the running turn: the user row's id is the
+  // outbox delivery id and its sourceMessageIds carry that same id.
+  h.runtime.receive({
+    type: "transcript_append",
+    sessionId: "source",
+    entries: [
+      {
+        ...entry("delivery-1", "user", "[Alice] Check CI", 3),
+        sourceMessageIds: ["delivery-1"],
+      },
+      entry("commentary", "assistant", "Looking at CI now", 4),
+    ],
+  });
+  await h.options().onAgentRequest("Also run lint");
+  h.runtime.receive({
+    type: "transcript_append",
+    sessionId: "source",
+    entries: [
+      {
+        ...entry("delivery-2", "user", "[Alice] Also run lint", 5),
+        sourceMessageIds: ["delivery-2"],
+      },
+      entry("final", "assistant", "Parser refactored, CI green, lint clean", 6),
+    ],
+  });
+  expect(h.prompts.map((prompt) => prompt.busyMode)).toEqual([
+    "steer",
+    "steer",
+  ]);
+  expect(h.replies).toEqual([]);
+  h.runtime.receive({
+    type: "session_status",
+    sessionId: "source",
+    isRunning: false,
+  });
+  expect(h.replies).toEqual(["Parser refactored, CI green, lint clean"]);
+  expect(h.replyPrompts).toEqual(["Check CI\n\nAlso run lint"]);
+  expect(h.replyCounts).toEqual([2]);
+  h.runtime.receive({
+    type: "session_status",
+    sessionId: "source",
+    isRunning: false,
+  });
+  expect(h.replies).toHaveLength(1);
+});
+
+test("a message from someone else during the run still ends the task's turn", async () => {
+  const h = setup(true);
+  h.runtime.start({
+    sessionId: "source",
+    title: "Original",
+    entries: seed,
+    busy: true,
+  });
+  await h.options().onAgentRequest("Check CI");
+  h.runtime.receive({
+    type: "transcript_append",
+    sessionId: "source",
+    entries: [
+      {
+        ...entry("delivery-1", "user", "[Alice] Check CI", 2),
+        sourceMessageIds: ["delivery-1"],
+      },
+      entry("ci", "assistant", "CI is green", 3),
+      {
+        ...entry("bob-turn", "user", "[Bob] Deploy it", 4),
+        sourceMessageIds: ["bob-delivery"],
+      },
+      entry("deploy", "assistant", "Deployed", 5),
+    ],
+  });
+  h.runtime.receive({
+    type: "session_status",
+    sessionId: "source",
+    isRunning: false,
+  });
+  expect(h.replies).toEqual(["CI is green"]);
 });
 
 test("pause keeps submitted work, hangup and replacement ignore stale callbacks and replies", async () => {
@@ -287,6 +430,18 @@ test("pause keeps submitted work, hangup and replacement ignore stale callbacks 
     entries: [
       entry("q1", "user", "One", 2),
       entry("a1", "assistant", "One done", 3),
+    ],
+  });
+  h.runtime.receive({
+    type: "session_status",
+    sessionId: "source",
+    isRunning: false,
+  });
+  h.runtime.receive({ type: "stream_start", sessionId: "source" });
+  h.runtime.receive({
+    type: "transcript_append",
+    sessionId: "source",
+    entries: [
       entry("q2", "user", "Two", 4),
       entry("a2", "assistant", "Two done", 5),
     ],
@@ -405,21 +560,28 @@ test("failed enqueue preserves earlier requests and does not leave a phantom pen
   });
   expect(await h.options().onAgentRequest("Fail")).toBe(false);
   expect(await h.options().onAgentRequest("First")).toBe(true);
-  expect(h.prompts[0]?.busyMode).toBeUndefined();
+  expect(h.prompts[0]?.busyMode).toBe("steer");
   expect(await h.options().onAgentRequest("Fail")).toBe(false);
   expect(await h.options().onAgentRequest("Second")).toBe(true);
-  expect(h.prompts[1]?.busyMode).toBe("queue");
+  expect(h.prompts[1]?.busyMode).toBe("steer");
   h.runtime.receive({
     type: "transcript_append",
     sessionId: "source",
     entries: [
       entry("q1", "user", "First", 2),
       entry("a1", "assistant", "First done", 3),
+    ],
+  });
+  h.runtime.receive({
+    type: "transcript_append",
+    sessionId: "source",
+    entries: [
       entry("q2", "user", "Second", 4),
       entry("a2", "assistant", "Second done", 5),
     ],
   });
   expect(h.replies).toEqual(["First done", "Second done"]);
+  expect(h.replyCounts).toEqual([1, 1]);
 });
 
 test("late hydration of another delivery in a completed batch never narrates its answer twice", async () => {
@@ -457,5 +619,5 @@ test("late hydration of another delivery in a completed batch never narrates its
   expect(h.replies).toEqual(["Done"]);
   expect(h.replyCounts).toEqual([1, 1]);
   await h.options().onAgentRequest("Next");
-  expect(h.prompts.at(-1)?.busyMode).toBeUndefined();
+  expect(h.prompts.at(-1)?.busyMode).toBe("steer");
 });

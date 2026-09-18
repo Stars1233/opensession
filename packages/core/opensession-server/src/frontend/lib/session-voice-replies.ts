@@ -60,8 +60,32 @@ export class SessionVoiceReplies {
   }
 }
 
+/** Everything one call has handed to the agent. Shared by every request of
+ * the call so a request can tell a sibling's delivery from an unrelated turn. */
+export interface SessionVoiceRequests {
+  /** User entries already matched to a request of this call. */
+  claimedUsers: Set<string>;
+  /** Outbox delivery ids issued for this call's requests. */
+  deliveryIds: Set<string>;
+}
+
+export function sessionVoiceRequests(): SessionVoiceRequests {
+  return { claimedUsers: new Set(), deliveryIds: new Set() };
+}
+
+/** Steer batches join adjacent user entries sharing the raw turn id (-j2). */
+function turnIdOf(entry: TranscriptEntry) {
+  return entry.id.replace(/-j\d+$/, "");
+}
+
 /** Wait for the requested task to actually reach the agent, not a reply from
- * an older run that was already in flight when the task entered the queue. */
+ * an older run that was already in flight when the task was sent.
+ *
+ * Every request steers: while the agent is busy the server appends the task
+ * inside the running turn, and the run's final reply answers every task it
+ * absorbed. A later user entry from this same call therefore does not end a
+ * request's turn, while a turn boundary or a message from anyone else still
+ * does, so a request never narrates a reply to an unrelated turn. */
 export class SessionVoiceAgentReply {
   private baseline: number;
   private existingUsers: Set<string>;
@@ -74,7 +98,7 @@ export class SessionVoiceAgentReply {
   constructor(
     readonly prompt: string,
     entries: TranscriptEntry[],
-    private claimedUsers = new Set<string>(),
+    private requests: SessionVoiceRequests = sessionVoiceRequests(),
   ) {
     this.baseline = entries.reduce(
       (max, entry) => Math.max(max, entry.seq ?? 0),
@@ -84,24 +108,35 @@ export class SessionVoiceAgentReply {
       entries.filter((entry) => entry.type === "user").map((entry) => entry.id),
     );
   }
+  /** Match the request's own user entry. Anchoring every pending request
+   * before reading replies lets each one recognize the others' entries. */
+  anchor(entries: TranscriptEntry[]): boolean {
+    if (this.user) return true;
+    const user = entries.find(
+      (entry) =>
+        entry.type === "user" &&
+        !this.existingUsers.has(entry.id) &&
+        (entry.seq === undefined || entry.seq > this.baseline) &&
+        (this.messageId
+          ? entry.sourceMessageIds?.includes(this.messageId)
+          : !this.requests.claimedUsers.has(entry.id) &&
+            entry.content.trim() === this.prompt.trim()),
+    );
+    if (!user) return false;
+    this.user = user;
+    this.requests.claimedUsers.add(user.id);
+    return true;
+  }
+  private isSibling(entry: TranscriptEntry, turnId: string) {
+    return (
+      turnIdOf(entry) === turnId ||
+      this.requests.claimedUsers.has(entry.id) ||
+      !!entry.sourceMessageIds?.some((id) => this.requests.deliveryIds.has(id))
+    );
+  }
   take(entries: TranscriptEntry[], busy: boolean): string | null {
-    if (this.delivered) return null;
-    if (!this.user) {
-      const user = entries.find(
-        (entry) =>
-          entry.type === "user" &&
-          !this.existingUsers.has(entry.id) &&
-          (entry.seq === undefined || entry.seq > this.baseline) &&
-          (this.messageId
-            ? entry.sourceMessageIds?.includes(this.messageId)
-            : !this.claimedUsers.has(entry.id) &&
-              entry.content.trim() === this.prompt.trim()),
-      );
-      if (!user) return null;
-      this.user = user;
-      this.claimedUsers.add(user.id);
-    }
-    const user = this.user;
+    if (this.delivered || !this.anchor(entries)) return null;
+    const user = this.user!;
     const index = entries.findIndex((entry) => entry.id === user.id);
     // Keep the anchor across bounded transcript windows. Once matched by its
     // delivery id, it need not remain among the newest 500 entries.
@@ -113,14 +148,16 @@ export class SessionVoiceAgentReply {
               (entry) => entry.seq !== undefined && entry.seq > user.seq!,
             )
           : [];
-    // Queue batches are split into adjacent user entries sharing the raw
-    // turn id (-j2, -j3). They share one answer, not separate turns.
-    const turnId = user.id.replace(/-j\d+$/, "");
-    this.end ??= after.find(
-      (entry) =>
-        entry.turnBoundary ||
-        (entry.type === "user" && entry.id.replace(/-j\d+$/, "") !== turnId),
-    );
+    const turnId = turnIdOf(user);
+    // An end that left the bounded window keeps bounding by sequence. One
+    // still in view is recomputed: a sibling's entry can gain its delivery id
+    // after it first appeared.
+    if (!this.end || after.some((entry) => entry.id === this.end?.id))
+      this.end = after.find(
+        (entry) =>
+          entry.turnBoundary ||
+          (entry.type === "user" && !this.isSibling(entry, turnId)),
+      );
     const endIndex = this.end
       ? after.findIndex((entry) => entry.id === this.end?.id)
       : -1;

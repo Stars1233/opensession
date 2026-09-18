@@ -1,10 +1,13 @@
 /**
  * The session voice orb: a small luminous sphere whose shape and light react
- * to the two directions of a call. The microphone bends the surface into
- * lobes, pulses the body and lights the rim in the person's ink; the speaker
- * swells and brightens the core in the agent's hue. Both read real levels the
- * parent's WebAudio analysis writes into a shared ref every frame; at silence
- * the orb breathes slowly and does nothing that could be mistaken for speech.
+ * to the two directions of a call. Both directions move it the same way: the
+ * surface swells, bends into soft lobes and pulses with whoever is speaking,
+ * so the person and the agent read as one consistent motion at one
+ * intensity. What tells them apart is the ink: the person lights it purple
+ * with a firmer rim, the agent lights it in the accent with a brighter core.
+ * Both read real levels the parent's WebAudio analysis writes into a shared
+ * ref every frame; at silence the orb breathes slowly and does nothing that
+ * could be mistaken for speech.
  *
  * Rendering is one fragment shader on a low-power WebGL context, drawn into a
  * transparent canvas that overscans its box (`ORB_CANVAS_OVERSCAN`) so the
@@ -87,6 +90,18 @@ export const ORB_GATE = 0.03;
 export function orbLevelDrive(level: number): number {
   const gated = (clamp01(level) - ORB_GATE) / (1 - ORB_GATE);
   return gated <= 0 ? 0 : Math.pow(gated, 0.6);
+}
+
+/**
+ * The one energy the shape follows, from both shaped drives. A soft OR: equal
+ * to either drive on its own, so the two directions move the orb identically,
+ * and only slightly more than the louder one when both speak at once. Bounded
+ * to 0..1 like its inputs.
+ */
+export function orbEnergy(mic: number, voice: number): number {
+  const a = clamp01(mic);
+  const b = clamp01(voice);
+  return a + b - a * b;
 }
 
 /**
@@ -283,14 +298,17 @@ export const ORB_HALO_EDGE = 0.985;
  * The shape of one frame, derived from the shaped levels. Every term is
  * bounded so the surface (`body ± deform ± pulse`) stays inside `reach`, and
  * `reach` stays inside the halo window: what the shader draws never touches
- * the canvas edge whatever the microphone does.
+ * the canvas edge whatever either voice does.
+ *
+ * The shape does not know who is speaking: it follows `orbEnergy`, so equal
+ * microphone and speaker levels produce the same swell, lobes and pulse.
  */
 export interface OrbGeometry {
-  /** Mean radius of the surface. Swells with both voices. */
+  /** Mean radius of the surface. Swells with whoever is speaking. */
   body: number;
-  /** Amplitude of the lobes the microphone bends into the surface. */
+  /** Amplitude of the lobes speech bends into the surface. */
   deform: number;
-  /** Amplitude of the fast pulse the microphone beats into the body. */
+  /** Amplitude of the fast pulse speech beats into the body. */
   pulse: number;
   /** Outermost radius the surface can reach this frame. */
   reach: number;
@@ -305,15 +323,13 @@ export function orbGeometry(
   connecting = 0,
 ): OrbGeometry {
   const act = clamp01(active);
-  const mic = orbLevelDrive(input);
-  const voice = orbLevelDrive(output);
+  const energy = orbEnergy(orbLevelDrive(input), orbLevelDrive(output));
   const body =
-    ORB_REST_RADIUS *
-    (1 + act * (0.18 * mic + 0.1 * voice + 0.12 * clamp01(connecting)));
-  // A resting orb keeps a hint of surface drift so it reads as alive; the
-  // microphone multiplies it into real lobes.
-  const deform = ORB_REST_RADIUS * (0.02 + act * (0.38 * mic + 0.04 * voice));
-  const pulse = ORB_REST_RADIUS * act * 0.1 * mic;
+    ORB_REST_RADIUS * (1 + act * (0.12 * energy + 0.12 * clamp01(connecting)));
+  // A resting orb keeps a hint of surface drift so it reads as alive; speech
+  // multiplies it into soft lobes, moderate enough to stay a sphere.
+  const deform = ORB_REST_RADIUS * (0.02 + act * 0.16 * energy);
+  const pulse = ORB_REST_RADIUS * act * 0.05 * energy;
   const reach = body + deform + pulse;
   return { body, deform, pulse, reach, fade: ORB_HALO_EDGE - reach };
 }
@@ -356,12 +372,16 @@ void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }`;
  * Layers, each with its own alpha so the same shader reads as a luminous body
  * on a dark theme and a solid ink one on a light theme:
  *   resting sphere  dim ink, lit from the upper left, with a fresnel edge
- *   agent body      accent, a drifting value-noise field and a core that grow
- *                   and brighten with the speaker
- *   person rim      ink, fresnel and an edge line that sharpen with the
- *                   microphone, plus a wash across the lobes it raises
+ *   body            a drifting value-noise field and a core, in the speaker's
+ *                   color, that grow and brighten with either voice; the
+ *                   agent's hue lifts the core a little further
+ *   rim             fresnel, an edge line and a wash across the raised lobes,
+ *                   in the speaker's color, that firm up with either voice;
+ *                   the person's ink lifts the rim a little further
  *   halo            outside the surface, tinted by whoever is speaking,
  *                   windowed to zero before the canvas edge
+ * The body and rim budgets are balanced so equal levels in either direction
+ * light the orb with the same weight; `u_tint` decides the color.
  * `u_active` fades every live layer so a pause settles to the resting sphere.
  * The output is premultiplied, matching the context's `premultipliedAlpha`.
  */
@@ -420,14 +440,16 @@ void main() {
   vec2 ring = vec2(cos(ang), sin(ang));
   float t = u_time;
   float act = u_active;
+  // One energy for both directions, the same soft OR as orbEnergy.
+  float lvl = u_in + u_out - u_in * u_out;
 
   // Surface: organic drift blended with rotating lobes, both in -1..1, so the
-  // wobble is bounded and the microphone can push it hard without escaping.
+  // wobble is bounded and either voice can push it without escaping.
   float drift = fbm(ring * 1.6 + vec2(t * 0.35, -t * 0.27)) * 2.0 - 1.0;
   float lobes = 0.5 * sin(3.0 * ang + t * 2.3)
     + 0.3 * sin(5.0 * ang - t * 3.1 + 1.7)
     + 0.2 * sin(8.0 * ang + t * 4.7);
-  float wobble = mix(drift, lobes, 0.35 + 0.4 * u_in);
+  float wobble = mix(drift, lobes, 0.35 + 0.3 * lvl);
   float beat = sin(t * 7.0);
   float rad = u_body + u_deform * wobble + u_pulse * beat;
   float d = r - rad;
@@ -446,34 +468,38 @@ void main() {
   vec3 col = u_cdim;
   float alpha = inner * (0.08 + 0.26 * lit + 0.22 * fres);
   vec3 speakerColor = mix(u_cout, u_cin, u_tint);
-  col = mix(col, speakerColor, act * max(u_in, u_out) * 0.85);
+  col = mix(col, speakerColor, act * lvl * 0.85);
   col = mix(col, u_cin, spec * 0.5);
   alpha += inner * (spec * 0.22 + act * u_startup * 0.4);
 
-  // Agent: a fluid field in the accent that floods the body as it speaks,
-  // and a core that grows from a glow to most of the sphere.
-  float flow = fbm(uv * (2.6 + 1.6 * u_out) + vec2(t * 0.22, t * 0.18) + drift * 0.3);
-  float core = exp(-r * r / (0.05 + 0.32 * u_out)) * (0.9 * u_out) * (0.6 + 0.6 * flow);
-  float fluidA = act * inner * (0.56 * u_out) * (0.35 + 0.65 * flow) * (0.7 + 0.3 * lit);
-  col = mix(col, u_cout, clamp(fluidA * 3.0, 0.0, 1.0));
+  // Body: a fluid field in the speaker's color that floods the sphere as
+  // either voice speaks, and a core that grows from a glow toward the rim.
+  // The agent's hue lifts the core a little further than the person's.
+  float flow = fbm(uv * (2.6 + 1.2 * lvl) + vec2(t * 0.22, t * 0.18) + drift * 0.3);
+  float coreDrive = 0.5 * lvl + 0.2 * u_out;
+  float core = exp(-r * r / (0.05 + 0.24 * lvl)) * coreDrive * (0.6 + 0.6 * flow);
+  float fluidA = act * inner * (0.42 * lvl) * (0.35 + 0.65 * flow) * (0.7 + 0.3 * lit);
+  col = mix(col, speakerColor, clamp(fluidA * 3.0, 0.0, 1.0));
   alpha += fluidA;
   float coreA = act * inner * core;
-  col = mix(col, u_cout, coreA);
+  col = mix(col, speakerColor, coreA);
   alpha += coreA;
 
-  // Person: the rim firms and the raised lobes wash in the ink as they speak.
+  // Rim: firms with either voice, and the raised lobes wash in the speaker's
+  // color. The person's ink lifts the rim a little further than the agent's.
   float crest = clamp(0.5 + 0.5 * wobble, 0.0, 1.0);
-  float edge = 1.0 - smoothstep(0.0, px * 2.0 + 0.04 * u_in, abs(d));
-  float washA = act * inner * u_in * (0.35 + 0.4 * crest) * (0.5 + 0.5 * fres);
-  float rimA = act * inner * (fres * u_in + edge * (0.8 * u_in));
-  col = mix(col, u_cin, clamp((washA + rimA) * 1.6, 0.0, 1.0));
+  float rimDrive = 0.5 * lvl + 0.2 * u_in;
+  float edge = 1.0 - smoothstep(0.0, px * 2.0 + 0.02 * lvl, abs(d));
+  float washA = act * inner * lvl * (0.16 + 0.2 * crest) * (0.5 + 0.5 * fres);
+  float rimA = act * inner * rimDrive * (fres + 0.7 * edge);
+  col = mix(col, speakerColor, clamp((washA + rimA) * 1.6, 0.0, 1.0));
   alpha += washA + rimA;
 
   // Halo: breathes with whoever is speaking, in their color, and is windowed
   // to nothing over u_fade so it can never reach the canvas edge.
   float window = 1.0 - smoothstep(0.0, u_fade, d);
-  float halo = exp(-max(d, 0.0) * (11.0 - 5.0 * max(u_in, u_out))) * (1.0 - inner) * act
-    * (0.06 + 0.5 * u_in + 0.4 * u_out + 0.5 * u_startup) * window;
+  float halo = exp(-max(d, 0.0) * (11.0 - 5.0 * lvl)) * (1.0 - inner) * act
+    * (0.06 + 0.45 * lvl + 0.5 * u_startup) * window;
   // Outside the body, use the speaker tint directly, not dim ink diluted
   // by halo opacity a second time.
   vec3 haloColor = u_startup > 0.0 ? u_cdim : mix(u_cout, u_cin, u_tint);
@@ -697,10 +723,11 @@ function rgba([r, g, b]: OrbRgb, alpha: number): string {
 /**
  * The Canvas 2D fallback: the same layers as the shader, without the
  * procedural surface. A lit resting sphere in the dim ink that swells with
- * the microphone, a halo and an accent core that grow with the speaker, and a
- * rim in the person's ink that firms up with the microphone. Nothing here
- * moves on its own except the neutral connecting pulse. Radii come from `orbGeometry`, so this too stays inside
- * the canvas.
+ * either voice, a halo in the speaker's color, a core that grows with either
+ * voice (the agent lifts it a little further) and a rim that firms with
+ * either voice (the person lifts it a little further). Nothing here moves on
+ * its own except the neutral connecting pulse. Radii come from `orbGeometry`,
+ * so this too stays inside the canvas.
  */
 export function drawSessionVoiceOrbFallback(
   ctx: OrbPaintContext,
@@ -713,6 +740,7 @@ export function drawSessionVoiceOrbFallback(
   const act = clamp01(frame.active);
   const mic = orbLevelDrive(frame.input);
   const voice = orbLevelDrive(frame.output);
+  const energy = orbEnergy(mic, voice);
   const connecting = clamp01(frame.connecting ?? 0);
   const geometry = orbGeometry(frame.input, frame.output, act, connecting);
   const c = size / 2;
@@ -742,7 +770,7 @@ export function drawSessionVoiceOrbFallback(
       rgba(connecting > 0 ? palette.dim.rgb : haloRgb, 0.35),
     );
     halo.addColorStop(1, rgba(connecting > 0 ? palette.dim.rgb : haloRgb, 0));
-    ctx.globalAlpha = act * (0.1 + 0.6 * mic + 0.5 * voice + 0.5 * connecting);
+    ctx.globalAlpha = act * (0.1 + 0.55 * energy + 0.5 * connecting);
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(c, c, ORB_HALO_EDGE * unit, 0, TAU);
@@ -758,15 +786,20 @@ export function drawSessionVoiceOrbFallback(
     rad,
   );
   const who = clamp01(frame.tint);
-  const drive = act * Math.max(mic, voice);
-  const channel = (i: 0 | 1 | 2) => {
-    const dim = palette.dim.rgb[i];
-    const speaker =
-      palette.output.rgb[i] +
-      (palette.input.rgb[i] - palette.output.rgb[i]) * who;
-    return dim + (speaker - dim) * drive;
-  };
-  const bodyRgb: OrbRgb = [channel(0), channel(1), channel(2)];
+  const drive = act * energy;
+  const speakerRgb: OrbRgb = [
+    palette.output.rgb[0] +
+      (palette.input.rgb[0] - palette.output.rgb[0]) * who,
+    palette.output.rgb[1] +
+      (palette.input.rgb[1] - palette.output.rgb[1]) * who,
+    palette.output.rgb[2] +
+      (palette.input.rgb[2] - palette.output.rgb[2]) * who,
+  ];
+  const bodyRgb: OrbRgb = [
+    palette.dim.rgb[0] + (speakerRgb[0] - palette.dim.rgb[0]) * drive,
+    palette.dim.rgb[1] + (speakerRgb[1] - palette.dim.rgb[1]) * drive,
+    palette.dim.rgb[2] + (speakerRgb[2] - palette.dim.rgb[2]) * drive,
+  ];
   body.addColorStop(
     0,
     rgba(bodyRgb, 0.36 + drive * 0.25 + act * connecting * 0.4),
@@ -788,19 +821,19 @@ export function drawSessionVoiceOrbFallback(
       0,
       c,
       c,
-      rad * (0.4 + 0.6 * voice),
+      rad * (0.4 + 0.45 * energy + 0.15 * voice),
     );
-    core.addColorStop(0, rgba(palette.output.rgb, 0.9));
-    core.addColorStop(1, rgba(palette.output.rgb, 0));
-    ctx.globalAlpha = act * voice;
+    core.addColorStop(0, rgba(speakerRgb, 0.9));
+    core.addColorStop(1, rgba(speakerRgb, 0));
+    ctx.globalAlpha = act * (0.7 * energy + 0.2 * voice);
     ctx.fillStyle = core;
     ctx.beginPath();
     ctx.arc(c, c, rad, 0, TAU);
     ctx.fill();
 
-    ctx.globalAlpha = act * mic;
-    ctx.strokeStyle = palette.input.css;
-    ctx.lineWidth = Math.max(1, size * 0.02 * (1 + 2 * mic));
+    ctx.globalAlpha = act * (0.7 * energy + 0.2 * mic);
+    ctx.strokeStyle = rgba(speakerRgb, 1);
+    ctx.lineWidth = Math.max(1, size * 0.02 * (1 + 1.2 * energy));
     ctx.beginPath();
     ctx.arc(c, c, rad, 0, TAU);
     ctx.stroke();

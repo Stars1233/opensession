@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   SessionVoiceReplies,
   SessionVoiceAgentReply,
+  sessionVoiceRequests,
 } from "./session-voice-replies";
 import type { TranscriptEntry } from "./types";
 
@@ -139,4 +140,96 @@ test("a running request retains its delivery anchor when a bounded transcript dr
   expect(tracker.take([reply("answer", "Finished", 502)], false)).toBe(
     "Finished",
   );
+});
+
+function steered(
+  deliveryId: string,
+  content: string,
+  seq: number,
+): TranscriptEntry {
+  // A task steered into a running turn lands as a user row whose id is the
+  // outbox delivery id and whose sourceMessageIds carry that same id.
+  return {
+    ...reply(deliveryId, content, seq),
+    type: "user",
+    sourceMessageIds: [deliveryId],
+  };
+}
+
+test("a sibling task steered into the same run does not end the request; both share the final reply", () => {
+  const requests = sessionVoiceRequests();
+  requests.deliveryIds.add("delivery-1").add("delivery-2");
+  const first = new SessionVoiceAgentReply("Check CI", [], requests);
+  first.messageId = "delivery-1";
+  const second = new SessionVoiceAgentReply("Run lint", [], requests);
+  second.messageId = "delivery-2";
+  const entries = [
+    steered("delivery-1", "[Alice] Check CI", 1),
+    reply("commentary", "Looking at CI now", 2),
+    steered("delivery-2", "[Alice] Run lint", 3),
+    reply("final", "CI is green and lint is clean", 4),
+  ];
+  expect(first.take(entries, true)).toBeNull();
+  expect(first.take(entries, false)).toBe("CI is green and lint is clean");
+  expect(second.take(entries, false)).toBe("CI is green and lint is clean");
+  expect(first.replyId).toBe("final");
+  expect(second.replyId).toBe("final");
+});
+
+test("a message from anyone else still ends the request's turn", () => {
+  const requests = sessionVoiceRequests();
+  requests.deliveryIds.add("delivery-1");
+  const tracker = new SessionVoiceAgentReply("Check CI", [], requests);
+  tracker.messageId = "delivery-1";
+  expect(
+    tracker.take(
+      [
+        steered("delivery-1", "[Alice] Check CI", 1),
+        reply("answer", "CI is green", 2),
+        {
+          ...reply("other-turn", "[Bob] Deploy it", 3),
+          type: "user",
+          sourceMessageIds: ["bob-delivery"],
+        },
+        reply("other-answer", "Deployed", 4),
+      ],
+      false,
+    ),
+  ).toBe("CI is green");
+});
+
+test("a sibling entry that gains its delivery id later reopens the turn", () => {
+  const requests = sessionVoiceRequests();
+  requests.deliveryIds.add("delivery-1").add("delivery-2");
+  const tracker = new SessionVoiceAgentReply("Check CI", [], requests);
+  tracker.messageId = "delivery-1";
+  const anchor = steered("delivery-1", "[Alice] Check CI", 1);
+  const commentary = reply("commentary", "Looking", 2);
+  const bare = {
+    ...reply("delivery-2", "[Alice] Run lint", 3),
+    type: "user" as const,
+  };
+  expect(tracker.take([anchor, commentary, bare], true)).toBeNull();
+  const hydrated = [
+    anchor,
+    commentary,
+    steered("delivery-2", "[Alice] Run lint", 3),
+    reply("final", "Both done", 4),
+  ];
+  expect(tracker.take(hydrated, false)).toBe("Both done");
+});
+
+test("without delivery ids a sibling claimed by content is recognized once anchored", () => {
+  const requests = sessionVoiceRequests();
+  const first = new SessionVoiceAgentReply("Check CI", [], requests);
+  const second = new SessionVoiceAgentReply("Run lint", [], requests);
+  const entries = [
+    { ...reply("q1", "Check CI", 1), type: "user" as const },
+    { ...reply("q2", "Run lint", 2), type: "user" as const },
+    reply("final", "Both done", 3),
+  ];
+  expect(first.anchor(entries)).toBe(true);
+  expect(second.anchor(entries)).toBe(true);
+  expect(first.take(entries, false)).toBe("Both done");
+  expect(second.take(entries, false)).toBe("Both done");
 });

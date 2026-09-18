@@ -6,6 +6,7 @@ import {
 } from "./session-voice-audio";
 import {
   SESSION_VOICE_HELP_TOOL,
+  SESSION_VOICE_END_TOOL,
   SESSION_VOICE_TARGETS,
   sessionVoiceInstructions,
   type SessionVoiceRequest,
@@ -61,6 +62,7 @@ const agentRequestSchema = z.object({
   prompt: z.string().trim().min(1).max(4000),
   reason: z.string().trim().min(1).max(500),
 });
+const endCallSchema = z.strictObject({});
 const START_TIMEOUT_MS = 30_000;
 const IDLE_TIMEOUT_MS = 3 * 60_000;
 const MAX_CALL_MS = 30 * 60_000;
@@ -330,7 +332,7 @@ export class SessionVoiceClient {
       if (!accepted) this.awaitingAgent--;
       this.notify(
         accepted
-          ? "The requested task is in the session agent's normal queue and may take minutes. Keep discussing the thread; do not claim a result yet."
+          ? 'The task was submitted for steering. Acknowledge once with at most "On it." Do not restate or summarize the request, ask for confirmation, or claim the work is finished.'
           : "The requested task could not be sent. No work was started.",
       );
       this.resting();
@@ -493,6 +495,24 @@ export class SessionVoiceClient {
           );
           break;
         }
+        if (event.name === SESSION_VOICE_END_TOOL) {
+          try {
+            endCallSchema.parse(JSON.parse(event.arguments ?? "{}"));
+          } catch {
+            this.toolResult(
+              event.call_id,
+              "Invalid end-call request. Keep the call open.",
+            );
+            break;
+          }
+          this.toolResult(
+            event.call_id,
+            "Ending voice only. Agent work continues.",
+            false,
+          );
+          this.stop();
+          break;
+        }
         if (event.name !== SESSION_VOICE_HELP_TOOL) {
           this.toolResult(
             event.call_id,
@@ -528,7 +548,7 @@ export class SessionVoiceClient {
         }
         this.toolResult(
           event.call_id,
-          "Sending the requested task to the session agent's normal queue.",
+          "Submitting the task through the session agent's steering path.",
           false,
         );
         void this.runRequest({ callId: event.call_id, ...request });
