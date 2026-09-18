@@ -163,28 +163,39 @@ returns an error and the rest of the app is unaffected.
 ### Session voice calls (web)
 
 Open a normal session and press the handset beside the dictation microphone.
-Allow microphone access, then speak naturally. Each completed utterance is sent
-as a normal message to that session's existing agent. If it is already working,
-the message queues rather than interrupting the run. Unsent composer text,
-quotes, and attachments stay untouched. Completed replies are summarized aloud;
-the full original reply remains in the transcript.
+Allow microphone access, then ask about the thread: what happened, why something
+changed, or what an answer means. GPT Realtime answers directly from a bounded
+recent transcript excerpt, including assistant replies and tool results. The
+voice conversation stays separate: spoken questions and answers are not posted
+to the thread and do not run the coding agent. It remembers the voice discussion
+for this call. Starting a new call starts a fresh discussion.
+
+If an answer needs new investigation or work, the voice companion proposes a
+request and warns that the session agent may take a few minutes. Review the
+exact prompt, then choose **Ask agent** or **Not now** in the approval card.
+Only the Ask agent button sends that prompt through the normal durable queue.
+A spoken confirmation alone does not authorize a send. You can keep discussing
+the transcript while it works; the result comes back into the voice discussion.
+Unsent composer text, quotes, and attachments stay untouched.
 
 Calls use the same instance-wide OpenAI API key configured in
 **Settings → Preferences → Desk voice**. You do not need to enable Desk's voice
 mode. A signed-in web identity and a browser with microphone/WebRTC support are
 required. OpenAI API usage is billed separately from the session agent.
 
-`gpt-realtime` handles transcription and speech only, with automatic answers
-disabled and no tools. It cannot change the session model, permissions, or MCP
-inventory. The server exchanges SDP at `/api/sessions/:id/voice`; the permanent
-API key never reaches the browser. Spoken prompts use the existing authenticated,
+`gpt-realtime` handles the transcript discussion itself. Its only tool proposes
+an agent request; there is no direct tool execution or transcript writer. It
+cannot change the session model, permissions, or MCP inventory. The server
+exchanges SDP at `/api/sessions/:id/voice` and supplies a bounded public transcript
+excerpt, excluding reasoning and hidden engine context. The permanent API key
+never reaches the browser. Approved requests use the existing authenticated,
 durable outbox, so normal session safety and automation restrictions still apply.
 No native iOS or Chrome extension behavior changes.
 
 Press the handset again to end the call. Speaking over a reply stops narration,
 not the agent's work. Leaving the session, hiding the browser, disconnecting, or
 starting another call also releases the microphone. Calls end after three idle
-minutes (not while the agent is working) or thirty minutes total. Dictation is
+minutes (not while an approved agent request is pending) or thirty minutes total. Dictation is
 unavailable while a call is active. Use the chat's existing controls for approval
 questions and stopping agent work.
 

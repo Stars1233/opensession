@@ -1,4 +1,6 @@
 import { findSessionAsync } from "../session-cache";
+import { mergedSessionTranscriptAsync } from "../sessions";
+import { sessionVoiceContext } from "../../shared/session-voice";
 import { createSessionVoiceAnswer } from "../session-voice";
 import type { RouteContext } from "./context";
 
@@ -39,7 +41,14 @@ export async function handleSessionVoiceRoutes(
       { status: 409 },
     );
   try {
-    const sdp = await createSessionVoiceAnswer(body.sdp, ctx.req.signal);
+    const context = sessionVoiceContext(
+      await mergedSessionTranscriptAsync(session),
+    );
+    const sdp = await createSessionVoiceAnswer(
+      body.sdp,
+      ctx.req.signal,
+      context,
+    );
     return Response.json({ sdp }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return Response.json(
