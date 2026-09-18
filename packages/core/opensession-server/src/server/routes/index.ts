@@ -18,6 +18,7 @@ import { handleSystemRoutes } from "./system";
 import { handleSessionAssetsRoutes } from "./session-assets";
 import { handleSessionNotesRoutes } from "./session-notes";
 import { handleSessionContextRoutes } from "./session-context";
+import { handleSessionVoiceRoutes } from "./session-voice";
 import { handleEffectiveConfigRoutes } from "./effective-config";
 import { handleMentionsRoutes } from "./mentions";
 import { handleMentionPaletteRoutes } from "./mention-palette";
@@ -84,6 +85,7 @@ export const routeHandlers: RouteHandler[] = [
   handleSessionAssetsRoutes,
   handleSessionNotesRoutes,
   handleSessionContextRoutes,
+  handleSessionVoiceRoutes,
   handleEffectiveConfigRoutes,
   handleMentionsRoutes,
   handleMentionPaletteRoutes,

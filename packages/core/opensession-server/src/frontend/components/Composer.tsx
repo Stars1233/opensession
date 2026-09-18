@@ -91,6 +91,7 @@ import { paletteIconBtn, paletteIconBtnRound } from "../lib/palette-classes";
 import { askSurface, noteSurface } from "../lib/tinted-surface";
 import { cn } from "../ui/cn";
 import { Tooltip } from "../ui/tooltip";
+import { Button } from "../ui/button";
 import { ContextMenu, Menu, MENU_ICON } from "../ui/menu";
 import {
   effectiveSendKey,
@@ -1792,7 +1793,7 @@ export function Composer({
             overlayTargetRef={voiceOverlayRef}
             overlayStyle={dictationSurfaceStyle}
             onActiveChange={handleDictationActive}
-            disabled={disabled}
+            disabled={disabled || call?.active}
           />
 
           {onToggleCall && (
@@ -1813,20 +1814,22 @@ export function Composer({
                     : "Start a voice call"
                 }
               >
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className={cn(
                     composerIconButtonClass,
+                    "phone:min-h-11 phone:min-w-11",
                     // A live call reads as the universal red handset.
                     call?.active && "text-red hover:text-red",
                   )}
                   onClick={onToggleCall}
-                  disabled={disabled}
+                  disabled={dictating || (disabled && !call?.active)}
                   aria-pressed={!!call?.active}
                   aria-label={call?.active ? "End call" : "Start a voice call"}
                 >
                   <IconCall size={22} />
-                </button>
+                </Button>
               </Tooltip>
             </motion.div>
           )}

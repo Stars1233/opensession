@@ -1,3 +1,6 @@
+import { useSessionVoice } from "../../hooks/useSessionVoice";
+import { SessionVoiceStatus } from "../SessionVoiceStatus";
+import { SESSION_VOICE_STATUS } from "../../lib/session-voice-client";
 import type { useSessionModelWorkflowController } from "../../hooks/useSessionModelWorkflowController";
 import type {
   ComponentProps,
@@ -311,6 +314,7 @@ interface ComposerState {
   files: FileAttachment[];
   uploadStaging: ComposerProps["config"]["staging"];
   focused: boolean;
+  voiceReady: boolean;
   quote: Quote | null;
   promoting: boolean;
   isAsk: boolean;
@@ -349,6 +353,7 @@ interface ComposerActions {
   handleSend: ComposerProps["onTyping"] extends never
     ? never
     : ComposerProps["actions"]["onSend"];
+  sendVoice: (text: string) => boolean | Promise<boolean>;
   setImages: ComposerProps["actions"]["onImagesChange"];
   setFiles: ComposerProps["actions"]["onFilesChange"];
   addSessionAttachments: ComposerProps["actions"]["onAddAttachments"];
@@ -628,6 +633,36 @@ export function SessionViewerMainRegion({
     setViewerInput,
     leaveLatest,
   } = layout;
+
+  const voiceAvailable =
+    !noEngine &&
+    !noteMode &&
+    !forkFrom &&
+    !session.archived &&
+    (session.source === "opensession" || session.source === "slack");
+  const chatVisible =
+    !showPortal &&
+    !showDesktop &&
+    !showStaging &&
+    !showAssets &&
+    !subagentOpen &&
+    !(showConversation && conversationThreadId) &&
+    !showReview &&
+    !showVideo &&
+    !showTerminal;
+  const voice = useSessionVoice({
+    sessionId: session.id,
+    enabled:
+      voiceAvailable &&
+      focused &&
+      composer.state.voiceReady &&
+      !safety &&
+      chatVisible,
+    busy: isBusy,
+    entries,
+    // Isolated sends leave text, quotes, and attachments in the composer.
+    onSend: composer.actions.sendVoice,
+  });
 
   return (
     <div
@@ -1267,6 +1302,12 @@ export function SessionViewerMainRegion({
                   }
                   config={{
                     draftKey,
+                    call: voiceAvailable
+                      ? {
+                          active: voice.active,
+                          status: SESSION_VOICE_STATUS[voice.state],
+                        }
+                      : undefined,
                     images,
                     files,
                     staging: uploadStaging,
@@ -1333,6 +1374,7 @@ export function SessionViewerMainRegion({
                   }}
                   actions={{
                     onSend: handleSend,
+                    onToggleCall: voiceAvailable ? voice.toggle : undefined,
                     onImagesChange: setImages,
                     onFilesChange: setFiles,
                     onAddAttachments: addSessionAttachments,
@@ -1411,7 +1453,20 @@ export function SessionViewerMainRegion({
                       )}
                     </>
                   )}
-                  attached={attachedComposer}
+                  attached={
+                    voice.active || voice.error ? (
+                      <>
+                        <SessionVoiceStatus
+                          state={voice.state}
+                          error={voice.error}
+                          onDismiss={voice.dismissError}
+                        />
+                        {attachedComposer}
+                      </>
+                    ) : (
+                      attachedComposer
+                    )
+                  }
                   attachedAction={
                     nextAction ? (
                       <NextUnreadButton key={session.id} phone={isPhone} />
