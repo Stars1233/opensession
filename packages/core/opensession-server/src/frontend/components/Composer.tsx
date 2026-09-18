@@ -1820,8 +1820,9 @@ export function Composer({
                   className={cn(
                     composerIconButtonClass,
                     // The composer owns the inset ::before wash; suppress
-                    // Button's full-size ghost wash so hover paints once.
-                    "hover:bg-transparent phone:min-h-11 phone:min-w-11",
+                    // Button's full-size ghost wash, including the open
+                    // tooltip state, so hover paints once like dictation.
+                    "hover:bg-transparent data-[popup-open]:bg-transparent phone:min-h-11 phone:min-w-11",
                     // A live call reads as the universal red handset.
                     call?.active && "text-red hover:text-red",
                   )}
