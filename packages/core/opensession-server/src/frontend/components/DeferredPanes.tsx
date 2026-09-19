@@ -1,5 +1,4 @@
-import React from "react";
-import { deferred } from "./deferred";
+import { deferred, deferredExport } from "./deferred";
 
 /*
  * The route panes AppContent mounts, each loaded the first time it is opened
@@ -13,35 +12,22 @@ export const FirstMile = deferred(() =>
   import("./FirstMile").then((m) => m.FirstMile),
 );
 
-type Panes = typeof import("./panes");
+const panes = () => import("./panes");
 
-function pane<K extends keyof Panes>(name: K): Panes[K] {
-  // SAFETY: every export of panes.ts is a function component, so each one
-  // accepts `never` as its props; the loader only forwards whatever props the
-  // caller passed.
-  const Pane = deferred<never>(() =>
-    import("./panes").then((m) => m[name] as React.ComponentType<never>),
-  );
-  // SAFETY: Deferred renders m[name] with the props it receives unchanged, so
-  // it takes exactly the props of Panes[K]; call sites type-check against the
-  // real component.
-  return Pane as Panes[K];
-}
-
-export const Analytics = pane("Analytics");
-export const Archived = pane("Archived");
-export const Automations = pane("Automations");
-export const CatchUpDeck = pane("CatchUpDeck");
-export const Databases = pane("Databases");
-export const Feed = pane("Feed");
-export const Goals = pane("Goals");
-export const Issues = pane("Issues");
-export const Prs = pane("Prs");
-export const Reports = pane("Reports");
-export const Reviews = pane("Reviews");
-export const Security = pane("Security");
-export const SupportInbox = pane("SupportInbox");
-export const SupportPreview = pane("SupportPreview");
-export const SupportTinder = pane("SupportTinder");
-export const Tasks = pane("Tasks");
-export const WorkspacePane = pane("WorkspacePane");
+export const Analytics = deferredExport(panes, "Analytics");
+export const Archived = deferredExport(panes, "Archived");
+export const Automations = deferredExport(panes, "Automations");
+export const CatchUpDeck = deferredExport(panes, "CatchUpDeck");
+export const Databases = deferredExport(panes, "Databases");
+export const Feed = deferredExport(panes, "Feed");
+export const Goals = deferredExport(panes, "Goals");
+export const Issues = deferredExport(panes, "Issues");
+export const Prs = deferredExport(panes, "Prs");
+export const Reports = deferredExport(panes, "Reports");
+export const Reviews = deferredExport(panes, "Reviews");
+export const Security = deferredExport(panes, "Security");
+export const SupportInbox = deferredExport(panes, "SupportInbox");
+export const SupportPreview = deferredExport(panes, "SupportPreview");
+export const SupportTinder = deferredExport(panes, "SupportTinder");
+export const Tasks = deferredExport(panes, "Tasks");
+export const WorkspacePane = deferredExport(panes, "WorkspacePane");
