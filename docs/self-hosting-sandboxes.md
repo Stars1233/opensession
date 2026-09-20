@@ -402,7 +402,9 @@ the Runner service so the running process picks the decision up. macOS
 records the decision per binary path, so a Homebrew upgrade of `bun` asks
 again. The qualification reads the recorded decision and says which of
 these is missing. Guest VMs run as launchd jobs on the Mac, so a Runner
-restart or upgrade does not stop them. Nothing dials into the Mac: Open
+restart or upgrade does not stop them. Inside a guest the session's
+workspace keeps its canonical path: base preparation switches off the
+`/home` automounter and aliases `/home/ubuntu` to the `admin` home. Nothing dials into the Mac: Open
 Session drives [Tart](https://tart.run) through the Runner's authenticated
 command channel and reaches each guest over SSH from the Mac itself, so the
 guests need no address of their own. The Runner stays a trusted machine; the

@@ -90,7 +90,7 @@ const TART_RELEASE_URL = `https://github.com/openai/tart/releases/download/${TAR
 export const DEFAULT_TART_IMAGE = "ghcr.io/cirruslabs/macos-tahoe-xcode:26.5";
 export const TART_BASE_VM = "opensession-base";
 /** Bump when the base VM preparation changes; existing bases are rebuilt. */
-const BASE_PREPARATION_REVISION = "base-v1";
+const BASE_PREPARATION_REVISION = "base-v2";
 const VM_PREFIX = "sbx-";
 const PREWARM_PREFIX = "sbx-prewarm-";
 const TEMPLATE_PREFIX = "tpl-";
@@ -891,6 +891,13 @@ export async function ensureTartBaseVm(
         "sudo -n pmset -a sleep 0 displaysleep 0 disksleep 0 >/dev/null 2>&1 || true",
         "defaults -currentHost write com.apple.screensaver idleTime 0 >/dev/null 2>&1 || true",
         "sudo -n launchctl unload -w /System/Library/LaunchDaemons/com.apple.softwareupdated.plist >/dev/null 2>&1 || true",
+        // A session keeps its canonical host workspace path, which lives under
+        // the Linux guest home. macOS reserves /home for the automounter, so
+        // switch that map off and alias the path to the guest user's home.
+        "sudo -n sed -i '' 's#^/home[[:space:]]#\\#&#' /etc/auto_master",
+        "sudo -n automount -vc >/dev/null 2>&1 || true",
+        `[ -e /home/ubuntu ] || sudo -n ln -s /Users/${GUEST_USER} /home/ubuntu`,
+        "test -d /home/ubuntu/Library",
         "command -v cliclick >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install cliclick >/dev/null 2>&1 || echo 'cliclick not installed (desktop control limited)' >&2",
         `printf %s ${q(signature)} > ~/.opensession-base`,
       ].join("\n"),
