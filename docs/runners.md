@@ -29,6 +29,10 @@ Connect cannot install a service, it says why;
 The Runner connects outbound over the tailnet. Open Session never dials into
 the machine.
 
+A paired Apple silicon Mac can also host **Mac VM** Sandboxes: isolated macOS
+virtual machines, one per session, driven through the same Runner channel. See
+[self-hosting-sandboxes.md](self-hosting-sandboxes.md#mac-vm-tart-on-a-mac-runner).
+
 ## AWS access from a Runner
 
 Runs on a Runner do not inherit the Open Session host's AWS credentials, and

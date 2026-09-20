@@ -798,6 +798,10 @@ if (!g.__opensessionBooted) {
         const { startSandboxEnvironmentMaintenance } =
           await import("./src/server/sandbox/environments");
         startSandboxEnvironmentMaintenance();
+        // Mac VMs have no provider-side idle timer; stop idle ones here.
+        const { startTartIdleSweep } =
+          await import("./src/server/sandbox/adapters/tart");
+        startTartIdleSweep();
         await poolStartup;
       })
       .catch((e) => console.error("[sandbox-prewarm] startup failed:", e));

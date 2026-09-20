@@ -1028,7 +1028,7 @@ export type WSServerMessage =
   | {
       type: "term_ready";
       termId?: string;
-      target: "host" | "daytona" | "box" | "runner";
+      target: "host" | "daytona" | "box" | "tart" | "runner";
       cwd?: string;
     }
   | { type: "term_notice"; termId?: string; message: string }
