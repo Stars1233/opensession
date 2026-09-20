@@ -62,7 +62,7 @@ describe("tart list parsing", () => {
     const vms = parseTartList(
       JSON.stringify([
         {
-          Source: "oci",
+          Source: "OCI",
           Name: "ghcr.io/x/y:1",
           Running: false,
           State: "stopped",

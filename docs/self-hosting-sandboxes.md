@@ -393,7 +393,11 @@ the sandbox; your dashboard retains it.
 
 Provider id `tart`. Each session gets a macOS virtual machine on a Mac you
 already paired as a Runner (Apple silicon, macOS 13 or later, the Runner's
-user logged in to a desktop session). Nothing dials into the Mac: Open
+user logged in to a desktop session). On macOS 15 and later the Runner
+process also needs the **Local Network** privacy permission (System Settings
+→ Privacy & Security → Local Network → allow `bun`, the Open Session
+Runner) so the Mac can reach its guests; the qualification says so when it
+is missing. Nothing dials into the Mac: Open
 Session drives [Tart](https://tart.run) through the Runner's authenticated
 command channel and reaches each guest over SSH from the Mac itself, so the
 guests need no address of their own. The Runner stays a trusted machine; the

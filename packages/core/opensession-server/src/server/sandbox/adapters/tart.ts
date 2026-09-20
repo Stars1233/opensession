@@ -347,13 +347,15 @@ async function launchVm(
       `${TART} set ${q(name)} --cpu ${machine.cpu} --memory ${machine.memoryMb}`,
       { label: `set ${name}`, sessionId: opts.sessionId },
     );
+    // `&` binds looser than `&&`, so the launch is its own statement: the
+    // pid recorded is tart's, not a backgrounded list's.
     const started = await tartHostExec(
       host,
-      `mkdir -p ${HOST_DIR}/vms && ` +
-        `nohup ${TART} run --no-graphics --vnc-experimental ${q(name)} ` +
-        `> ${HOST_DIR}/vms/${q(`${name}.log`)} 2>&1 < /dev/null & ` +
-        `echo $! > ${HOST_DIR}/vms/${q(`${name}.pid`)}; sleep 2; ` +
-        `kill -0 "$(cat ${HOST_DIR}/vms/${q(`${name}.pid`)})"`,
+      `mkdir -p ${HOST_DIR}/vms; cd ${HOST_DIR}/vms || exit 1
+` +
+        `nohup ${TART} run --no-graphics --vnc-experimental ${q(name)} > ${q(`${name}.log`)} 2>&1 < /dev/null &
+` +
+        `echo $! > ${q(`${name}.pid`)}; sleep 2; kill -0 "$(cat ${q(`${name}.pid`)})"`,
       { label: `run ${name}`, sessionId: opts.sessionId, timeoutMs: 30_000 },
     );
     if (started.exitCode !== 0) {
@@ -383,7 +385,38 @@ async function launchVm(
       `Mac VM ${name} got no IP address: ${(ip.stderr || log.stdout).trim().slice(0, 400)}`,
     );
   }
+  await assertGuestReachable(host, name, match[0], opts.sessionId);
   return match[0];
+}
+
+/** The guest's sshd must answer from the Mac. macOS 15 and later gate LAN
+ *  access (the vmnet bridge included) per app behind the Local Network
+ *  privacy permission; the Runner's process needs it once. Name that cause
+ *  instead of timing out in the SSH wait later. */
+async function assertGuestReachable(
+  host: TartHost,
+  name: string,
+  ip: string,
+  sessionId?: string,
+): Promise<void> {
+  const probe = await tartHostExec(
+    host,
+    `for i in $(seq 1 40); do nc -z -w 2 ${ip} 22 >/dev/null 2>&1 && exit 0; sleep 3; done; exit 1`,
+    { label: `reach ${name}`, sessionId, timeoutMs: 150_000 },
+  );
+  if (probe.exitCode === 0) return;
+  const gated = await tartHostExec(
+    host,
+    `log show --last 3m --predicate 'eventMessage CONTAINS "LocalNetwork"' 2>/dev/null | grep -c 'bundle id bun' || true`,
+    { label: `local-network ${name}`, timeoutMs: 60_000 },
+  );
+  const hint =
+    Number(gated.stdout.trim()) > 0
+      ? ` macOS is applying the Local Network privacy check to the Runner: on ${host.runnerName}, open System Settings > Privacy & Security > Local Network and allow "bun" (the Open Session Runner), then test again.`
+      : ` Check that the VM booted (its VNC URL is in ~/.opensession-tart/vms/${name}.log on the Mac) and that the Runner may reach the local network.`;
+  throw new Error(
+    `Mac VM ${name} at ${ip} does not answer on port 22 from ${host.runnerName}.${hint}`,
+  );
 }
 
 async function stopVm(
