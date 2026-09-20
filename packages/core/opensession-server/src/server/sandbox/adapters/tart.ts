@@ -263,7 +263,8 @@ export function parseTartList(stdout: string): TartVm[] {
       entry.Running === true || entry.running === true || state === "running";
     out.push({
       name,
-      source: String(entry.Source ?? entry.source ?? "local"),
+      // tart prints "OCI" / "local"; compare case-insensitively.
+      source: String(entry.Source ?? entry.source ?? "local").toLowerCase(),
       running,
     });
   }
@@ -633,11 +634,14 @@ async function ensureImagePulled(
       (vm) => vm.source === "oci" && vm.name === image,
     );
   if (await present()) return;
+  // A pull already in flight (this or an operator's) is joined, never
+  // duplicated: two pulls of one image race on the same cache directory.
+  const pulling = `pgrep -f ${q(`tart pull ${image}`)} >/dev/null 2>&1`;
   const started = await tartHostExec(
     host,
     `mkdir -p ${HOST_DIR} && cd ${HOST_DIR} && ` +
-      `if [ -f pull.pid ] && kill -0 "$(cat pull.pid)" 2>/dev/null; then echo already; else ` +
-      `nohup ${TART} pull ${q(image)} > pull.log 2>&1 < /dev/null & echo $! > pull.pid; echo started; fi`,
+      `if ${pulling}; then echo already; else ` +
+      `nohup ${TART} pull ${q(image)} > pull.log 2>&1 < /dev/null & echo started; fi`,
     { label: "pull", timeoutMs: 30_000 },
   );
   hostNeed(started, "could not start the image pull");
@@ -646,8 +650,8 @@ async function ensureImagePulled(
     await sleep(20_000);
     const status = await tartHostExec(
       host,
-      `cd ${HOST_DIR} && if kill -0 "$(cat pull.pid 2>/dev/null)" 2>/dev/null; then echo running; else echo done; fi; ` +
-        `tail -c 400 pull.log 2>/dev/null | tr '\\r' '\\n' | grep -E '[0-9]+%' | tail -1`,
+      `cd ${HOST_DIR} && if ${pulling}; then echo running; else echo done; fi; ` +
+        `tail -c 400 pull.log 2>/dev/null | tr '\\r' '\\n' | grep -aE '[0-9]+%' | tail -1`,
       { label: "pull status", timeoutMs: 30_000 },
     );
     const lines = status.stdout.trim().split("\n");
@@ -1243,6 +1247,19 @@ export const tartPrewarmAdapter: PrewarmAdapter = {
  *  clone (the project-snapshot mechanism). Everything created is deleted. */
 export async function qualifyTartConnection(
   update: (stage: string, progress?: number) => void = () => undefined,
+): Promise<void> {
+  try {
+    await qualifyTartConnectionInner(update);
+  } catch (error) {
+    // Surface the host's own message: the generic classifier keys on words
+    // like "image" and would otherwise report a snapshot problem.
+    const message = error instanceof Error ? error.message : String(error);
+    throw Object.assign(new Error(message), { code: "QUALIFICATION_FAILED" });
+  }
+}
+
+async function qualifyTartConnectionInner(
+  update: (stage: string, progress?: number) => void,
 ): Promise<void> {
   const settings = tartSettings();
   update("Checking the Mac host", 3);
