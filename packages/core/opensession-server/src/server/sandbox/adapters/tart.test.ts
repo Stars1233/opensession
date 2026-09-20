@@ -112,7 +112,7 @@ describe("tart guest commands", () => {
       env: { FOO: "a b" },
     });
     expect(script).toBe(
-      "export HOME=/Users/admin PATH=/Users/admin/.bun/bin:/Users/admin/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; " +
+      "export HOME=/Users/admin PATH=/Users/admin/.bun/bin:/Users/admin/.local/bin:/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin; " +
         "export FOO='a b'; cd /Users/admin/worktrees/x && git status",
     );
   });

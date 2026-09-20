@@ -267,9 +267,11 @@ const LINUX_LAYOUT: RemoteLayout = buildLayout("linux", REMOTE_HOME, {
  *  run dirs under that home because /home is not writable on macOS. */
 export const DARWIN_GUEST_HOME = "/Users/admin";
 const DARWIN_LAYOUT: RemoteLayout = buildLayout("darwin", DARWIN_GUEST_HOME, {
+  // Pinned tools land in /usr/local/bin and must shadow whatever the image's
+  // Homebrew ships (its `node` is newer than the one the runner expects).
   path:
     `${DARWIN_GUEST_HOME}/.bun/bin:${DARWIN_GUEST_HOME}/.local/bin:` +
-    "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
   runsBase: `${DARWIN_GUEST_HOME}/.opensession-sessions/sandbox-runs`,
   hostEntry: `${DARWIN_GUEST_HOME}/projects/opensession/packages/core/opensession-server/src/runner-host/host.ts`,
 });
