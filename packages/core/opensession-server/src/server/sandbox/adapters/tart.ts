@@ -347,15 +347,21 @@ async function launchVm(
       `${TART} set ${q(name)} --cpu ${machine.cpu} --memory ${machine.memoryMb}`,
       { label: `set ${name}`, sessionId: opts.sessionId },
     );
-    // `&` binds looser than `&&`, so the launch is its own statement: the
-    // pid recorded is tart's, not a backgrounded list's.
+    // launchd owns the VM process: a child of the Runner dies with the
+    // Runner's process group when the Runner restarts or upgrades.
+    const label = q(launchdLabel(name));
+    const log = `${HOST_DIR}/vms/${q(`${name}.log`)}`;
     const started = await tartHostExec(
       host,
-      `mkdir -p ${HOST_DIR}/vms; cd ${HOST_DIR}/vms || exit 1
+      `mkdir -p ${HOST_DIR}/vms && cd ${HOST_DIR}/vms || exit 1
 ` +
-        `nohup ${TART} run --no-graphics --vnc-experimental ${q(name)} > ${q(`${name}.log`)} 2>&1 < /dev/null &
+        `launchctl remove ${label} >/dev/null 2>&1; rm -f ${log}
 ` +
-        `echo $! > ${q(`${name}.pid`)}; sleep 2; kill -0 "$(cat ${q(`${name}.pid`)})"`,
+        `launchctl submit -l ${label} -o ${log} -e ${log} -- ${TART} run --no-graphics --vnc-experimental ${q(name)} || exit 1
+` +
+        `sleep 2; pid=$(pgrep -f -- ${q(`tart run --no-graphics --vnc-experimental ${name}$`)} | head -1)
+` +
+        `[ -n "$pid" ] || exit 1; echo "$pid" > ${q(`${name}.pid`)}`,
       { label: `run ${name}`, sessionId: opts.sessionId, timeoutMs: 30_000 },
     );
     if (started.exitCode !== 0) {
@@ -399,24 +405,73 @@ async function assertGuestReachable(
   ip: string,
   sessionId?: string,
 ): Promise<void> {
-  const probe = await tartHostExec(
-    host,
-    `for i in $(seq 1 40); do nc -z -w 2 ${ip} 22 >/dev/null 2>&1 && exit 0; sleep 3; done; exit 1`,
-    { label: `reach ${name}`, sessionId, timeoutMs: 150_000 },
-  );
-  if (probe.exitCode === 0) return;
-  const gated = await tartHostExec(
-    host,
-    `log show --last 3m --predicate 'eventMessage CONTAINS "LocalNetwork"' 2>/dev/null | grep -c 'bundle id bun' || true`,
-    { label: `local-network ${name}`, timeoutMs: 60_000 },
-  );
-  const hint =
-    Number(gated.stdout.trim()) > 0
-      ? ` macOS is applying the Local Network privacy check to the Runner: on ${host.runnerName}, open System Settings > Privacy & Security > Local Network and allow "bun" (the Open Session Runner), then test again.`
-      : ` Check that the VM booted (its VNC URL is in ~/.opensession-tart/vms/${name}.log on the Mac) and that the Runner may reach the local network.`;
+  // A cold macOS guest holds its DHCP lease a couple of minutes before sshd
+  // is up, so the wait is generous and split into short host commands. The
+  // last connect error tells the two failures apart: a booting guest refuses
+  // or times out, a Local Network gate answers "No route to host" although
+  // the guest already has a lease.
+  const deadline = Date.now() + GUEST_REACH_TIMEOUT_MS;
+  let lastError = "";
+  while (Date.now() < deadline) {
+    const probe = await tartHostExec(
+      host,
+      `for i in $(seq 1 12); do err=$(nc -z -v -w 2 ${ip} 22 2>&1) && exit 0; sleep 3; done; echo "$err" >&2; exit 1`,
+      { label: `reach ${name}`, sessionId, timeoutMs: 90_000 },
+    );
+    if (probe.exitCode === 0) return;
+    lastError = probe.stderr.trim().slice(0, 200) || lastError;
+  }
+  const hint = /no route to host/i.test(lastError)
+    ? await localNetworkHint(host)
+    : ` Check that the VM booted (its VNC URL is in ~/.opensession-tart/vms/${name}.log on the Mac).`;
   throw new Error(
-    `Mac VM ${name} at ${ip} does not answer on port 22 from ${host.runnerName}.${hint}`,
+    `Mac VM ${name} at ${ip} does not answer on port 22 from ${host.runnerName}${lastError ? ` (${lastError})` : ""}.${hint}`,
   );
+}
+
+const GUEST_REACH_TIMEOUT_MS = 6 * 60_000;
+
+function launchdLabel(name: string): string {
+  return `opensession-tart-${name}`;
+}
+
+/** macOS keeps the Local Network decision per signed binary in the network
+ *  extension preferences (world-readable). The Runner's own binary is the
+ *  parent of the host shell, so its record says whether the user has denied,
+ *  allowed, or never been asked. */
+const LOCAL_NETWORK_STATE_SCRIPT = [
+  "BUN=$(ps -o comm= -p $PPID); T=$(mktemp)",
+  'plutil -p /Library/Preferences/com.apple.networkextension.plist > "$T" 2>/dev/null',
+  // The archived plist lists strings by index and records reference them:
+  // find the index of the binary's path, then the record whose Path is it.
+  `id=$(grep -n "=> .$BUN.$" "$T" | head -1 | sed -E 's/^[0-9]+: *([0-9]+) => .*/\\1/')`,
+  'L=""; [ -n "$id" ] && L=$(grep -n ".Path. => .*value = $id}" "$T" | head -1 | cut -d: -f1)',
+  'if [ -z "$L" ]; then echo "unset $BUN"',
+  `elif sed -n "$((L-12)),$L p" "$T" | grep -q '.DenyMulticast. => true'; then echo "denied $BUN"`,
+  'else echo "allowed $BUN"; fi',
+  'rm -f "$T"',
+].join("\n");
+
+export function localNetworkHintFor(state: string, runnerName: string): string {
+  const [word, ...rest] = state.trim().split(/\s+/);
+  const binary = rest.join(" ") || "bun";
+  const where = `System Settings > Privacy & Security > Local Network on ${runnerName}`;
+  switch (word) {
+    case "denied":
+      return ` The Runner (${binary}) is switched off under ${where}; turn it on, then test again.`;
+    case "allowed":
+      return ` The Runner (${binary}) is allowed under ${where} but its running process predates that decision; restart the Runner service on ${runnerName}, then test again.`;
+    default:
+      return ` macOS has not been told whether the Runner may use the local network: on ${runnerName}, accept the "bun would like to find and connect to devices on your local network" dialog or add ${binary} under ${where}, then test again.`;
+  }
+}
+
+async function localNetworkHint(host: TartHost): Promise<string> {
+  const probe = await tartHostExec(host, LOCAL_NETWORK_STATE_SCRIPT, {
+    label: "local-network",
+    timeoutMs: 60_000,
+  });
+  return localNetworkHintFor(probe.stdout, host.runnerName);
 }
 
 async function stopVm(
@@ -431,6 +486,11 @@ async function stopVm(
     timeoutMs: 120_000,
   });
   await waitForState(host, name, "stopped", 90_000);
+  await tartHostExec(
+    host,
+    `launchctl remove ${q(launchdLabel(name))} >/dev/null 2>&1; true`,
+    { label: `unload ${name}`, sessionId: opts.sessionId },
+  );
 }
 
 async function deleteVm(
@@ -444,7 +504,7 @@ async function deleteVm(
   hostNeed(
     await tartHostExec(
       host,
-      `${TART} delete ${q(name)} && rm -f ${HOST_DIR}/vms/${q(`${name}.log`)} ${HOST_DIR}/vms/${q(`${name}.pid`)} ${HOST_DIR}/vms/${q(`${name}.labels.json`)}`,
+      `launchctl remove ${q(launchdLabel(name))} >/dev/null 2>&1; ${TART} delete ${q(name)} && rm -f ${HOST_DIR}/vms/${q(`${name}.log`)} ${HOST_DIR}/vms/${q(`${name}.pid`)} ${HOST_DIR}/vms/${q(`${name}.labels.json`)}`,
       {
         label: `delete ${name}`,
         sessionId: opts.sessionId,

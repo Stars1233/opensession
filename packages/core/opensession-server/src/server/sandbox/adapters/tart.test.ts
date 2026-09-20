@@ -5,6 +5,7 @@ import {
   DEFAULT_TART_IMAGE,
   guestRemoteArg,
   guestScript,
+  localNetworkHintFor,
   parseTartList,
   tartSettings,
   tartTemplateVmName,
@@ -130,5 +131,24 @@ describe("tart guest commands", () => {
   test("the base signature changes with the image", () => {
     expect(baseSignature("a")).not.toBe(baseSignature("b"));
     expect(baseSignature("a")).toContain("tart@");
+  });
+});
+
+describe("local network hint", () => {
+  test("names the recorded decision for the Runner binary", () => {
+    const denied = localNetworkHintFor(
+      "denied /opt/homebrew/bin/bun\n",
+      "mini",
+    );
+    expect(denied).toContain("switched off");
+    expect(denied).toContain("/opt/homebrew/bin/bun");
+    expect(denied).toContain("on mini");
+    expect(
+      localNetworkHintFor("allowed /opt/homebrew/bin/bun", "mini"),
+    ).toContain("restart the Runner service");
+    expect(
+      localNetworkHintFor("unset /opt/homebrew/bin/bun", "mini"),
+    ).toContain("accept the");
+    expect(localNetworkHintFor("", "mini")).toContain("accept the");
   });
 });

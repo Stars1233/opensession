@@ -394,10 +394,15 @@ the sandbox; your dashboard retains it.
 Provider id `tart`. Each session gets a macOS virtual machine on a Mac you
 already paired as a Runner (Apple silicon, macOS 13 or later, the Runner's
 user logged in to a desktop session). On macOS 15 and later the Runner
-process also needs the **Local Network** privacy permission (System Settings
-→ Privacy & Security → Local Network → allow `bun`, the Open Session
-Runner) so the Mac can reach its guests; the qualification says so when it
-is missing. Nothing dials into the Mac: Open
+process also needs the **Local Network** privacy permission so the Mac can
+reach its guests: accept the "bun would like to find and connect to devices
+on your local network" dialog, or turn `bun` (the Open Session Runner) on
+under System Settings → Privacy & Security → Local Network, then restart
+the Runner service so the running process picks the decision up. macOS
+records the decision per binary path, so a Homebrew upgrade of `bun` asks
+again. The qualification reads the recorded decision and says which of
+these is missing. Guest VMs run as launchd jobs on the Mac, so a Runner
+restart or upgrade does not stop them. Nothing dials into the Mac: Open
 Session drives [Tart](https://tart.run) through the Runner's authenticated
 command channel and reaches each guest over SSH from the Mac itself, so the
 guests need no address of their own. The Runner stays a trusted machine; the
