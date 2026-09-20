@@ -90,7 +90,7 @@ const TART_RELEASE_URL = `https://github.com/openai/tart/releases/download/${TAR
 export const DEFAULT_TART_IMAGE = "ghcr.io/cirruslabs/macos-tahoe-xcode:26.5";
 export const TART_BASE_VM = "opensession-base";
 /** Bump when the base VM preparation changes; existing bases are rebuilt. */
-const BASE_PREPARATION_REVISION = "base-v2";
+const BASE_PREPARATION_REVISION = "base-v3";
 const VM_PREFIX = "sbx-";
 const PREWARM_PREFIX = "sbx-prewarm-";
 const TEMPLATE_PREFIX = "tpl-";
@@ -894,10 +894,16 @@ export async function ensureTartBaseVm(
         // A session keeps its canonical host workspace path, which lives under
         // the Linux guest home. macOS reserves /home for the automounter, so
         // switch that map off and alias the path to the guest user's home.
+        // The automounter also created the root /home entry at boot; with the
+        // map off, synthetic.conf has to provide it (it takes effect on the
+        // next boot, which is the first boot of every clone).
         "sudo -n sed -i '' 's#^/home[[:space:]]#\\#&#' /etc/auto_master",
         "sudo -n automount -vc >/dev/null 2>&1 || true",
-        `[ -e /home/ubuntu ] || sudo -n ln -s /Users/${GUEST_USER} /home/ubuntu`,
-        "test -d /home/ubuntu/Library",
+        "printf 'home\\tSystem/Volumes/Data/home\\n' | sudo -n tee /etc/synthetic.conf >/dev/null",
+        "sudo -n chmod 644 /etc/synthetic.conf",
+        "sudo -n mkdir -p /System/Volumes/Data/home",
+        `[ -e /System/Volumes/Data/home/ubuntu ] || sudo -n ln -s /Users/${GUEST_USER} /System/Volumes/Data/home/ubuntu`,
+        "test -d /System/Volumes/Data/home/ubuntu/Library",
         "command -v cliclick >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install cliclick >/dev/null 2>&1 || echo 'cliclick not installed (desktop control limited)' >&2",
         `printf %s ${q(signature)} > ~/.opensession-base`,
       ].join("\n"),
