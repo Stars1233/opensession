@@ -348,18 +348,22 @@ async function launchVm(
       { label: `set ${name}`, sessionId: opts.sessionId },
     );
     // launchd owns the VM process: a child of the Runner dies with the
-    // Runner's process group when the Runner restarts or upgrades.
-    const label = q(launchdLabel(name));
-    const log = `${HOST_DIR}/vms/${q(`${name}.log`)}`;
+    // Runner's process group when the Runner restarts or upgrades. A plist
+    // rather than `launchctl submit`, whose jobs are kept alive: launchd
+    // would boot the guest again the moment `tart stop` shut it down.
     const started = await tartHostExec(
       host,
       `mkdir -p ${HOST_DIR}/vms && cd ${HOST_DIR}/vms || exit 1
 ` +
-        `launchctl remove ${label} >/dev/null 2>&1; rm -f ${log}
+        `${unloadVmJob(name)}; rm -f ${q(`${name}.log`)}
 ` +
-        `launchctl submit -l ${label} -o ${log} -e ${log} -- ${TART} run --no-graphics --vnc-experimental ${q(name)} || exit 1
+        `cat > ${q(`${name}.plist`)} <<EOF
+${launchdPlist(name)}
+EOF
 ` +
-        `sleep 2; pid=$(pgrep -f -- ${q(`tart run --no-graphics --vnc-experimental ${name}$`)} | head -1)
+        `launchctl bootstrap gui/$(id -u) ${q(`${name}.plist`)} || exit 1
+` +
+        `sleep 2; pid=$(launchctl print gui/$(id -u)/${q(launchdLabel(name))} 2>/dev/null | awk '/^\tpid = /{print $3}')
 ` +
         `[ -n "$pid" ] || exit 1; echo "$pid" > ${q(`${name}.pid`)}`,
       { label: `run ${name}`, sessionId: opts.sessionId, timeoutMs: 30_000 },
@@ -435,6 +439,39 @@ function launchdLabel(name: string): string {
   return `opensession-tart-${name}`;
 }
 
+/** Shell text that unloads a guest's launchd job if it is loaded. Exits 0. */
+function unloadVmJob(name: string): string {
+  return `launchctl bootout gui/$(id -u)/${q(launchdLabel(name))} >/dev/null 2>&1; true`;
+}
+
+/** The job runs the guest once (`KeepAlive` false) and logs next to the VM
+ *  records. Written through an unquoted heredoc, so `$HOME` expands on the
+ *  Mac; VM names are already restricted to `[A-Za-z0-9_.-]`. */
+export function launchdPlist(name: string): string {
+  const dir = "$HOME/.opensession-tart";
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0"><dict>',
+    `<key>Label</key><string>${launchdLabel(name)}</string>`,
+    "<key>ProgramArguments</key><array>",
+    `<string>${dir}/tart.app/Contents/MacOS/tart</string>`,
+    "<string>run</string><string>--no-graphics</string><string>--vnc-experimental</string>",
+    `<string>${name}</string>`,
+    "</array>",
+    `<key>WorkingDirectory</key><string>${dir}/vms</string>`,
+    `<key>StandardOutPath</key><string>${dir}/vms/${name}.log</string>`,
+    `<key>StandardErrorPath</key><string>${dir}/vms/${name}.log</string>`,
+    "<key>EnvironmentVariables</key><dict>",
+    "<key>HOME</key><string>$HOME</string>",
+    "<key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string>",
+    "</dict>",
+    "<key>RunAtLoad</key><true/>",
+    "<key>KeepAlive</key><false/>",
+    "</dict></plist>",
+  ].join("\n");
+}
+
 /** macOS keeps the Local Network decision per signed binary in the network
  *  extension preferences (world-readable). The Runner's own binary is the
  *  parent of the host shell, so its record says whether the user has denied,
@@ -486,11 +523,10 @@ async function stopVm(
     timeoutMs: 120_000,
   });
   await waitForState(host, name, "stopped", 90_000);
-  await tartHostExec(
-    host,
-    `launchctl remove ${q(launchdLabel(name))} >/dev/null 2>&1; true`,
-    { label: `unload ${name}`, sessionId: opts.sessionId },
-  );
+  await tartHostExec(host, unloadVmJob(name), {
+    label: `unload ${name}`,
+    sessionId: opts.sessionId,
+  });
 }
 
 async function deleteVm(
@@ -504,7 +540,7 @@ async function deleteVm(
   hostNeed(
     await tartHostExec(
       host,
-      `launchctl remove ${q(launchdLabel(name))} >/dev/null 2>&1; ${TART} delete ${q(name)} && rm -f ${HOST_DIR}/vms/${q(`${name}.log`)} ${HOST_DIR}/vms/${q(`${name}.pid`)} ${HOST_DIR}/vms/${q(`${name}.labels.json`)}`,
+      `${unloadVmJob(name)}; ${TART} delete ${q(name)} && rm -f ${HOST_DIR}/vms/${q(`${name}.log`)} ${HOST_DIR}/vms/${q(`${name}.pid`)} ${HOST_DIR}/vms/${q(`${name}.plist`)} ${HOST_DIR}/vms/${q(`${name}.labels.json`)}`,
       {
         label: `delete ${name}`,
         sessionId: opts.sessionId,

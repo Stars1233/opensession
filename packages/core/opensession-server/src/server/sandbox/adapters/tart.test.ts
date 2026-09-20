@@ -5,6 +5,7 @@ import {
   DEFAULT_TART_IMAGE,
   guestRemoteArg,
   guestScript,
+  launchdPlist,
   localNetworkHintFor,
   parseTartList,
   tartSettings,
@@ -150,5 +151,20 @@ describe("local network hint", () => {
       localNetworkHintFor("unset /opt/homebrew/bin/bun", "mini"),
     ).toContain("accept the");
     expect(localNetworkHintFor("", "mini")).toContain("accept the");
+  });
+});
+
+describe("launchd plist", () => {
+  test("runs the guest once under the Runner user's home", () => {
+    const plist = launchdPlist("os-abc");
+    expect(plist).toContain("<string>opensession-tart-os-abc</string>");
+    expect(plist).toContain(
+      "<string>$HOME/.opensession-tart/tart.app/Contents/MacOS/tart</string>",
+    );
+    expect(plist).toContain("<string>run</string>");
+    expect(plist).toContain("<string>os-abc</string>");
+    expect(plist).toContain("<key>KeepAlive</key><false/>");
+    expect(plist).toContain("<key>RunAtLoad</key><true/>");
+    expect(plist).toContain("$HOME/.opensession-tart/vms/os-abc.log");
   });
 });
