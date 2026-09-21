@@ -29,6 +29,7 @@ const PROVIDER_LABELS = new Map([
   ["daytona", "Daytona"],
   ["box", "Boat"],
   ["tart", "Mac VM"],
+  ["usecomputer", "use.computer"],
 ]);
 
 export function sandboxProviderLabel(id: string): string {

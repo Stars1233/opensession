@@ -43,6 +43,28 @@ export function SandboxProviderLogo({
 }: {
   provider: SandboxProvider;
 }) {
+  if (provider === "usecomputer") {
+    // use.computer: a display with a pointer over it, the computer-use mark.
+    return (
+      <SandboxProviderTile className="bg-surface text-fg">
+        <svg
+          viewBox="0 0 32 32"
+          className="size-7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="4" y="6" width="24" height="16" rx="3" />
+          <path d="M12 26h8M16 22v4" />
+          <path d="M13 10l7 4-3 1 2 3-1.6.9-2-3-2.4 2.3z" fill="currentColor" />
+        </svg>
+      </SandboxProviderTile>
+    );
+  }
+
   if (provider === "tart") {
     // A Mac VM: a rounded display with a smaller window inside it.
     return (

@@ -80,6 +80,27 @@ describe("Mac VM hosts", () => {
   });
 });
 
+describe("use.computer", () => {
+  test("needs an account key and keeps the reservation setting", () => {
+    expect(() =>
+      connectSandboxProvider("usecomputer", { settings: {} }),
+    ).toThrow(/use.computer API key is required/);
+    const connection = connectSandboxProvider("usecomputer", {
+      secret: "uc_live_secret",
+      settings: { reservation: " 00000000-0000-4000-8000-000000000001 " },
+    });
+    expect(connection.settings.reservation).toBe(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(sandboxProviderCredential("usecomputer")).toEqual({
+      apiKey: "uc_live_secret",
+    });
+    expect(
+      readFileSync(process.env.OPENSESSION_SANDBOX_CONFIG!, "utf-8"),
+    ).not.toContain("uc_live_secret");
+  });
+});
+
 describe("workspace sandbox connections", () => {
   test("stores Daytona credentials behind an opaque reference and never returns it", () => {
     connectSandboxProvider("daytona", {

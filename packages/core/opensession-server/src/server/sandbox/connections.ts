@@ -22,7 +22,12 @@ import {
   workspaceSecretExists,
 } from "../workspace-secrets";
 export { sandboxAdapterSignature } from "./adapter-signature";
-export const WORKSPACE_SANDBOX_PROVIDERS = ["daytona", "box", "tart"] as const;
+export const WORKSPACE_SANDBOX_PROVIDERS = [
+  "daytona",
+  "box",
+  "tart",
+  "usecomputer",
+] as const;
 export type WorkspaceSandboxProvider =
   (typeof WORKSPACE_SANDBOX_PROVIDERS)[number];
 
@@ -50,6 +55,9 @@ export interface SandboxConnectionSettings {
   /** tart: the Macs that host VMs. Sessions are placed on whichever has a
    *  free slot. */
   hosts?: SandboxHostSetting[];
+  /** usecomputer: the Mac reservation to use when the account holds more
+   *  than one active reservation. */
+  reservation?: string;
 }
 
 export interface SandboxHostSetting {
@@ -177,6 +185,9 @@ function settings(value: unknown): SandboxConnectionSettings {
     ...(string(raw.runner) ? { runner: string(raw.runner) } : {}),
     ...(number(raw.maxVms) ? { maxVms: Math.round(number(raw.maxVms)!) } : {}),
     ...(Array.isArray(raw.hosts) ? { hosts: hosts(raw.hosts) } : {}),
+    ...(string(raw.reservation)
+      ? { reservation: string(raw.reservation) }
+      : {}),
   };
 }
 
@@ -358,7 +369,7 @@ export function connectSandboxProvider(
   }
   if (!credentialRef && sandboxProviderNeedsCredential(provider)) {
     throw new Error(
-      `${provider === "box" ? "Boat" : "Daytona"} API key is required`,
+      `${provider === "box" ? "Boat" : provider === "usecomputer" ? "use.computer" : "Daytona"} API key is required`,
     );
   }
   const nextSettings = mergeSettings(

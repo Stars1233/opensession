@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
 
+import type { PanReleaseRecord } from "../lib/viewport-readout";
+
 // Execute the actual pre-paint bootstrap with a controllable WebKit window.
 // Chromium phone emulation cannot reproduce iOS standalone letterboxing.
 const html = await Bun.file(new URL("../index.html", import.meta.url)).text();
@@ -20,6 +22,8 @@ function viewportHarness(standalone = true) {
     { tagName: "BODY" };
   const timers = new Map<number, { at: number; callback: () => void }>();
   const windowEvents = new EventTarget();
+  // Filled in by the bootstrap under test.
+  const panRelease: PanReleaseRecord | undefined = undefined;
   const documentEvents = new EventTarget();
   const document = {
     hidden: false,
@@ -52,6 +56,7 @@ function viewportHarness(standalone = true) {
     innerHeight: 784,
     scrollY: 0,
     visualViewport: viewport,
+    __os1PanRelease: panRelease,
     addEventListener: windowEvents.addEventListener.bind(windowEvents),
     scrollTo(x: number, y: number) {
       scrolls.push([x, y]);
@@ -318,5 +323,49 @@ describe("standalone viewport recovery", () => {
     app.fireWindow("scroll");
     app.advance(2000);
     expect(app.scrolls).toEqual([]);
+  });
+  test("a scroll inside the document schedules the release when the viewport reports nothing", () => {
+    const app = viewportHarness();
+    app.advance(1000);
+    app.viewport.offsetTop = 62;
+    app.fireDocument("scroll");
+    app.advance(119);
+    expect(app.scrolls).toEqual([]);
+    app.advance(1);
+    expect(app.scrolls).toEqual([[0, 0]]);
+    expect(app.window.__os1PanRelease).toMatchObject({
+      reason: "released",
+      released: 1,
+      pan: 62,
+      viewportEvents: 0,
+      scrollerEvents: 1,
+    });
+  });
+
+  test("the record names why an attempt stopped", () => {
+    const app = viewportHarness();
+    app.advance(1000);
+    app.keyboard(true);
+    app.viewport.offsetTop = 62;
+    app.fireViewport("scroll");
+    app.advance(120);
+    expect(app.scrolls).toEqual([]);
+    expect(app.window.__os1PanRelease).toMatchObject({
+      reason: "keyboard",
+      runs: 1,
+      released: 0,
+      pan: 62,
+      viewportEvents: 1,
+    });
+    app.keyboard(false);
+    app.viewport.offsetTop = 0;
+    app.fireDocument("touchend");
+    app.advance(120);
+    expect(app.window.__os1PanRelease).toMatchObject({
+      reason: "rest",
+      runs: 2,
+      released: 0,
+      scrollerEvents: 1,
+    });
   });
 });
