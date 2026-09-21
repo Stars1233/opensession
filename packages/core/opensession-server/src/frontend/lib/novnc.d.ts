@@ -1,6 +1,7 @@
 /** The slice of noVNC's RFB client the Desktop tab uses. noVNC ships no
- * types; see node_modules/@novnc/novnc/docs/API.md for the full surface. */
-declare module "@novnc/novnc/core/rfb.js" {
+ * types; see node_modules/@novnc/novnc/docs/API.md for the full surface. The
+ * package exports only its RFB entry (core/rfb.js) under the bare name. */
+declare module "@novnc/novnc" {
   export interface RfbCredentials {
     username?: string;
     password?: string;
