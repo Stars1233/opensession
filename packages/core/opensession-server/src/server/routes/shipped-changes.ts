@@ -1,8 +1,8 @@
 import {
   forgetShippedChangeAnnouncement,
   shareShippedVisualChange,
-  shippedChangeChannels,
 } from "../../agents/github/shipped-change-notify";
+import { slackChannelsPayload } from "./slack-channels";
 import { deleteSlackMessage } from "../../agents/slack/slack-api";
 import { shippedChangesChannel } from "../../agents/github/constants";
 import { findSessionAsync, updateSessionFile } from "../session-cache";
@@ -26,27 +26,12 @@ export async function handleShippedChangeRoutes(
   if (!session)
     return Response.json({ error: "Session not found" }, { status: 404 });
   if (req.method === "GET") {
-    const caller = ctx.authUser?.login || ctx.authUser?.name;
-    const { mcpUserGrantToken } = await import("../mcp-oauth");
-    const slackToken = caller ? mcpUserGrantToken("slack", caller) : undefined;
-    let canUploadImages = false;
-    if (slackToken) {
-      try {
-        const response = await fetch("https://slack.com/api/auth.test", {
-          headers: { Authorization: `Bearer ${slackToken}` },
-          signal: AbortSignal.timeout(5_000),
-        });
-        canUploadImages = (response.headers.get("x-oauth-scopes") || "")
-          .split(",")
-          .map((scope) => scope.trim())
-          .includes("files:write");
-      } catch {}
-    }
-    return Response.json({
-      channels: shippedChangeChannels(),
-      defaultChannel: shippedChangesChannel(),
-      canUploadImages,
-    });
+    return Response.json(
+      await slackChannelsPayload(ctx, {
+        everyChannel: true,
+        defaultChannel: shippedChangesChannel(),
+      }),
+    );
   }
   const body = await req.json().catch(() => ({}));
   const caller =
@@ -110,6 +95,7 @@ export async function handleShippedChangeRoutes(
       requestedBy: requestUser(ctx, body?.user),
       channel: body?.channel,
       message: body?.message,
+      caller,
       slackToken,
       screenshots: Array.isArray(body?.screenshots)
         ? body.screenshots.filter(

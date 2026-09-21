@@ -7,7 +7,7 @@ import { imageFilesFromPaste, uploadFile } from "../lib/images";
 import { noAutofill } from "../lib/composer-autofill";
 import { Button } from "../ui/button";
 import { OverlayAction } from "../ui/overlay-action";
-import { OptionSelect } from "../ui/select";
+import { SearchSelect } from "../ui/combobox";
 import { toast } from "../ui/toast";
 import { Tooltip } from "../ui/tooltip";
 import { BrandMark } from "./BrandMark";
@@ -453,22 +453,21 @@ export function ShippedChangeComposer({
             {uploading ? <Spinner size="md" /> : <IconPlus size={20} />}
           </button>
           <div className="flex-1" />
-          {/* The app's own select. This was the native one with
-					    `appearance-none`, a hand-placed chevron and a wrapper to
-					    position it, which is the primitive rebuilt by hand around a
-					    control it exists to replace. */}
-          <OptionSelect
+          {/* Searchable: the list is every channel the person is in, with
+					    the configured ones first, so it runs to hundreds of rows. */}
+          <SearchSelect
             label="Slack channel"
-            className="w-28 phone:w-32"
+            className="w-32 phone:w-36"
             value={channel}
-            options={
-              channels.length === 0
-                ? [{ value: "", label: "No channels available" }]
-                : channels.map((candidate) => ({
-                    value: candidate.id,
-                    label: `#${candidate.name}`,
-                  }))
+            options={channels.map((candidate) => ({
+              value: candidate.id,
+              label: `#${candidate.name}`,
+            }))}
+            placeholder={
+              channels.length === 0 ? "No channels" : "Choose a channel"
             }
+            searchPlaceholder="Search channels"
+            emptyText="No channels match"
             onChange={(nextChannel) => {
               draftDirtyRef.current = true;
               setChannel(nextChannel);
