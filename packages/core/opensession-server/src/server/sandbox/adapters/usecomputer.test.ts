@@ -1,12 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import {
   DEFAULT_USE_COMPUTER_API_URL,
   GUEST_PREPARATION,
   guestCommand,
   guestScript,
   parseDetachedExecStatus,
+  prepareGuest,
   sleepSnapshotVersion,
   useComputerChord,
+  useComputerDriver,
   useComputerSandboxId,
   useComputerSettings,
   useComputerTerminalArgv,
@@ -87,12 +89,94 @@ describe("use.computer guest commands", () => {
     });
   });
 
+  test.each([
+    [
+      "printf 'hello\\nworld\\n'; printf 'oops\\n' >&2; exit 7",
+      7,
+      "hello\nworld\n",
+      "oops\n",
+    ],
+    ["exit 0", 0, "", ""],
+  ] as const)(
+    "detached exec preserves streams: %s",
+    async (command, exitCode, stdout, stderr) => {
+      // Exercise the actual status-file writer and reader, not just a hand-built
+      // wire response: an extra newline can shift stdout into stderr.
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        async fetch(request) {
+          const body = (await request.json()) as { command: string };
+          const process = Bun.spawn(["bash", "-c", body.command], {
+            stdout: "pipe",
+            stderr: "pipe",
+          });
+          const [stdout, stderr, return_code] = await Promise.all([
+            new Response(process.stdout).text(),
+            new Response(process.stderr).text(),
+            process.exited,
+          ]);
+          return Response.json({ stdout, stderr, return_code });
+        },
+      });
+      try {
+        const driver = useComputerDriver(
+          { apiUrl: server.url.origin, apiKey: "test-key" },
+          "test-sandbox",
+        );
+        expect(await driver.exec(command)).toEqual({
+          exitCode,
+          stdout,
+          stderr,
+        });
+      } finally {
+        await server.stop(true);
+      }
+    },
+  );
+
   test("guest preparation aliases the canonical workspace home", () => {
     expect(GUEST_PREPARATION).toContain(
       "ln -s /Users/lume /System/Volumes/Data/home/ubuntu",
     );
     expect(GUEST_PREPARATION).toContain("test -d /home/ubuntu/Library");
+    expect(GUEST_PREPARATION).toContain("home\\tSystem/Volumes/Data/home\\n");
+    expect(GUEST_PREPARATION).toContain("tee -a /etc/synthetic.conf");
+    expect(GUEST_PREPARATION).toContain("apfs.util -t");
   });
+
+  test.each([
+    [0, "guest-v2", 1],
+    [0, "guest-v1", 2],
+    [1, "guest-v2", 2],
+  ] as const)(
+    "guest preparation checks path and revision (%s, %s)",
+    async (exitCode, stdout, calls) => {
+      const driver = useComputerDriver(
+        { apiUrl: "https://example.test", apiKey: "test-key" },
+        "test-sandbox",
+      );
+      const exec = mock(async () => ({
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+      })).mockResolvedValueOnce({ exitCode, stdout, stderr: "" });
+      driver.exec = exec;
+      await prepareGuest(driver);
+      expect(exec).toHaveBeenCalledTimes(calls);
+      expect(exec).toHaveBeenNthCalledWith(
+        1,
+        "test -d /home/ubuntu/Library && cat /Users/lume/.opensession-guest 2>/dev/null",
+        { timeoutMs: 30_000 },
+      );
+      if (calls === 2)
+        expect(exec).toHaveBeenNthCalledWith(
+          2,
+          `${GUEST_PREPARATION}\nprintf %s guest-v2 > /Users/lume/.opensession-guest`,
+          { timeoutMs: 120_000 },
+        );
+    },
+  );
 });
 
 describe("use.computer desktop keys", () => {
