@@ -391,9 +391,11 @@ the sandbox; your dashboard retains it.
 
 ### Mac VM (Tart on a Mac Runner)
 
-Provider id `tart`. Each session gets a macOS virtual machine on a Mac you
-already paired as a Runner (Apple silicon, macOS 13 or later, the Runner's
-user logged in to a desktop session). On macOS 15 and later the Runner
+Provider id `tart`. Each session gets a macOS virtual machine on one of the
+Macs you already paired as Runners (Apple silicon, macOS 13 or later, the
+Runner's user logged in to a desktop session). A Mac mini in the office and
+an EC2 Mac instance are the same thing to the connection: a paired macOS
+Runner with a VM budget. On macOS 15 and later the Runner
 process also needs the **Local Network** privacy permission so the Mac can
 reach its guests: accept the "bun would like to find and connect to devices
 on your local network" dialog, or turn `bun` (the Open Session Runner) on
@@ -410,16 +412,28 @@ command channel and reaches each guest over SSH from the Mac itself, so the
 guests need no address of their own. The Runner stays a trusted machine; the
 VMs are the isolation boundary.
 
-**Connect** picks the Runner, the image, the VM shape (default 4 CPUs, 6 GB),
-and **Max VMs** (default 2; Apple allows two macOS guests per host, and the
-host shares its memory with them). The qualification installs the pinned
+**Connect** lists the **Mac hosts** (each a paired macOS Runner with its own
+**Max VMs**, default 2; Apple allows two macOS guests per host, and the host
+shares its memory with them), the image, and the VM shape (default 4 CPUs,
+6 GB). The qualification proves every host in turn: it installs the pinned
 Tart release under `~/.opensession-tart` on the Mac, generates a host-local
 SSH key, pulls the image (the default
 `ghcr.io/cirruslabs/macos-tahoe-xcode:26.5` is about 70 GB on disk; plan
 100 GB free and an hour for the first pull), prepares `opensession-base` (key
 installed, sleep disabled, `cliclick` for desktop control), and then proves
 a disposable VM: exec semantics, file upload, stop/start persistence, and a
-distinct clone. Later connects are seconds.
+distinct clone. Later connects are seconds per host. A failure names the
+Mac it happened on, and every listed Mac must pass.
+
+A new VM goes to the host with the most free slots, preferring one that
+already holds the repo's project snapshot; ties keep the configured order.
+The VM's state file records which Runner holds it, so sleep, wake, the
+Desktop tab, and Terminal tabs return to that Mac. Offline hosts are skipped
+for new VMs; a VM whose Mac is offline waits for it rather than being
+recreated elsewhere. When every host is full, the error lists each Mac's
+running VMs. Project snapshots (`tpl-<repo>-<hash>`) live on the Mac that
+sealed them; a session placed on another Mac clones the base instead, and
+the snapshot stays valid where it is.
 
 Session VMs are APFS clone-on-write clones of the base (`sbx-<session>`), so
 creating one costs no space up front and takes seconds; the runner payload
@@ -443,12 +457,13 @@ says which sessions hold the slots.
 
 Portals ride the outbound relay like every remote provider. The agent's
 `opensession-desktop` tools work (`screencapture` and `cliclick` inside the
-guest); a person-facing desktop view and Terminal tabs are not available
-yet. Automations never run here: the guest network is not policy-enforced.
+guest). Automations never run here: the guest network is not
+policy-enforced.
 
-More capacity is more Macs: pair another Mac (a Mac mini, or an EC2 Mac
-instance running the Runner client) and point the connection at it. One
-host per connection today.
+More capacity is more Macs: pair another Mac and add it under **Configure**
+on the Mac VM card. [mac-vm-hosts.md](mac-vm-hosts.md) walks through
+preparing a Mac mini or an EC2 Mac instance as a host, including the
+`deploy/mac-host/prepare.sh` script that does the machine-side steps.
 
 ## Security posture
 

@@ -31,7 +31,9 @@ the machine.
 
 A paired Apple silicon Mac can also host **Mac VM** Sandboxes: isolated macOS
 virtual machines, one per session, driven through the same Runner channel. See
-[self-hosting-sandboxes.md](self-hosting-sandboxes.md#mac-vm-tart-on-a-mac-runner).
+[self-hosting-sandboxes.md](self-hosting-sandboxes.md#mac-vm-tart-on-a-mac-runner)
+and, for preparing a Mac mini or an EC2 Mac instance as a host,
+[mac-vm-hosts.md](mac-vm-hosts.md).
 
 ## AWS access from a Runner
 

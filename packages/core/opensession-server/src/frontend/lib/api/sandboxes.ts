@@ -1,6 +1,7 @@
 import { request } from "./request";
 import type {
   SandboxConnectionInfo,
+  SandboxConnectionSettings,
   SandboxIngressInfo,
   SandboxOperationInfo,
 } from "./automations";
@@ -156,7 +157,7 @@ export function connectSandbox(
     tokenId?: string;
     tokenSecret?: string;
     publicBaseUrl?: string;
-    settings?: Record<string, string | number | boolean | undefined>;
+    settings?: SandboxConnectionSettings;
   },
 ): Promise<SandboxConnectionsResponse> {
   return request(`/sandbox/connections/${provider}/connect`, {
@@ -180,7 +181,7 @@ export function updateSandboxConnection(
   provider: SandboxConnectionInfo["provider"],
   body: {
     enabled?: boolean;
-    settings?: Record<string, string | number | boolean | undefined>;
+    settings?: SandboxConnectionSettings;
   },
 ): Promise<SandboxConnectionsResponse> {
   return request(`/sandbox/connections/${provider}`, {
