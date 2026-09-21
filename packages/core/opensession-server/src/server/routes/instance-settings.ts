@@ -82,8 +82,8 @@ function identityDto() {
   };
 }
 
-function generalDto(publicPrefix: string) {
-  const revision = organizationIconRevision();
+async function generalDto(publicPrefix: string) {
+  const revision = await organizationIconRevision();
   return {
     organizationName: organizationName(),
     organizationIconUrl:
@@ -291,7 +291,7 @@ export async function handleInstanceSettingsRoutes(
   const { req, path, publicPrefix } = ctx;
 
   if (path === "/api/settings/general" && req.method === "GET") {
-    return Response.json(generalDto(publicPrefix));
+    return Response.json(await generalDto(publicPrefix));
   }
 
   if (path === "/api/settings/worktrees" && req.method === "GET") {
@@ -362,15 +362,15 @@ export async function handleInstanceSettingsRoutes(
         { status: 400 },
       );
     }
-    return Response.json(generalDto(publicPrefix));
+    return Response.json(await generalDto(publicPrefix));
   }
 
   if (path === "/api/settings/general/icon" && req.method === "POST") {
     const forbidden = requireWorkspaceAdmin(ctx);
     if (forbidden) return forbidden;
     try {
-      saveOrganizationIcon(await organizationIconBody(req));
-      return Response.json(generalDto(publicPrefix));
+      await saveOrganizationIcon(await organizationIconBody(req));
+      return Response.json(await generalDto(publicPrefix));
     } catch (error) {
       if (error instanceof OrganizationIconBodyTooLarge) {
         return Response.json(
@@ -393,8 +393,8 @@ export async function handleInstanceSettingsRoutes(
   if (path === "/api/settings/general/icon" && req.method === "DELETE") {
     const forbidden = requireWorkspaceAdmin(ctx);
     if (forbidden) return forbidden;
-    removeOrganizationIcon();
-    return Response.json(generalDto(publicPrefix));
+    await removeOrganizationIcon();
+    return Response.json(await generalDto(publicPrefix));
   }
 
   if (path === "/api/settings/asset-storage" && req.method === "GET") {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   SandboxConnectionInfo,
+  SandboxHostSetting,
   SandboxOperationInfo,
 } from "../../lib/api";
 import type { SandboxConnectionsResponse } from "../../lib/api/sandboxes";
@@ -35,7 +36,7 @@ import {
 import { InlineAlert } from "../../ui/state";
 import { Switch } from "../../ui/switch";
 import { toast } from "../../ui/toast";
-import { IconCheck, IconPlus } from "../icons";
+import { IconCheck, IconPlus, IconX } from "../icons";
 import { WorkspaceSandboxDefaults } from "./SandboxDefaults";
 import { SandboxProviderLogo } from "./SandboxProviderLogo";
 
@@ -62,7 +63,125 @@ const PROVIDERS: Array<{
     description:
       "macOS virtual machines with Xcode on a Mac you paired as a Runner, one VM per session.",
   },
+  {
+    id: "usecomputer",
+    label: "use.computer",
+    description:
+      "macOS virtual machines with Xcode on Mac minis reserved in your use.computer account, connected with your account API key.",
+  },
 ];
+
+/** Apple allows two macOS guests per host; the server's default. */
+const DEFAULT_MAX_VMS = 2;
+
+/** The Macs a Mac VM connection may use, with the older single-host form
+ *  folded in. */
+function macHostsOf(
+  settings: SandboxConnectionInfo["settings"],
+): SandboxHostSetting[] {
+  if (settings.hosts?.length) return settings.hosts;
+  if (!settings.runner) return [];
+  const host: SandboxHostSetting = { runner: settings.runner };
+  if (settings.maxVms) host.maxVms = settings.maxVms;
+  return [host];
+}
+
+interface MacHostRow {
+  runner: string;
+  maxVms: string;
+}
+
+/** One row per Mac: which paired Runner, and how many VMs it may run. A
+ *  Runner can appear once; the last row cannot be removed. */
+function MacHostsEditor({
+  hosts,
+  onChange,
+  runners,
+}: {
+  hosts: MacHostRow[];
+  onChange: (next: MacHostRow[]) => void;
+  runners: RunnerInfo[] | null;
+}) {
+  const unused = (runners || []).filter(
+    (candidate) => !hosts.some((row) => row.runner === candidate.name),
+  );
+  const update = (index: number, patch: Partial<MacHostRow>) =>
+    onChange(hosts.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-supporting font-medium text-fg">Mac hosts</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<IconPlus size={15} />}
+          onClick={() =>
+            onChange([...hosts, { runner: unused[0]?.name || "", maxVms: "" }])
+          }
+          disabled={!unused.length}
+        >
+          Add Mac
+        </Button>
+      </div>
+      {!runners?.length && (
+        <p className="m-0 text-supporting text-dim">
+          {runners === null
+            ? "Loading Runners…"
+            : "No macOS Runner is paired yet. Pair a Mac under Settings > Runners first."}
+        </p>
+      )}
+      {hosts.map((row, index) => (
+        <div
+          key={index}
+          className="grid grid-cols-[minmax(0,1fr)_5.5rem_auto] items-center gap-2"
+        >
+          <Select
+            aria-label="Mac host"
+            value={row.runner}
+            onChange={(event) => update(index, { runner: event.target.value })}
+            disabled={!runners?.length}
+          >
+            {!row.runner && <option value="">Choose a Mac</option>}
+            {(runners || []).map((candidate) => (
+              <option
+                key={candidate.id}
+                value={candidate.name}
+                disabled={
+                  candidate.name !== row.runner &&
+                  hosts.some((other) => other.runner === candidate.name)
+                }
+              >
+                {candidate.name}
+                {candidate.state !== "online" ? " (offline)" : ""}
+              </option>
+            ))}
+          </Select>
+          <Input
+            aria-label="Max VMs"
+            type="number"
+            min="1"
+            max="8"
+            value={row.maxVms}
+            onChange={(event) => update(index, { maxVms: event.target.value })}
+            placeholder={String(DEFAULT_MAX_VMS)}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<IconX size={15} />}
+            aria-label="Remove Mac"
+            onClick={() => onChange(hosts.filter((_, i) => i !== index))}
+            disabled={hosts.length === 1}
+          />
+        </div>
+      ))}
+      <p className="m-0 text-meta text-faint">
+        Max VMs is per Mac; Apple allows two macOS guests on one host. New
+        sessions go to the Mac with the most free slots.
+      </p>
+    </div>
+  );
+}
 
 const STATE_LABEL: Record<SandboxConnectionInfo["state"], string> = {
   not_configured: "Not configured",
@@ -142,6 +261,14 @@ const MACHINE_PROFILES: Record<
       settings: { cpu: 6, memoryMb: 10_240 },
     },
   ],
+  usecomputer: [
+    {
+      id: "split",
+      label: "Split",
+      detail: "5 CPU · 8 GB (two VMs per reserved Mac)",
+      settings: { cpu: 5, memoryMb: 8192 },
+    },
+  ],
   daytona: [
     {
       id: "small",
@@ -193,7 +320,9 @@ function machineProfiles(
 function defaultMachineProfile(
   provider: SandboxConnectionInfo["provider"],
 ): string {
-  return provider === "box" ? "default" : "medium";
+  if (provider === "box") return "default";
+  if (provider === "usecomputer") return "split";
+  return "medium";
 }
 
 function machineProfileForSettings(
@@ -237,12 +366,16 @@ function ConnectDialog({
     String(connection.settings.memoryMb || ""),
   );
   const isMac = connection.provider === "tart";
-  const [runner, setRunner] = useState(
-    String(connection.settings.runner || ""),
+  const isUseComputer = connection.provider === "usecomputer";
+  const [reservation, setReservation] = useState(
+    String(connection.settings.reservation || ""),
   );
   const [image, setImage] = useState(String(connection.settings.image || ""));
-  const [maxVms, setMaxVms] = useState(
-    String(connection.settings.maxVms || ""),
+  const [hosts, setHosts] = useState<MacHostRow[]>(() =>
+    macHostsOf(connection.settings).map((host) => ({
+      runner: host.runner,
+      maxVms: host.maxVms ? String(host.maxVms) : "",
+    })),
   );
   const [macRunners, setMacRunners] = useState<RunnerInfo[] | null>(null);
   useEffect(() => {
@@ -255,7 +388,11 @@ function ConnectDialog({
           (candidate) => candidate.platform === "darwin",
         );
         setMacRunners(macs);
-        setRunner((current) => current || macs[0]?.name || "");
+        setHosts((current) =>
+          current.length || !macs[0]
+            ? current
+            : [{ runner: macs[0].name, maxVms: "" }],
+        );
       })
       .catch(() => {
         if (!cancelled) setMacRunners([]);
@@ -282,11 +419,16 @@ function ConnectDialog({
       if (snapshot) settings.snapshot = snapshot;
       if (cpu) settings.cpu = Number(cpu);
       if (memoryMb) settings.memoryMb = Number(memoryMb);
+      if (isUseComputer && reservation) settings.reservation = reservation;
       if (isMac) {
-        if (!runner) throw new Error("Choose the Mac that hosts the VMs");
-        settings.runner = runner;
+        const chosen = hosts.filter((row) => row.runner);
+        if (!chosen.length) throw new Error("Add at least one Mac");
+        settings.hosts = chosen.map((row) => {
+          const host: SandboxHostSetting = { runner: row.runner };
+          if (row.maxVms) host.maxVms = Number(row.maxVms);
+          return host;
+        });
         if (image) settings.image = image;
-        if (maxVms) settings.maxVms = Number(maxVms);
       }
       const response = await connectSandbox(connection.provider, body);
       onChanged(response);
@@ -340,53 +482,29 @@ function ConnectDialog({
           title={`${exists ? "Configure" : "Connect"} ${provider.label}`}
           description={
             isMac
-              ? "No credential needed: the Mac is a paired Runner. Open Session installs Tart on it, pulls the image once (about 70 GB, up to an hour), prepares a base VM, then proves a disposable VM and deletes it."
+              ? "No credential needed: each Mac is a paired Runner. Open Session installs Tart on it, pulls the image once (about 70 GB, up to an hour), prepares a base VM, then proves a disposable VM and deletes it. Sessions land on whichever Mac has a free slot."
               : connection.provider === "box"
                 ? "Credentials stay on this server. Open Session tests ingress, creates a disposable Boat sandbox, verifies archive/resume and snapshot restore, then archives it."
-                : "Credentials stay on this server. Open Session tests ingress, creates a disposable sandbox, restores a snapshot, and cleans up."
+                : isUseComputer
+                  ? "Credentials stay on this server. Open Session tests ingress, checks your active Mac reservation, creates a disposable sandbox on it, proves a snapshot restore (about six minutes), and deletes everything."
+                  : "Credentials stay on this server. Open Session tests ingress, creates a disposable sandbox, restores a snapshot, and cleans up."
           }
         />
 
         {isMac ? (
           <>
-            <Field label="Mac host">
-              <Select
-                value={runner}
-                onChange={(event) => setRunner(event.target.value)}
-                disabled={!macRunners?.length}
-              >
-                {!macRunners?.length && (
-                  <option value="">
-                    {macRunners === null
-                      ? "Loading Runners…"
-                      : "No macOS Runner paired yet"}
-                  </option>
-                )}
-                {(macRunners || []).map((candidate) => (
-                  <option key={candidate.id} value={candidate.name}>
-                    {candidate.name}
-                    {candidate.state !== "online" ? " (offline)" : ""}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            <MacHostsEditor
+              hosts={hosts}
+              onChange={setHosts}
+              runners={macRunners}
+            />
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Image">
+              <Field label="Image" className="sm:col-span-2">
                 <Input
                   ref={firstFieldRef}
                   value={image}
                   onChange={(event) => setImage(event.target.value)}
                   placeholder="ghcr.io/cirruslabs/macos-tahoe-xcode:26.5"
-                />
-              </Field>
-              <Field label="Max VMs">
-                <Input
-                  type="number"
-                  min="1"
-                  max="8"
-                  value={maxVms}
-                  onChange={(event) => setMaxVms(event.target.value)}
-                  placeholder="2"
                 />
               </Field>
               <Field label="CPU">
@@ -412,7 +530,11 @@ function ConnectDialog({
         ) : (
           <Field
             label={
-              connection.provider === "box" ? "Boat API key" : "Daytona API key"
+              connection.provider === "box"
+                ? "Boat API key"
+                : isUseComputer
+                  ? "use.computer API key"
+                  : "Daytona API key"
             }
           >
             <Input
@@ -422,7 +544,7 @@ function ConnectDialog({
               placeholder={
                 connection.hasCredentials
                   ? "Leave blank to keep current key"
-                  : `Enter ${connection.provider === "box" ? "boat_…" : "API key"}`
+                  : `Enter ${connection.provider === "box" ? "boat_…" : isUseComputer ? "uc_live_…" : "API key"}`
               }
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
@@ -435,6 +557,26 @@ function ConnectDialog({
             Sandboxes reach this server through Public callback under Domains
             for run streaming and workload identity.
           </p>
+          {isUseComputer && (
+            <details className="rounded-lg bg-surface p-3 text-supporting text-dim">
+              <summary className="cursor-pointer font-medium text-fg">
+                Provider settings
+              </summary>
+              <div className="mt-3 grid gap-3">
+                <Field label="Reservation id">
+                  <Input
+                    value={reservation}
+                    onChange={(event) => setReservation(event.target.value)}
+                    placeholder="The account's active reservation"
+                  />
+                </Field>
+                <p className="m-0 text-meta text-faint">
+                  Needed only when the account holds more than one active Mac
+                  reservation. Reserve Macs at use.computer; each runs two VMs.
+                </p>
+              </div>
+            </details>
+          )}
           {connection.provider === "daytona" && (
             <details className="rounded-lg bg-surface p-3 text-supporting text-dim">
               <summary className="cursor-pointer font-medium text-fg">
@@ -584,6 +726,8 @@ function ConnectionCard({
   const summary = checking
     ? operation?.stage || "Checking connection"
     : connection.qualification?.failureSummary;
+  const macHosts =
+    connection.provider === "tart" ? macHostsOf(connection.settings) : [];
 
   return (
     <>
@@ -608,6 +752,17 @@ function ConnectionCard({
               <p className="m-0 mt-1 text-supporting leading-relaxed text-dim">
                 {provider.description}
               </p>
+              {macHosts.length > 0 && (
+                <p className="m-0 mt-1 text-meta text-faint">
+                  {macHosts.length === 1 ? "Host" : "Hosts"}:{" "}
+                  {macHosts
+                    .map(
+                      (host) =>
+                        `${host.runner} (${host.maxVms || DEFAULT_MAX_VMS} VM${(host.maxVms || DEFAULT_MAX_VMS) === 1 ? "" : "s"})`,
+                    )
+                    .join(", ")}
+                </p>
+              )}
               {summary && (
                 <p
                   className={cn(
@@ -870,6 +1025,8 @@ function ProjectEnvironmentDialog({
             "Boat exposes three fixed machine types. Stop and resume retain the disk, and new sandboxes restore from this project's named snapshot."}
           {provider === "tart" &&
             "The VM shape applies when a VM boots. Memory is shared with the Mac itself, so keep the total of running VMs below what the host can spare."}
+          {provider === "usecomputer" &&
+            "Every sandbox is one of the two VMs on a reserved Mac (5 CPU, 8 GB). The reservation's layout sets the size, not the project."}
         </div>
 
         <Modal.Footer>

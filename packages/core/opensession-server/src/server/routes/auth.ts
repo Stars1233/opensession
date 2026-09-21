@@ -58,7 +58,7 @@ export async function handleAuthRoutes(
     // organization's own icon when one is configured. The image itself is a
     // static asset, already served pre-auth (page loads stay open so the
     // sign-in screen can render); only the revisioned URL needed a way out.
-    const iconRevision = organizationIconRevision();
+    const iconRevision = await organizationIconRevision();
     return Response.json({
       required: webAuthRequired(),
       authenticated: signedIn,

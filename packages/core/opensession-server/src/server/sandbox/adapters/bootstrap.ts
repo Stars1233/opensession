@@ -263,38 +263,73 @@ const LINUX_LAYOUT: RemoteLayout = buildLayout("linux", REMOTE_HOME, {
   hostEntry: HOST_ENTRY,
 });
 
-/** macOS guests (tart): the image's `admin` user, Homebrew on the PATH, and
- *  run dirs under that home because /home is not writable on macOS. */
+/** macOS guests: the image's user (tart's `admin`, use.computer's `lume`),
+ *  Homebrew on the PATH, and run dirs under that home because /home is not
+ *  writable on macOS. */
 export const DARWIN_GUEST_HOME = "/Users/admin";
-const DARWIN_LAYOUT: RemoteLayout = buildLayout("darwin", DARWIN_GUEST_HOME, {
-  // Pinned tools land in /usr/local/bin and must shadow whatever the image's
-  // Homebrew ships (its `node` is newer than the one the runner expects).
-  path:
-    `${DARWIN_GUEST_HOME}/.bun/bin:${DARWIN_GUEST_HOME}/.local/bin:` +
-    "/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
-  runsBase: `${DARWIN_GUEST_HOME}/.opensession-sessions/sandbox-runs`,
-  hostEntry: `${DARWIN_GUEST_HOME}/projects/opensession/packages/core/opensession-server/src/runner-host/host.ts`,
-});
+export const USE_COMPUTER_GUEST_HOME = "/Users/lume";
+const darwinLayouts = new Map<string, RemoteLayout>();
 
-export function remoteLayout(os: RemoteGuestOs = "linux"): RemoteLayout {
-  return os === "darwin" ? DARWIN_LAYOUT : LINUX_LAYOUT;
+function darwinLayout(home: string): RemoteLayout {
+  let layout = darwinLayouts.get(home);
+  if (!layout) {
+    layout = buildLayout("darwin", home, {
+      // Pinned tools land in /usr/local/bin and must shadow whatever the
+      // image's Homebrew ships (its `node` is newer than the one the runner
+      // expects).
+      path:
+        `${home}/.bun/bin:${home}/.local/bin:` +
+        "/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
+      runsBase: `${home}/.opensession-sessions/sandbox-runs`,
+      hostEntry: `${home}/projects/opensession/packages/core/opensession-server/src/runner-host/host.ts`,
+    });
+    darwinLayouts.set(home, layout);
+  }
+  return layout;
 }
 
-/** The guest OS a provider's sandboxes run. Only tart hosts macOS guests. */
+/** The layout for a guest OS; a darwin guest may name its user's home
+ *  (default: the tart image's `admin`). */
+export function remoteLayout(
+  os: RemoteGuestOs = "linux",
+  home?: string,
+): RemoteLayout {
+  return os === "darwin"
+    ? darwinLayout(home || DARWIN_GUEST_HOME)
+    : LINUX_LAYOUT;
+}
+
+/** The guest OS a provider's sandboxes run. tart and use.computer host
+ *  macOS guests. */
 export function remoteGuestOsForProvider(
   provider: string | undefined | null,
 ): RemoteGuestOs {
-  return provider === "tart" ? "darwin" : "linux";
+  return provider === "tart" || provider === "usecomputer" ? "darwin" : "linux";
+}
+
+/** The guest user's home for a provider's sandboxes. */
+export function remoteGuestHomeForProvider(
+  provider: string | undefined | null,
+): string {
+  if (provider === "usecomputer") return USE_COMPUTER_GUEST_HOME;
+  if (provider === "tart") return DARWIN_GUEST_HOME;
+  return REMOTE_HOME;
 }
 
 export function remoteLayoutForProvider(
   provider: string | undefined | null,
 ): RemoteLayout {
-  return remoteLayout(remoteGuestOsForProvider(provider));
+  return remoteLayout(
+    remoteGuestOsForProvider(provider),
+    remoteGuestHomeForProvider(provider),
+  );
 }
 
-function layoutFor(driver: { os?: RemoteGuestOs }): RemoteLayout {
-  return remoteLayout(driver.os);
+function layoutFor(driver: {
+  os?: RemoteGuestOs;
+  home?: string;
+}): RemoteLayout {
+  return remoteLayout(driver.os, driver.home);
 }
 
 /** The guest-side path of a host run dir (RUNS_BASE/<session>/<host>). */
@@ -351,6 +386,9 @@ export interface RemoteDriver {
   ensureStarted(): Promise<void>;
   /** Guest operating system; absent = linux (the legacy layout). */
   os?: RemoteGuestOs;
+  /** The guest user's home when it is not the layout's default for `os`
+   *  (use.computer's `lume`). */
+  home?: string;
 }
 
 // ── Small shell helpers ───────────────────────────────────────────────────────
@@ -641,6 +679,14 @@ export interface RemoteSandboxState extends SandboxTrustPolicy {
   provider: SandboxProviderId;
   sessionId: string;
   cwd: string;
+  /** Which of a provider's hosts holds the sandbox, when the provider spans
+   *  several (tart: the Runner id of the Mac). Sleep, wake, desktop, and
+   *  terminals go back to that host. */
+  host?: string;
+  /** The provider's own id for the sandbox when it names sandboxes itself
+   *  and that name can change over the session's life (use.computer: the
+   *  VM currently holding the session; absent while asleep). */
+  remoteId?: string;
   repoId?: string;
   resources?: { cpu?: number; memoryMb?: number; diskGb?: number };
   branch?: string;
@@ -1931,11 +1977,14 @@ async function materializeRemoteWorkspaceSeedFiles(
   }
 }
 
+/** The warm workspace clone for a repo, under a guest layout (a guest OS
+ *  names that OS's default layout). */
 export function remoteWarmWorkspaceDir(
   repoId: string,
-  os: RemoteGuestOs = "linux",
+  layout: RemoteGuestOs | RemoteLayout = "linux",
 ): string {
-  return `${remoteLayout(os).warmBase}/${sanitizeName(repoId)}`;
+  const L = typeof layout === "string" ? remoteLayout(layout) : layout;
+  return `${L.warmBase}/${sanitizeName(repoId)}`;
 }
 
 /**
@@ -1963,7 +2012,7 @@ export async function warmRemoteWorkspace(
   },
 ): Promise<boolean> {
   const L = layoutFor(driver);
-  const dir = remoteWarmWorkspaceDir(repo.id, L.os);
+  const dir = remoteWarmWorkspaceDir(repo.id, L);
   const log = (msg: string) =>
     console.log(`[sandbox:${label}] warm workspace: ${msg}`);
   const has = await driver.exec(`test -d ${shellQuoteWord(dir)}/.git`);
@@ -2024,7 +2073,7 @@ export async function warmRemoteWorkspace(
 export async function scrubRemoteWarmWorkspaceAuthority(
   driver: RemoteDriver,
   repo: { id: string; ghRepo?: string },
-  dir = remoteWarmWorkspaceDir(repo.id, driver.os),
+  dir = remoteWarmWorkspaceDir(repo.id, layoutFor(driver)),
 ): Promise<void> {
   const safeOrigin = repo.ghRepo
     ? `https://github.com/${repo.ghRepo}.git`
@@ -2081,7 +2130,7 @@ export async function setupRemoteWorkspace(
     console.log(
       `[sandbox-remote] workspace ${repoId || cwd}: ${stage} (+${Date.now() - startedAt}ms)`,
     );
-  const warmDir = repoId ? remoteWarmWorkspaceDir(repoId, L.os) : undefined;
+  const warmDir = repoId ? remoteWarmWorkspaceDir(repoId, L) : undefined;
   const probe = warmDir
     ? `if test -d ${shellQuoteWord(cwd)}/.git; then echo cwd; ` +
       `elif test -d ${shellQuoteWord(warmDir)}/.git; then echo warm; else echo none; fi`

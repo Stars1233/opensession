@@ -33,7 +33,11 @@ import { PHONE_QUERY } from "../lib/breakpoints";
  *   the home root or under the phone Settings sheet, so the browser's own
  *   back/forward swipe can't start a real history navigation there. That
  *   cancel also swallows the tap→click synthesis and any scroll, which is why
- *   the zone is narrow and why onEnd completes a plain tap itself.
+ *   the zone is narrow and why onEnd completes a plain tap itself. The cancel
+ *   is a race (WebKit lets its native gestures go if the main thread answers
+ *   late) and misses starts a little inside the edge, so on the iOS Home
+ *   Screen app the router also keeps the history at one entry, leaving the
+ *   native gesture nothing to swipe back to (lib/history-mode).
  * - SOFT, the strip beside it. Nothing is cancelled at touchstart: a tap on a
  *   row's icon, a vertical scroll or a long-press starting there stays native.
  *   The first movement past SLOP decides, and only a clearly rightward one

@@ -79,6 +79,12 @@ export async function qualifySandboxConnection(
       await qualifyTartConnection((stage, progress) =>
         update({ stage, progress }),
       );
+    } else if (provider === "usecomputer") {
+      const { qualifyUseComputerConnection } =
+        await import("./adapters/usecomputer");
+      await qualifyUseComputerConnection((stage, progress) =>
+        update({ stage, progress }),
+      );
     } else {
       const { qualifyBoxConnection } = await import("./adapters/box");
       await qualifyBoxConnection((stage, progress) =>

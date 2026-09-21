@@ -20,11 +20,13 @@ declare global {
 // a home. Utilities are linked after both, so they win source-order ties.
 import "./styles/base.css";
 import "./styles/legacy.css";
+import { ViewportReadout } from "./components/ViewportReadout";
 
 export function App(props: AppProps = {}) {
   return (
     <EffectRegistryProvider>
       <AppContent {...props} />
+      <ViewportReadout />
     </EffectRegistryProvider>
   );
 }

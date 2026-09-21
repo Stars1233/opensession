@@ -30,11 +30,26 @@ describe("remote guest layout", () => {
     expect(L.hostEntry).toContain("/Users/admin/projects/opensession/");
   });
 
-  test("only tart guests are darwin", () => {
+  test("tart and use.computer guests are darwin, each under its image's user", () => {
     expect(remoteGuestOsForProvider("tart")).toBe("darwin");
+    expect(remoteGuestOsForProvider("usecomputer")).toBe("darwin");
     expect(remoteGuestOsForProvider("daytona")).toBe("linux");
     expect(remoteGuestOsForProvider(undefined)).toBe("linux");
     expect(remoteLayoutForProvider("box").home).toBe("/home/ubuntu");
+    expect(remoteLayoutForProvider("tart")).toBe(remoteLayout("darwin"));
+    const lume = remoteLayoutForProvider("usecomputer");
+    expect(lume.os).toBe("darwin");
+    expect(lume.home).toBe("/Users/lume");
+    expect(lume.bun).toBe("/Users/lume/.bun/bin/bun");
+    expect(lume.repo).toBe("/Users/lume/projects/opensession");
+    expect(lume.runsBase).toBe(
+      "/Users/lume/.opensession-sessions/sandbox-runs",
+    );
+    expect(lume.path.startsWith("/Users/lume/.bun/bin:")).toBe(true);
+    expect(lume).toBe(remoteLayout("darwin", "/Users/lume"));
+    expect(remoteWarmWorkspaceDir("repo", lume)).toBe(
+      "/Users/lume/.bks-warm/repo",
+    );
   });
 
   test("run dirs are identical on linux and remapped on darwin", () => {

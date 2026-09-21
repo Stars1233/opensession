@@ -8,8 +8,10 @@ import {
   getSandboxConnection,
   safeSandboxConnections,
   sandboxConnectionReady,
+  sandboxHostSettings,
   sandboxProviderCredential,
   setSandboxConnectionQualification,
+  updateSandboxConnection,
 } from "./connections";
 
 let scratch = "";
@@ -34,6 +36,69 @@ afterEach(() => {
     delete process.env.OPENSESSION_WORKSPACE_SECRETS_STORE;
   else process.env.OPENSESSION_WORKSPACE_SECRETS_STORE = oldSecrets;
   rmSync(scratch, { recursive: true, force: true });
+});
+
+describe("Mac VM hosts", () => {
+  test("a Mac VM connection needs at least one host and keeps them in order", () => {
+    expect(() => connectSandboxProvider("tart", { settings: {} })).toThrow(
+      /at least one paired macOS Runner/,
+    );
+    const connection = connectSandboxProvider("tart", {
+      settings: {
+        hosts: [
+          { runner: "mini-1", maxVms: 2 },
+          { runner: "mini-1" },
+          { runner: " ec2-mac-1 ", maxVms: 1.4 },
+          { runner: "" },
+        ],
+      },
+    });
+    expect(connection.settings.hosts).toEqual([
+      { runner: "mini-1", maxVms: 2 },
+      { runner: "ec2-mac-1", maxVms: 1 },
+    ]);
+    expect(sandboxHostSettings(connection.settings)).toEqual(
+      connection.settings.hosts!,
+    );
+  });
+
+  test("the single-host form still reads as one host and a host list replaces it", () => {
+    const single = connectSandboxProvider("tart", {
+      settings: { runner: "mini-1", maxVms: 2 },
+    });
+    expect(sandboxHostSettings(single.settings)).toEqual([
+      { runner: "mini-1", maxVms: 2 },
+    ]);
+    const listed = updateSandboxConnection("tart", {
+      settings: { hosts: [{ runner: "mini-2" }] },
+    });
+    expect(listed.settings.runner).toBeUndefined();
+    expect(listed.settings.maxVms).toBeUndefined();
+    expect(sandboxHostSettings(listed.settings)).toEqual([
+      { runner: "mini-2" },
+    ]);
+  });
+});
+
+describe("use.computer", () => {
+  test("needs an account key and keeps the reservation setting", () => {
+    expect(() =>
+      connectSandboxProvider("usecomputer", { settings: {} }),
+    ).toThrow(/use.computer API key is required/);
+    const connection = connectSandboxProvider("usecomputer", {
+      secret: "uc_live_secret",
+      settings: { reservation: " 00000000-0000-4000-8000-000000000001 " },
+    });
+    expect(connection.settings.reservation).toBe(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(sandboxProviderCredential("usecomputer")).toEqual({
+      apiKey: "uc_live_secret",
+    });
+    expect(
+      readFileSync(process.env.OPENSESSION_SANDBOX_CONFIG!, "utf-8"),
+    ).not.toContain("uc_live_secret");
+  });
 });
 
 describe("workspace sandbox connections", () => {

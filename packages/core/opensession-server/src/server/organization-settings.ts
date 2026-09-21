@@ -1,6 +1,6 @@
 /** Organization artwork stored beside the instance's other durable state. */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { createHash } from "crypto";
 import { stateDir } from "./paths";
 
@@ -14,16 +14,20 @@ export function organizationIconPath(): string {
   return `${stateDir("organization")}/icon.png`;
 }
 
-export function organizationIconRevision(): string | null {
-  const path = organizationIconPath();
-  return existsSync(path)
-    ? createHash("sha256").update(readFileSync(path)).digest("hex").slice(0, 12)
+export async function organizationIconRevision(): Promise<string | null> {
+  const bytes = await organizationIconBytes();
+  return bytes
+    ? createHash("sha256").update(bytes).digest("hex").slice(0, 12)
     : null;
 }
 
-export function organizationIconBytes(): Uint8Array | null {
-  const path = organizationIconPath();
-  return existsSync(path) ? new Uint8Array(readFileSync(path)) : null;
+export async function organizationIconBytes(): Promise<Uint8Array | null> {
+  try {
+    return new Uint8Array(await readFile(organizationIconPath()));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 function pngDimension(bytes: Uint8Array, offset: number): number {
@@ -36,7 +40,7 @@ function pngDimension(bytes: Uint8Array, offset: number): number {
 }
 
 /** Store the square PNG prepared by the web or native image picker. */
-export function saveOrganizationIcon(bytes: Uint8Array): void {
+export async function saveOrganizationIcon(bytes: Uint8Array): Promise<void> {
   if (!bytes.length) throw new OrganizationIconError("The upload was empty");
   if (bytes.length > MAX_ORGANIZATION_ICON_BYTES) {
     throw new OrganizationIconError(
@@ -58,10 +62,10 @@ export function saveOrganizationIcon(bytes: Uint8Array): void {
     );
   }
   const path = organizationIconPath();
-  mkdirSync(stateDir("organization"), { recursive: true });
-  writeFileSync(path, bytes);
+  await mkdir(stateDir("organization"), { recursive: true });
+  await writeFile(path, bytes);
 }
 
-export function removeOrganizationIcon(): void {
-  rmSync(organizationIconPath(), { force: true });
+export async function removeOrganizationIcon(): Promise<void> {
+  await rm(organizationIconPath(), { force: true });
 }
