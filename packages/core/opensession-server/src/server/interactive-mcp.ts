@@ -75,7 +75,11 @@ import {
 import { makeAskHandler } from "./asks";
 import { createScheduleMcpServer } from "./schedule-mcp";
 import { activeSandboxFor } from "./session-sandbox";
-import { portalsInSandbox, sandboxForPortals } from "./portal-sandbox";
+import {
+  describePortalSandbox,
+  portalsInSandbox,
+  sandboxForPortals,
+} from "./portal-sandbox";
 
 /** The session's primary repo id, for the papercuts toggle (undefined =
  *  session-only session, which logs under no repo and is always enabled). */
@@ -312,6 +316,10 @@ export function interactiveMcpServers(
             hasSandbox: () => {
               const session = findSession(sessionId);
               return Boolean(session && portalsInSandbox(session));
+            },
+            sandboxState: () => {
+              const session = findSession(sessionId);
+              return session ? describePortalSandbox(session) : null;
             },
             runner: () => findSession(sessionId),
             verifyEditorFixture: (leaseId) => {

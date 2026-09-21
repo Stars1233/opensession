@@ -32,6 +32,7 @@ import {
 } from "./runner-portals";
 import type { UnifiedSession } from "./types";
 import type { Sandbox } from "./sandbox/provider";
+import type { PortalSandboxReport } from "./portal-sandbox";
 import { createWorkloadIdentityEnv } from "./workload-identity";
 import { getRepo } from "./worktree";
 import {
@@ -64,6 +65,12 @@ export interface PortalsMcpContext {
   /** An explicit computation action may wake the Sandbox. Passive listing may not. */
   sandbox: (options?: { wake?: boolean }) => Promise<Sandbox | null>;
   hasSandbox: () => boolean;
+  /** How the Sandbox that runs the Portals is doing when none is live: the
+   * answer says preparing, waking, asleep, or what failed. */
+  sandboxState?: () => PortalSandboxReport | null;
+  /** How long one tool call waits before answering with where things
+   * stand. Defaults to PORTAL_TOOL_WAIT_MS. */
+  waitMs?: number;
   /** Runner sessions own their services on the trusted remote machine. */
   runner: () => UnifiedSession | undefined;
 }
@@ -81,13 +88,21 @@ function result(value: string) {
 export const PORTAL_TOOL_WAIT_MS = 90_000;
 
 /**
+ * What a start already answering "still starting" may add after the
+ * deadline: the launch settles its own answer with the Portal's port, and
+ * the call that wraps it waits this much longer for that before answering
+ * without it. Deadline plus grace stays well inside the 120s MCP budget.
+ */
+const STILL_STARTING_GRACE_MS = 10_000;
+
+/**
  * The budget of one Portal tool call, taken when the handler starts. Waking
  * the Sandbox, probing status, and stopping the previous process all spend
  * it: a restart that bounded only its launch still answered after the MCP
  * timeout once a loaded host made the stop slow.
  */
-function portalToolDeadline(): number {
-  return Date.now() + PORTAL_TOOL_WAIT_MS;
+function portalToolDeadline(ctx: PortalsMcpContext): number {
+  return Date.now() + (ctx.waitMs ?? PORTAL_TOOL_WAIT_MS);
 }
 
 export function settleBefore<T>(
@@ -132,11 +147,144 @@ async function stillStarting(
     ? await listSandboxPortalServices(sandbox)
     : await listPortalServices(dir);
   const portal = portals.find((candidate) => candidate.name === name);
-  const where = portal ? ` on port ${portal.port}` : "";
+  return stillStartingText(name, portal ? ` on port ${portal.port}` : "");
+}
+
+function stillStartingText(name: string, where = ""): string {
   return (
     `${name} is still starting${where}. Do not start it again: check list_portals ` +
     `in a minute; it reports the URL once something listens, or the error if it died.`
   );
+}
+
+/**
+ * The answer when the machine is what the call ran out of time on: a Portal
+ * Sandbox created on this first start, or a sleeping one waking and
+ * relaunching the Portals it ran. The start goes on past this answer and
+ * launches the Portal as soon as the machine is up; a repeated start would
+ * only join it (portal-sandbox.ts, portal-supervisor.ts), so say so.
+ */
+function sandboxStillComing(ctx: PortalsMcpContext, name: string): string {
+  const state = ctx.sandboxState?.();
+  const doing =
+    state?.where === "portal" && !state.materialized
+      ? "being prepared"
+      : "waking";
+  return (
+    `The Sandbox that runs this session's Portals is still ${doing}; ${name} starts ` +
+    `there as soon as it is up. Do not start it again: check list_portals in a minute. ` +
+    `It reports the URL once something listens, or what failed.`
+  );
+}
+
+/**
+ * Why no Sandbox is live for the Portals, from the record the Portals panel
+ * shows. Reads as a sentence after "Could not start Portal:" or, capitalized,
+ * on its own. Never "sleeping or unavailable": that read as a machine to
+ * wake by sending a message, when it was one still coming up after a start
+ * that answered early, or one whose failure only the panel could see.
+ */
+export function noSandboxReason(ctx: PortalsMcpContext): string {
+  const state = ctx.sandboxState?.();
+  if (!state) return "this session's Sandbox is unavailable.";
+  const why = state.error ? `: ${state.error.replace(/\.?$/, ".")}` : ".";
+  if (state.where === "workspace") {
+    switch (state.busy ? "waking" : state.lifecycle) {
+      case "preparing":
+      case "waking":
+        return "this session's Sandbox is still coming up. Check list_portals in a minute.";
+      case "sleeping":
+        return "this session's Sandbox is asleep. Starting or restarting a Portal wakes it.";
+      case "needs_attention":
+        return `this session's Sandbox needs attention${why} Starting a Portal tries again.`;
+      default:
+        return `this session's Sandbox is unavailable${why}`;
+    }
+  }
+  const machine = `the Portal Sandbox (${state.provider}) that runs this session's Portals`;
+  const lifecycle = state.busy
+    ? state.materialized
+      ? "waking"
+      : "preparing"
+    : state.lifecycle;
+  switch (lifecycle) {
+    case "none":
+      return `${machine} is created by the first start_portal or start_declared_portal; nothing runs there yet.`;
+    case "preparing":
+      return `${machine} is still being prepared. Do not start the Portal again: check list_portals in a minute.`;
+    case "waking":
+      return `${machine} is still waking. Do not start the Portal again: check list_portals in a minute.`;
+    case "sleeping":
+      return `${machine} is asleep. Starting or restarting a Portal wakes it.`;
+    case "needs_attention":
+      return `${machine} needs attention${why} Starting a Portal tries again.`;
+    default:
+      return `${machine} is not reachable right now${why} Starting a Portal tries again.`;
+  }
+}
+
+function sentence(reason: string): string {
+  return reason.charAt(0).toUpperCase() + reason.slice(1);
+}
+
+/**
+ * A Portal start from the Sandbox up, under one deadline: wake or provision
+ * the machine, then launch. The machine alone can take longer than the call
+ * may wait (a Portal Sandbox is created on the first start; a wake relaunches
+ * the Portals it ran before landing the checkpoint), and an answer that
+ * arrived after the MCP timeout read as failure, so the agent started again
+ * on top of it, each time asking for another machine. Now the call answers
+ * with where things stand while the start it began runs on.
+ */
+async function startUnderDeadline(
+  ctx: PortalsMcpContext,
+  dir: string,
+  name: string,
+  deadline: number,
+  input: (
+    status: Awaited<ReturnType<typeof portalStatus>>,
+  ) => PortalStartInput | null,
+): Promise<string> {
+  const runner = ctx.runner();
+  let sandbox: Sandbox | null | undefined;
+  const run = (async () => {
+    sandbox = runner?.runner ? null : await ctx.sandbox({ wake: true });
+    if (!sandbox && !runner?.runner && ctx.hasSandbox())
+      return `Could not start Portal: ${noSandboxReason(ctx)}`;
+    const status = await portalStatus(ctx, dir, sandbox);
+    const resolved = input(status);
+    if (!resolved)
+      return `Could not start Portal: declared Portal '${name}' was not found.`;
+    return startPortalForContext(ctx, dir, sandbox, resolved, deadline);
+  })();
+  return answerUnderDeadline(ctx, name, deadline, run, () => sandbox);
+}
+
+/**
+ * The call's answer: what `run` settled to in time, or where it stands. The
+ * work continues either way; a failure after the answer is logged, and the
+ * Sandbox record or the Portal registry carries it for list_portals.
+ */
+async function answerUnderDeadline(
+  ctx: PortalsMcpContext,
+  name: string,
+  deadline: number,
+  run: Promise<string>,
+  sandboxSoFar: () => Sandbox | null | undefined,
+): Promise<string> {
+  let outcome = await settleBefore(run, deadline);
+  if (!outcome.settled && sandboxSoFar() !== undefined)
+    outcome = await settleWithin(run, STILL_STARTING_GRACE_MS);
+  if (outcome.settled) return outcome.value;
+  run.catch((error) =>
+    console.warn(
+      `[portals] ${ctx.sessionId}: ${name} failed after the tool answered:`,
+      error instanceof Error ? error.message : String(error),
+    ),
+  );
+  return sandboxSoFar() === undefined
+    ? sandboxStillComing(ctx, name)
+    : stillStartingText(name);
 }
 function workspace(ctx: PortalsMcpContext): string | Error {
   const dir = ctx.worktreeDir();
@@ -240,7 +388,7 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
         "Start this session's interactive iOS Simulator Portal on the local Mac. Requires full Xcode, an iOS Simulator runtime, idb and idb_companion on PATH, and an already-built simulator .app inside the workspace. Creates a private simulator, streams its screen and forwards taps, swipes and typing. Returns the authenticated viewer URL; the viewer reports boot or dependency errors. Repeated calls reuse the Portal. Use stop_portal/restart_portal with the returned name. Not available in Sandboxes or remote Runner workspaces. Does not build, sign, release, or enable hot reload.",
         simulatorPortalInput,
         async (args) => {
-          const deadline = portalToolDeadline();
+          const deadline = portalToolDeadline(ctx);
           const dir = workspace(ctx);
           if (dir instanceof Error) return result(dir.message);
           if (ctx.hasSandbox() || ctx.runner()?.runner)
@@ -282,29 +430,22 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
           port?: number;
           description?: string;
         }) => {
-          const deadline = portalToolDeadline();
+          const deadline = portalToolDeadline(ctx);
           const dir = workspace(ctx);
           if (dir instanceof Error) return result(dir.message);
           try {
-            const runner = ctx.runner();
-            const sandbox = runner?.runner
-              ? null
-              : await ctx.sandbox({ wake: true });
-            if (!sandbox && !runner?.runner && ctx.hasSandbox())
-              return result(
-                "Could not start Portal: this session's Sandbox is unavailable.",
-              );
-            const status = await portalStatus(ctx, dir, sandbox);
-            const recipe = status.portalRecipes.find(
-              (candidate) => candidate.id === args.name,
-            );
             return result(
-              await startPortalForContext(
+              await startUnderDeadline(
                 ctx,
                 dir,
-                sandbox,
-                recipe ? recipeStartOptions(recipe) : args,
+                args.name,
                 deadline,
+                (status) => {
+                  const recipe = status.portalRecipes.find(
+                    (candidate) => candidate.id === args.name,
+                  );
+                  return recipe ? recipeStartOptions(recipe) : args;
+                },
               ),
             );
           } catch (error) {
@@ -321,34 +462,17 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
           id: z.string(),
         },
         async ({ id }: { id: string }) => {
-          const deadline = portalToolDeadline();
+          const deadline = portalToolDeadline(ctx);
           const dir = workspace(ctx);
           if (dir instanceof Error) return result(dir.message);
           try {
-            const runner = ctx.runner();
-            const sandbox = runner?.runner
-              ? null
-              : await ctx.sandbox({ wake: true });
-            if (!sandbox && !runner?.runner && ctx.hasSandbox())
-              return result(
-                "Could not start Portal: this session's Sandbox is unavailable.",
-              );
-            const status = await portalStatus(ctx, dir, sandbox);
-            const recipe = status.portalRecipes.find(
-              (candidate) => candidate.id === id,
-            );
-            if (!recipe)
-              return result(
-                `Could not start Portal: declared Portal '${id}' was not found.`,
-              );
             return result(
-              await startPortalForContext(
-                ctx,
-                dir,
-                sandbox,
-                recipeStartOptions(recipe),
-                deadline,
-              ),
+              await startUnderDeadline(ctx, dir, id, deadline, (status) => {
+                const recipe = status.portalRecipes.find(
+                  (candidate) => candidate.id === id,
+                );
+                return recipe ? recipeStartOptions(recipe) : null;
+              }),
             );
           } catch (error) {
             return result(
@@ -384,9 +508,7 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
           }
           const sandbox = await ctx.sandbox();
           if (!sandbox && ctx.hasSandbox())
-            return result(
-              "This session's Sandbox is sleeping or unavailable. Opening a Portal or sending a message wakes it.",
-            );
+            return result(sentence(noSandboxReason(ctx)));
           const portals = sandbox
             ? await listSandboxPortalServices(sandbox)
             : await listPortalServices(dir);
@@ -422,9 +544,7 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
             }
             const sandbox = await ctx.sandbox();
             if (!sandbox && ctx.hasSandbox())
-              return result(
-                "Could not stop Portal: this session's Sandbox is sleeping or unavailable.",
-              );
+              return result(`Could not stop Portal: ${noSandboxReason(ctx)}`);
             if (sandbox)
               await stopSandboxPortalService({
                 sessionId: ctx.sessionId,
@@ -448,99 +568,100 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
         "Restart one supervised Portal using its registered command and port. Repository-declared Portals are refreshed from their trusted recipe before restart.",
         { name: z.string() },
         async ({ name }: { name: string }) => {
-          const deadline = portalToolDeadline();
+          const deadline = portalToolDeadline(ctx);
           const dir = workspace(ctx);
           if (dir instanceof Error) return result(dir.message);
           try {
             const runner = ctx.runner();
-            const sandbox = runner?.runner
-              ? null
-              : await ctx.sandbox({ wake: true });
-            if (!sandbox && !runner?.runner && ctx.hasSandbox())
-              return result(
-                "Could not restart Portal: this session's Sandbox is unavailable.",
+            // Under the same deadline as a start: the wake is the step that
+            // outlasts the call, and it relaunches the Portal being restarted
+            // on its own.
+            let sandbox: Sandbox | null | undefined;
+            const run = (async (): Promise<string> => {
+              sandbox = runner?.runner
+                ? null
+                : await ctx.sandbox({ wake: true });
+              if (!sandbox && !runner?.runner && ctx.hasSandbox())
+                return `Could not restart Portal: ${noSandboxReason(ctx)}`;
+              const status = await portalStatus(ctx, dir, sandbox);
+              const recipe = status.portalRecipes.find(
+                (candidate) => candidate.id === name,
               );
-            const status = await portalStatus(ctx, dir, sandbox);
-            const recipe = status.portalRecipes.find(
-              (candidate) => candidate.id === name,
-            );
-            if (recipe) {
-              const options = recipeStartOptions(recipe);
-              if (sandbox) {
-                const restarting = restartSandboxPortalService({
-                  sessionId: ctx.sessionId,
-                  sandbox,
-                  ...options,
-                  env: sandboxPortalEnv(ctx, sandbox),
-                });
-                const outcome = await settleBefore(restarting, deadline);
-                if (!outcome.settled)
-                  return result(
-                    await stillStarting(ctx, dir, sandbox, name, restarting),
+              if (recipe) {
+                const options = recipeStartOptions(recipe);
+                if (sandbox) {
+                  const restarting = restartSandboxPortalService({
+                    sessionId: ctx.sessionId,
+                    sandbox,
+                    ...options,
+                    env: sandboxPortalEnv(ctx, sandbox),
+                  });
+                  const outcome = await settleBefore(restarting, deadline);
+                  if (!outcome.settled)
+                    return stillStarting(ctx, dir, sandbox, name, restarting);
+                  const portal = outcome.value;
+                  const refreshed = await portalStatus(ctx, dir, sandbox);
+                  return `${portal.name} restarted at ${refreshed.services.find((candidate) => candidate.key === portal.key)?.previewUrl ?? "its authenticated Portal URL"}.`;
+                }
+                // Stopping a loaded dev server can take most of the budget on
+                // its own. The stop and the start keep running past the reply;
+                // the registry records where they end up.
+                const restarting = (async () => {
+                  if (runner?.runner)
+                    await stopRunnerPortal({ session: runner, name });
+                  else
+                    await stopPortalService({
+                      sessionId: ctx.sessionId,
+                      worktreeDir: dir,
+                      name,
+                    });
+                  return startPortalForContext(
+                    ctx,
+                    dir,
+                    sandbox ?? null,
+                    options,
+                    deadline,
                   );
-                const portal = outcome.value;
-                const refreshed = await portalStatus(ctx, dir, sandbox);
-                return result(
-                  `${portal.name} restarted at ${refreshed.services.find((candidate) => candidate.key === portal.key)?.previewUrl ?? "its authenticated Portal URL"}.`,
-                );
+                })();
+                const outcome = await settleBefore(restarting, deadline);
+                return outcome.settled
+                  ? outcome.value
+                  : stillStarting(ctx, dir, sandbox, name, restarting);
               }
-              // Stopping a loaded dev server can take most of the budget on
-              // its own. The stop and the start keep running past the reply;
-              // the registry records where they end up.
-              const restarting = (async () => {
-                if (runner?.runner)
-                  await stopRunnerPortal({ session: runner, name });
-                else
-                  await stopPortalService({
+              if (runner?.runner) {
+                const portal = await restartRunnerPortal({
+                  session: runner,
+                  name,
+                });
+                return `${portal.name} restarted at ${(await runnerPortalUrl(portal)) ?? "its authenticated Portal URL"}.`;
+              }
+              const restarting = sandbox
+                ? restartSandboxPortalService({
+                    sessionId: ctx.sessionId,
+                    sandbox,
+                    name,
+                    env: sandboxPortalEnv(ctx, sandbox),
+                  })
+                : restartPortalService({
                     sessionId: ctx.sessionId,
                     worktreeDir: dir,
                     name,
                   });
-                return startPortalForContext(
-                  ctx,
-                  dir,
-                  sandbox,
-                  options,
-                  deadline,
-                );
-              })();
               const outcome = await settleBefore(restarting, deadline);
-              return result(
-                outcome.settled
-                  ? outcome.value
-                  : await stillStarting(ctx, dir, sandbox, name, restarting),
-              );
-            }
-            if (runner?.runner) {
-              const portal = await restartRunnerPortal({
-                session: runner,
-                name,
-              });
-              return result(
-                `${portal.name} restarted at ${(await runnerPortalUrl(portal)) ?? "its authenticated Portal URL"}.`,
-              );
-            }
-            const restarting = sandbox
-              ? restartSandboxPortalService({
-                  sessionId: ctx.sessionId,
-                  sandbox,
-                  name,
-                  env: sandboxPortalEnv(ctx, sandbox),
-                })
-              : restartPortalService({
-                  sessionId: ctx.sessionId,
-                  worktreeDir: dir,
-                  name,
-                });
-            const outcome = await settleBefore(restarting, deadline);
-            if (!outcome.settled)
-              return result(
-                await stillStarting(ctx, dir, sandbox, name, restarting),
-              );
-            const portal = outcome.value;
-            const refreshed = await portalStatus(ctx, dir, sandbox);
+              if (!outcome.settled)
+                return stillStarting(ctx, dir, sandbox, name, restarting);
+              const portal = outcome.value;
+              const refreshed = await portalStatus(ctx, dir, sandbox);
+              return `${portal.name} restarted at ${refreshed.services.find((candidate) => candidate.key === portal.key)?.previewUrl ?? "its authenticated Portal URL"}.`;
+            })();
             return result(
-              `${portal.name} restarted at ${refreshed.services.find((candidate) => candidate.key === portal.key)?.previewUrl ?? "its authenticated Portal URL"}.`,
+              await answerUnderDeadline(
+                ctx,
+                name,
+                deadline,
+                run,
+                () => sandbox,
+              ),
             );
           } catch (error) {
             return result(
@@ -618,7 +739,7 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
               const sandbox = await ctx.sandbox();
               if (!sandbox && ctx.hasSandbox())
                 return result(
-                  "Could not set Portal route: this session's Sandbox is sleeping or unavailable.",
+                  `Could not set Portal route: ${noSandboxReason(ctx)}`,
                 );
               if (sandbox) await setSandboxPortalPath(sandbox, path, name);
               else await setPortalPath(dir, path, name);

@@ -286,6 +286,126 @@ describe("Portals MCP staging routes", () => {
   });
 });
 
+function text(response: { content: unknown[] }): string {
+  const first = response.content[0] as { text?: string } | undefined;
+  return first?.text ?? "";
+}
+
+describe("Portals MCP Sandbox readiness", () => {
+  test("a start whose Sandbox is still coming up answers before the deadline and keeps the start alive", async () => {
+    let wakes = 0;
+    let release!: () => void;
+    const machine = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    const { runtime } = await harness(undefined, {
+      hasSandbox: () => true,
+      waitMs: 50,
+      sandbox: async (options) => {
+        if (!options?.wake) return null;
+        wakes++;
+        return machine;
+      },
+      sandboxState: () => ({
+        where: "portal",
+        provider: "box",
+        lifecycle: "preparing",
+        materialized: false,
+        busy: true,
+      }),
+    });
+    const started = Date.now();
+    const response = await runtime.callExact(
+      "opensession-portals_start_declared_portal",
+      { id: "web" },
+      { toolCallId: "start-preparing" },
+    );
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(text(response)).toContain("still being prepared");
+    expect(text(response)).toContain("web starts there as soon as it is up");
+    expect(text(response)).toContain("Do not start it again");
+    expect(wakes).toBe(1);
+    release();
+  });
+
+  test("a machine recorded and waking is reported as waking", async () => {
+    const { runtime } = await harness(undefined, {
+      hasSandbox: () => true,
+      waitMs: 50,
+      sandbox: () => new Promise<null>(() => {}),
+      sandboxState: () => ({
+        where: "portal",
+        provider: "box",
+        lifecycle: "waking",
+        materialized: true,
+        busy: true,
+      }),
+    });
+    const response = await runtime.callExact(
+      "opensession-portals_restart_portal",
+      { name: "web" },
+      { toolCallId: "restart-waking" },
+    );
+    expect(text(response)).toContain("still waking; web starts there");
+  });
+
+  test("no live Sandbox reads as what the machine is doing, with the recorded error", async () => {
+    const state: NonNullable<
+      ReturnType<NonNullable<PortalsMcpContext["sandboxState"]>>
+    > & {
+      where: "portal";
+    } = {
+      where: "portal",
+      provider: "box",
+      lifecycle: "needs_attention",
+      materialized: false,
+      error: "box API POST /sandboxes timed out after 60s",
+      busy: false,
+    };
+    const { runtime } = await harness(undefined, {
+      hasSandbox: () => true,
+      sandbox: async () => null,
+      sandboxState: () => state,
+    });
+    const list = () =>
+      runtime.callExact(
+        "opensession-portals_list_portals",
+        {},
+        { toolCallId: `list-${state.lifecycle}-${state.busy}` },
+      );
+    expect(text(await list())).toBe(
+      "The Portal Sandbox (box) that runs this session's Portals needs attention: box API POST /sandboxes timed out after 60s. Starting a Portal tries again.",
+    );
+    const start = await runtime.callExact(
+      "opensession-portals_start_portal",
+      { name: "web", command: "bun dev" },
+      { toolCallId: "start-needs-attention" },
+    );
+    expect(text(start)).toBe(
+      "Could not start Portal: the Portal Sandbox (box) that runs this session's Portals needs attention: box API POST /sandboxes timed out after 60s. Starting a Portal tries again.",
+    );
+
+    state.busy = true;
+    expect(text(await list())).toContain("is still being prepared");
+    state.materialized = true;
+    expect(text(await list())).toContain("is still waking");
+
+    state.busy = false;
+    state.lifecycle = "sleeping";
+    delete state.error;
+    expect(text(await list())).toContain(
+      "is asleep. Starting or restarting a Portal wakes it.",
+    );
+    expect(text(await list())).not.toContain("sending a message");
+
+    state.lifecycle = "none";
+    state.materialized = false;
+    expect(text(await list())).toContain(
+      "is created by the first start_portal or start_declared_portal",
+    );
+  });
+});
+
 describe("Simulator Portal MCP", () => {
   test("the tool is discoverable and refuses Sandbox workspaces without waking them", async () => {
     let woke = false;
