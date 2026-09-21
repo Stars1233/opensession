@@ -256,7 +256,12 @@ Fence-shaped blocks register in `lib/fence-upgraders.ts`. The contract:
 - One module, `lib/<name>-block.ts`, exporting a `FenceUpgrader`: the langs it
   claims (lowercase), `upgrade(ctx)` that replaces `ctx.pre` with the block
   and returns `true`, or returns `false` to keep the plain fence for shiki.
-  Keep the module light; `import()` the renderer inside `upgrade`.
+  Keep the module light; `import()` the renderer inside `upgrade`. When that
+  import rejects, call `noteFenceLoadFailure(ctx, "The … renderer")` from
+  `lib/fence-load-failure.ts` before returning `false`: a tab from before a
+  frontend promotion asks for chunks the server no longer has, and the note
+  under the fence says a refresh fixes it instead of leaving a code block
+  that looks like a parse error.
 - `keepsCodeControls: true` when the block is still code someone might copy
   (the copy and wrap controls stay); otherwise the block carries its own
   controls, like a diagram's expand button.

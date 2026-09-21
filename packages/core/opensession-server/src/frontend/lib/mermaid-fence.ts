@@ -5,6 +5,7 @@
  */
 
 import { expandIconMarkup } from "../components/icons";
+import { noteFenceLoadFailure } from "./fence-load-failure";
 import type { FenceUpgrader } from "./fence-upgraders";
 
 let mermaidPromise: Promise<typeof import("./mermaid")> | null = null;
@@ -18,9 +19,16 @@ function loadMermaid() {
 export const mermaidUpgrader: FenceUpgrader = {
   langs: ["mermaid"],
   async upgrade({ pre, source, root, alive }) {
-    const m = await loadMermaid().catch(() => null);
-    if (!m || !alive()) return false;
-    const svg = await m.renderMermaidSvg(source).catch(() => null);
+    // A rejection is the library failing to arrive (this chunk or the one
+    // mermaid.ts imports in turn), not the diagram failing to parse: source
+    // that does not draw comes back as null.
+    const svg = await loadMermaid()
+      .then((m) => m.renderMermaidSvg(source))
+      .catch(() => undefined);
+    if (svg === undefined) {
+      noteFenceLoadFailure({ pre, root, alive }, "The diagram renderer");
+      return false;
+    }
     if (!alive() || !svg || !root.contains(pre)) return false;
     // The diagram itself sits in a scroller, with the expand control as its
     // SIBLING rather than a child: a wide diagram scrolls sideways, and a

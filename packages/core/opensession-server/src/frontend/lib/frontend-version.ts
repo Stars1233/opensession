@@ -41,6 +41,15 @@ async function check() {
   } catch {}
 }
 
+/**
+ * Look now rather than on the next tick. For a moment with evidence the page
+ * is behind: a fence whose renderer chunk the server no longer has
+ * (lib/fence-load-failure.ts). Same nudge, still never a reload.
+ */
+export function recheckFrontendVersion(): Promise<void> {
+  return check();
+}
+
 /** Subscribe to "a newer frontend build is live". Returns an unsubscribe. */
 export function subscribeFrontendVersion(onChange: (version: string) => void) {
   subscribers.add(onChange);

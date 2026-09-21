@@ -12,6 +12,7 @@
  */
 
 import { expandIconMarkup } from "../components/icons";
+import { noteFenceLoadFailure } from "./fence-load-failure";
 import type { FenceUpgrader } from "./fence-upgraders";
 
 /** Fence info strings that render as a chart. `chart` is the short alias. */
@@ -87,7 +88,11 @@ export const chartUpgrader: FenceUpgrader = {
   langs: [...CHART_LANGS],
   async upgrade({ pre, source, root, alive }) {
     const m = await loadChart().catch(() => null);
-    if (!m || !alive() || !root.contains(pre)) return false;
+    if (!m) {
+      noteFenceLoadFailure({ pre, root, alive }, "The chart renderer");
+      return false;
+    }
+    if (!alive() || !root.contains(pre)) return false;
     const wrap = document.createElement("div");
     wrap.className = CHART_WRAP_CLASS;
     const well = document.createElement("div");

@@ -4,6 +4,7 @@
  * the markdown renderer, so it is imported when a body carries one.
  */
 
+import { noteFenceLoadFailure } from "./fence-load-failure";
 import type { FenceUpgrader } from "./fence-upgraders";
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
@@ -59,7 +60,11 @@ export const slidesUpgrader: FenceUpgrader = {
     const slides = splitSlides(source);
     if (slides.length === 0) return false;
     const m = await loadDeck().catch(() => null);
-    if (!m || !alive() || !root.contains(pre)) return false;
+    if (!m) {
+      noteFenceLoadFailure({ pre, root, alive }, "The slide deck");
+      return false;
+    }
+    if (!alive() || !root.contains(pre)) return false;
     pre.replaceWith(
       m.buildSlidesDeck(slides, { expandable: true, markdown }).el,
     );
