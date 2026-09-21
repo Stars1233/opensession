@@ -20,6 +20,7 @@ import {
   SettingCardSkeleton,
   SettingRow,
   SettingRowControl,
+  SettingRowDescription,
   SettingRowText,
   SettingRowTitle,
   SettingsHeader,
@@ -291,6 +292,9 @@ export function OrganizationProfileSection({
                 <SettingRow className="items-center">
                   <SettingRowText>
                     <SettingRowTitle>Upload icon</SettingRowTitle>
+                    <SettingRowDescription>
+                      Also used for the installed web app on your Home Screen.
+                    </SettingRowDescription>
                   </SettingRowText>
                   <SettingRowControl className="flex flex-wrap items-center justify-end gap-2">
                     {iconEditor}
@@ -309,7 +313,8 @@ export function OrganizationProfileSection({
           {!onboarding && (
             <SettingsHint>
               Shared by everyone in this organization. Clearing the name
-              restores the product name.
+              restores the product name. On iOS, remove and re-add the web app
+              from Safari’s Share menu to update its Home Screen icon.
             </SettingsHint>
           )}
         </>

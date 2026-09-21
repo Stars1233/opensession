@@ -33,9 +33,22 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
+/** Refresh Safari's install artwork after a load, upload, or removal. */
+function refreshInstallIcons(revision: string | null) {
+  if (typeof document === "undefined") return;
+  for (const rel of ["apple-touch-icon", "manifest"]) {
+    const link = document.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
+    if (!link) continue;
+    const url = new URL(link.href);
+    url.searchParams.set("v", revision || "6");
+    if (link.href !== url.href) link.href = url.href;
+  }
+}
+
 /** Keep the organization identity in step with a successful General settings update. */
 export function rememberOrganizationIcon(settings: OrganizationSettingsDto) {
   generation += 1;
+  refreshInstallIcons(settings.organizationIconRevision);
   setIconUrl(settings.organizationIconUrl);
   setOrganizationName(settings.organizationName);
 }
@@ -48,6 +61,7 @@ async function refreshOrganizationIcon() {
       // A settings save that finished while this request was in flight owns the
       // newer value. Do not let the older response put its identity back.
       if (generation === startedAt) {
+        refreshInstallIcons(settings.organizationIconRevision);
         setIconUrl(settings.organizationIconUrl);
         setOrganizationName(settings.organizationName);
       }
