@@ -1894,7 +1894,9 @@ export async function resumeInterruptedRuns(
     // out of processes that never touch them.
     if (
       run.sandboxId &&
-      (run.sandboxProvider === "daytona" || run.sandboxProvider === "box")
+      (run.sandboxProvider === "daytona" ||
+        run.sandboxProvider === "box" ||
+        run.sandboxProvider === "tart")
     ) {
       rememberHandledSession(run);
       trackRecovery(run);

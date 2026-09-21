@@ -195,11 +195,12 @@ describe("sandboxCapabilityStatus (the /api/sandbox/status payload)", () => {
     const s = sandboxCapabilityStatus();
     expect(s.enabled).toBe(false);
     expect(s.defaultProvider).toBe("local");
-    expect(s.providers.map((p) => p.id)).toEqual(["daytona", "box"]);
+    expect(s.providers.map((p) => p.id)).toEqual(["daytona", "box", "tart"]);
     expect(s.providers.every((p) => !p.configured)).toBe(true);
     expect(s.providers.filter((p) => p.certified).map((p) => p.id)).toEqual([
       "daytona",
       "box",
+      "tart",
     ]);
     expect(s.killSwitch).toBe(!sandboxesEnabled());
   });

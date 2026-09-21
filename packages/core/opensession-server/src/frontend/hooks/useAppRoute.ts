@@ -8,6 +8,7 @@ import {
   type Route,
 } from "../lib/app-route";
 import { BASE_PATH, stripBasePath } from "../lib/base";
+import { keepsSingleHistoryEntry } from "../lib/history-mode";
 import { onPushNavigate } from "../lib/push";
 import { pushRecent } from "../lib/recents";
 import {
@@ -59,6 +60,11 @@ export type AppRouteBrowser = {
   location: RouteLocation;
   history: RouteHistory;
   storage: RouteStorage;
+  /**
+   * Replace the current entry on every navigation instead of pushing, so the
+   * history never grows a back entry. See lib/history-mode.
+   */
+  singleHistoryEntry: boolean;
   currentUser(): string;
   recordRecent(sessionId: string): void;
   listenForPopState(listener: () => void): () => void;
@@ -112,12 +118,11 @@ export class AppRouteController {
           : null;
       if (lastSessionId) {
         this.route = { view: "session", id: lastSessionId };
-        browser.history.pushState(
+        this.pushEntry(
           {
-            d: 1,
+            d: browser.singleHistoryEntry ? 0 : 1,
             restoredSession: lastSessionId,
           } satisfies NonNullable<NavState>,
-          "",
           routePath(this.route),
         );
         return;
@@ -179,7 +184,8 @@ export class AppRouteController {
       path === this.browser.location.pathname ||
       routePath(current) === path ||
       samePanel(current, next);
-    const replace = opts?.replace ?? samePath;
+    const replace =
+      this.browser.singleHistoryEntry || (opts?.replace ?? samePath);
     const depth = entryDepth(this.browser);
     const settingsReturn = settingsReturnForNavigation({
       currentIsSettings: isSettingsRoute(current),
@@ -267,11 +273,7 @@ export class AppRouteController {
   }
 
   openFirstMile(): void {
-    this.browser.history.pushState(
-      this.browser.history.state,
-      "",
-      `${BASE_PATH}/welcome`,
-    );
+    this.pushEntry(this.browser.history.state, `${BASE_PATH}/welcome`);
     this.firstMile = true;
     this.publish();
   }
@@ -321,6 +323,16 @@ export class AppRouteController {
     this.browser.history.replaceState(this.browser.history.state, "", path);
   }
 
+  // A push everywhere a back entry is wanted; a replace where the history is
+  // kept to one entry.
+  private pushEntry(state: RouteHistoryState, path: string): void {
+    if (this.browser.singleHistoryEntry) {
+      this.browser.history.replaceState(state, "", path);
+    } else {
+      this.browser.history.pushState(state, "", path);
+    }
+  }
+
   private popOr(steps: number, fallback: () => void): void {
     let popped = false;
     const stop = this.browser.listenForPopState(() => {
@@ -344,6 +356,9 @@ function browserAdapter(currentUser: () => string): AppRouteBrowser {
     location: window.location,
     history: window.history,
     storage: window.localStorage,
+    singleHistoryEntry: keepsSingleHistoryEntry({
+      standalone: "standalone" in navigator && navigator.standalone === true,
+    }),
     currentUser,
     recordRecent: pushRecent,
     listenForPopState(listener) {

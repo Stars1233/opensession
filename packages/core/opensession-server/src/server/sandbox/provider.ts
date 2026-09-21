@@ -22,8 +22,9 @@ import type { RunHostSpec } from "../../runner-host/protocol";
 
 /** The provider ids the registry knows (all implemented — see index.ts).
  *  Persisted sessions may still carry a retired id (docker, modal, e2b,
- *  microvm, lambda-microvm); those fail explicitly at dispatch. */
-export type SandboxProviderId = "local" | "daytona" | "box";
+ *  microvm, lambda-microvm); those fail explicitly at dispatch. `tart` is a
+ *  macOS VM on a paired Mac Runner (adapters/tart.ts). */
+export type SandboxProviderId = "local" | "daytona" | "box" | "tart";
 
 /** Selection authority for starting new work on a configured provider. */
 export type SandboxProviderUsability =
@@ -203,8 +204,13 @@ export interface Sandbox {
 }
 
 export interface SandboxDesktop {
-  /** Opens straight into the live desktop; treat it like a password. */
-  url: string;
+  /** Opens straight into the live desktop; treat it like a password. Absent
+   *  when the desktop streams through `vnc` instead. */
+  url?: string;
+  /** A VNC stream relayed by this server: the browser's viewer connects to
+   *  `streamPath` on the app origin and authenticates with `password`. Treat
+   *  both like a password. */
+  vnc?: { streamPath: string; password: string };
   /** Epoch ms after which the URL stops working, when the provider says. */
   expiresAt?: number;
 }

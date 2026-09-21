@@ -39,7 +39,10 @@ import {
   remoteSandboxCallbackBaseUrl,
   usesOutboundSandboxPortalRelay,
 } from "./sandbox/config";
-import { shellQuoteWord } from "./sandbox/adapters/bootstrap";
+import {
+  remoteLayoutForProvider,
+  shellQuoteWord,
+} from "./sandbox/adapters/bootstrap";
 import { sandboxHttpsPortFor } from "./sandbox/preview-ports";
 import { cacheSandboxPortalRecords } from "./sandbox-portals";
 import { REPO_ROOT } from "../runner-host/protocol";
@@ -99,6 +102,12 @@ const MIN_PORT = 1024;
 const MAX_PORT = 19_000;
 export const SANDBOX_PORTAL_PATH =
   "/home/ubuntu/.bun/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/** The PATH a Portal process gets inside a Sandbox of `provider` (the guest
+ *  layout differs on macOS guests). */
+export function sandboxPortalPathFor(provider: string | undefined): string {
+  return remoteLayoutForProvider(provider).path;
+}
 const remoteRelayAgents: Map<string, { expiresAt: number }> = ((
   globalThis as Record<string, unknown>
 ).__opensessionSandboxPortalAgents ??= new Map()) as Map<
@@ -1767,7 +1776,11 @@ export async function ensureRemoteSandboxPortalAgent(input: {
     const grant = mintSandboxPortalGrant(relayIdentity);
     const callbackBase = remoteSandboxCallbackBaseUrl().replace(/\/$/, "");
     const endpoint = `${callbackBase}/sandbox-portal-ws?session=${encodeURIComponent(input.sessionId)}&sandbox=${encodeURIComponent(input.sandbox.id)}&port=${input.port}`;
-    const logDir = sandboxSessionScratchDir(input.sessionId);
+    const logDir = sandboxSessionScratchDir(
+      input.sessionId,
+      input.sandbox.provider,
+    );
+    const guest = remoteLayoutForProvider(input.sandbox.provider);
     const logPath = `${logDir}/sandbox-portal-${input.port}.log`;
     // Portal transport fixes must not wait for a repository image refresh or
     // mutate the prepared project. Copy this small, self-contained sidecar
@@ -1776,7 +1789,7 @@ export async function ensureRemoteSandboxPortalAgent(input: {
     const agentPayload = Buffer.from(
       readFileSync(SANDBOX_PORTAL_AGENT_ENTRY, "utf8"),
     ).toString("base64");
-    const relayLaunch = `mkdir -p ${shellQuoteWord(logDir)} && printf %s ${shellQuoteWord(agentPayload)} | base64 -d > ${shellQuoteWord(agentPath)} && OPENSESSION_SANDBOX_PORTAL_WS_URL=${shellQuoteWord(endpoint)} OPENSESSION_SANDBOX_PORTAL_TOKEN=${shellQuoteWord(grant.token)} OPENSESSION_SANDBOX_PORTAL_PORT=${shellQuoteWord(String(input.port))} OPENSESSION_SANDBOX_PORTAL_EXPIRES_AT=${shellQuoteWord(String(grant.expiresAt))} exec /home/ubuntu/.bun/bin/bun run ${shellQuoteWord(agentPath)} </dev/null >${shellQuoteWord(logPath)} 2>&1`;
+    const relayLaunch = `mkdir -p ${shellQuoteWord(logDir)} && printf %s ${shellQuoteWord(agentPayload)} | base64 -d > ${shellQuoteWord(agentPath)} && OPENSESSION_SANDBOX_PORTAL_WS_URL=${shellQuoteWord(endpoint)} OPENSESSION_SANDBOX_PORTAL_TOKEN=${shellQuoteWord(grant.token)} OPENSESSION_SANDBOX_PORTAL_PORT=${shellQuoteWord(String(input.port))} OPENSESSION_SANDBOX_PORTAL_EXPIRES_AT=${shellQuoteWord(String(grant.expiresAt))} exec ${guest.bun} run ${shellQuoteWord(agentPath)} </dev/null >${shellQuoteWord(logPath)} 2>&1`;
     const started = await input.sandbox.exec(["bash", "-c", relayLaunch], {
       background: true,
       timeoutMs: 15_000,
@@ -1901,9 +1914,13 @@ async function startSandboxPortalServiceInner(
   // Sandbox-side path: it must match the agent's $OPENSESSION_SCRATCH there,
   // not the host's scratch root.
   const sandboxRuntimeDir = join(
-    sandboxSessionScratchDir(input.sessionId),
+    sandboxSessionScratchDir(input.sessionId, input.sandbox.provider),
     "portals",
   );
+  const guest = remoteLayoutForProvider(input.sandbox.provider);
+  // macOS has no setsid; the provider's detached lane (nohup) already
+  // detaches the process there.
+  const detach = guest.os === "darwin" ? "" : "setsid ";
   const awake = await startPortal(
     sandboxPortalOps(input.sandbox, input.sessionId),
     {
@@ -1930,7 +1947,7 @@ async function startSandboxPortalServiceInner(
         // synchronous shell returns. Start the service through the provider's
         // native detached lane. Logs and the short-lived PID marker live in
         // session scratch, never in the user's Git workspace.
-        const launch = `rm -f ${shellQuoteWord(legacyLogPath)} ${shellQuoteWord(legacyPidPath)} && mkdir -p ${shellQuoteWord(runtimeDir)} && printf '%s\\n' $$ > ${shellQuoteWord(pidPath)} && HOME=/home/ubuntu PATH=${shellQuoteWord(SANDBOX_PORTAL_PATH)} PORT=${shellQuoteWord(String(port))} PORTAL_URL=${shellQuoteWord(url)} OPENSESSION_PORTAL=${shellQuoteWord(name)} exec setsid bash -c ${shellQuoteWord(`exec ${command}`)} >${shellQuoteWord(logPath)} 2>&1`;
+        const launch = `rm -f ${shellQuoteWord(legacyLogPath)} ${shellQuoteWord(legacyPidPath)} && mkdir -p ${shellQuoteWord(runtimeDir)} && printf '%s\\n' $$ > ${shellQuoteWord(pidPath)} && HOME=${guest.home} PATH=${shellQuoteWord(guest.path)} PORT=${shellQuoteWord(String(port))} PORTAL_URL=${shellQuoteWord(url)} OPENSESSION_PORTAL=${shellQuoteWord(name)} exec ${detach}bash -c ${shellQuoteWord(`exec ${command}`)} >${shellQuoteWord(logPath)} 2>&1`;
         const launched = await input.sandbox.exec(["bash", "-c", launch], {
           env: input.env,
           background: true,

@@ -29,6 +29,12 @@ Connect cannot install a service, it says why;
 The Runner connects outbound over the tailnet. Open Session never dials into
 the machine.
 
+A paired Apple silicon Mac can also host **Mac VM** Sandboxes: isolated macOS
+virtual machines, one per session, driven through the same Runner channel. See
+[self-hosting-sandboxes.md](self-hosting-sandboxes.md#mac-vm-tart-on-a-mac-runner)
+and, for preparing a Mac mini or an EC2 Mac instance as a host,
+[mac-vm-hosts.md](mac-vm-hosts.md).
+
 ## AWS access from a Runner
 
 Runs on a Runner do not inherit the Open Session host's AWS credentials, and
@@ -272,6 +278,12 @@ allowlists for command delegation, command access, and maintenance state.
 Revoking a Runner invalidates its credential and closes its control connection
 immediately. Runner-backed full sessions, managed workspace roots, terminals,
 and Portals are not currently available.
+
+A macOS Runner that hosts Mac VM Sandboxes (`docs/self-hosting-sandboxes.md`)
+additionally carries two typed streams for those VMs: a PTY that SSHes into a
+named guest, and the guest's display from the Mac's loopback VNC port. The
+Runner resolves both from the VM name; the server never names a host or a
+port, and the streams ride the `commands` permission the provider needs.
 
 Interactive sessions can use the `opensession-runners` MCP tools for audited
 command delegation subject to those allowlists. Delegated commands are time-
