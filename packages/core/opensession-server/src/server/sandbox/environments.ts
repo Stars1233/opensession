@@ -244,7 +244,11 @@ function readyPool(
 
 export async function listSandboxEnvironments(): Promise<SandboxEnvironment[]> {
   const out: SandboxEnvironment[] = [];
-  const providers: WorkspaceSandboxProvider[] = ["daytona", "box"];
+  const providers: WorkspaceSandboxProvider[] = [
+    "daytona",
+    "box",
+    "usecomputer",
+  ];
   for (const repo of Object.keys(REPOS)) {
     for (const provider of providers)
       out.push({
@@ -291,6 +295,10 @@ async function removeTemplate(
     } else if (provider === "tart") {
       const { deleteTartTemplateArtifact } = await import("./adapters/tart");
       await deleteTartTemplateArtifact(previous.artifactId);
+    } else if (provider === "usecomputer") {
+      const { deleteUseComputerTemplateArtifact } =
+        await import("./adapters/usecomputer");
+      await deleteUseComputerTemplateArtifact(previous.artifactId);
     } else {
       const { deleteBoxTemplateArtifact } = await import("./adapters/box");
       await deleteBoxTemplateArtifact(previous.artifactId);
@@ -307,7 +315,7 @@ export async function invalidateSandboxEnvironmentsForRepo(
   repo: string,
 ): Promise<void> {
   if (!(repo in REPOS)) return;
-  for (const provider of ["daytona", "box"] as const) {
+  for (const provider of ["daytona", "box", "usecomputer"] as const) {
     const stored = storedEnvironment(repo, provider);
     if (!stored) continue;
     // Remote repo templates contain a credential-free warm clone. Adoption
@@ -501,7 +509,7 @@ let maintenanceTimer: ReturnType<typeof setInterval> | undefined = (
 function maintainSandboxEnvironments(): void {
   for (const environment of readStored()) {
     if (
-      !["daytona", "box"].includes(environment.provider) ||
+      !["daytona", "box", "usecomputer"].includes(environment.provider) ||
       (environment.mode !== "template" && environment.state !== "preparing") ||
       !sandboxConnectionReady(environment.provider)
     )

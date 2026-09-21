@@ -1,8 +1,9 @@
 /**
  * Durable post-setup repo templates for remote sandbox providers.
  *
- * Daytona stores templates as provider snapshots and Box as named snapshots.
- * This file owns only the small local index that maps (provider, repo, runtime/create signature and
+ * Daytona stores templates as provider snapshots, Box as named snapshots,
+ * Tart as local VM clones, and use.computer as service snapshots. This file
+ * owns only the small local index that maps (provider, repo, runtime/create signature and
  * project preparation inputs) to the provider artifact. The artifact itself
  * is credential-free and durable; adapters replace it only when an input that
  * affects setup changes.
@@ -15,18 +16,17 @@ import { join } from "path";
 import { OPENSESSION_SESSIONS_DIR } from "../paths";
 import { writeJsonAtomic } from "../shared/atomic-write";
 import {
-  remoteGuestOsForProvider,
+  REMOTE_HOME,
   remoteLayoutForProvider,
   remoteWarmWorkspaceDir,
   runnerToolchainSignature,
   shellQuoteWord,
   type RemoteDriver,
-  type RemoteGuestOs,
 } from "./adapters/bootstrap";
 import { getSandboxConnection } from "./connections";
 import { configuredRepos } from "../config";
 
-export type RemoteTemplateProvider = "daytona" | "box" | "tart";
+export type RemoteTemplateProvider = "daytona" | "box" | "tart" | "usecomputer";
 
 export interface RemoteRepoTemplate {
   provider: RemoteTemplateProvider;
@@ -62,10 +62,9 @@ export function remoteRepoTemplateNeedsRefresh(
 
 export function remoteRepoTemplateProofPath(
   repoId: string,
-  os: RemoteGuestOs = "linux",
+  /** The guest user's home (the provider's layout). */
+  home: string = REMOTE_HOME,
 ): string {
-  const home =
-    os === "darwin" ? remoteLayoutForProvider("tart").home : "/home/ubuntu";
   return `${home}/.opensession/repo-template-${clean(repoId)}.json`;
 }
 
@@ -78,9 +77,9 @@ export async function sealRemoteRepoTemplate(
   provider: RemoteTemplateProvider,
   repo: { id: string },
 ): Promise<string> {
-  const os = remoteGuestOsForProvider(provider);
-  const home = remoteLayoutForProvider(provider).home;
-  const warmDir = remoteWarmWorkspaceDir(repo.id, os);
+  const L = remoteLayoutForProvider(provider);
+  const home = L.home;
+  const warmDir = remoteWarmWorkspaceDir(repo.id, L);
   const origin = await driver.exec("git remote get-url origin", {
     cwd: warmDir,
   });
@@ -132,7 +131,7 @@ export async function sealRemoteRepoTemplate(
     nonce,
     sealedAt: new Date().toISOString(),
   });
-  const path = remoteRepoTemplateProofPath(repo.id, os);
+  const path = remoteRepoTemplateProofPath(repo.id, home);
   const written = await driver.exec(
     `mkdir -p ${shellQuoteWord(path.slice(0, path.lastIndexOf("/")))} && printf %s ${shellQuoteWord(proof)} > ${shellQuoteWord(path)}`,
   );
@@ -149,9 +148,9 @@ export async function validateRemoteRepoTemplate(
   provider: RemoteTemplateProvider,
   repo: { id: string },
 ): Promise<string> {
-  const os = remoteGuestOsForProvider(provider);
+  const L = remoteLayoutForProvider(provider);
   const proof = await driver.exec(
-    `cat ${shellQuoteWord(remoteRepoTemplateProofPath(repo.id, os))}`,
+    `cat ${shellQuoteWord(remoteRepoTemplateProofPath(repo.id, L.home))}`,
   );
   if (proof.exitCode !== 0) {
     throw new Error(`restored ${provider} template has no seal for ${repo.id}`);
@@ -182,8 +181,8 @@ export async function validateRemoteRepoTemplate(
     );
   }
   const warm = await driver.exec(
-    `test -d ${shellQuoteWord(remoteWarmWorkspaceDir(repo.id, os))}/.git && git remote get-url origin`,
-    { cwd: remoteWarmWorkspaceDir(repo.id, os) },
+    `test -d ${shellQuoteWord(remoteWarmWorkspaceDir(repo.id, L))}/.git && git remote get-url origin`,
+    { cwd: remoteWarmWorkspaceDir(repo.id, L) },
   );
   if (warm.exitCode !== 0 || /https?:\/\/[^/\s]+@/i.test(warm.stdout)) {
     throw new Error(
@@ -344,7 +343,11 @@ export function remoteRepoTemplateSignature(
         ? // Template VMs live on whichever Mac sealed them; the name stays the
           // same across hosts so a host list edit does not orphan them.
           { image: settings.image || "default" }
-        : { machineProfile: settings.profile || "default" };
+        : provider === "usecomputer"
+          ? // Snapshots must match the reservation's VM layout; the service
+            // picks the image.
+            { reservation: settings.reservation || "default" }
+          : { machineProfile: settings.profile || "default" };
   return createHash("sha256")
     .update(
       `repo-template-v3|${runnerToolchainSignature()}|${JSON.stringify(shape)}`,

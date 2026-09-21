@@ -485,7 +485,7 @@ export interface SpawnTaskArgs {
   /** Give the child its own worktree/branch instead of sharing the parent's. */
   isolatedWorktree?: boolean;
   /** true = config default provider; or an explicit configured provider id. */
-  sandbox?: boolean | "daytona" | "box" | "tart";
+  sandbox?: boolean | "daytona" | "box" | "tart" | "usecomputer";
 }
 
 export type SpawnTaskResult =
@@ -1323,7 +1323,10 @@ export function createSessionsMcpServer(
               "Code mode: give the worker its own worktree and branch instead of sharing the parent workspace's worktree, while keeping child/report-back linkage. Use when fanning work out across separate workspaces so each child produces its own diff. Branch is generated from the prompt when omitted.",
             ),
           sandbox: z
-            .union([z.boolean(), z.enum(["daytona", "box", "tart"])])
+            .union([
+              z.boolean(),
+              z.enum(["daytona", "box", "tart", "usecomputer"]),
+            ])
             .optional()
             .describe(
               "Run the session in an isolated sandbox: true = the server's default provider, or an explicit provider id (must be configured server-side, else the create fails with a clear error). Omit for a host run.",
@@ -1359,7 +1362,7 @@ export function createSessionsMcpServer(
             reportBack?: boolean;
             standalone?: boolean;
             isolatedWorktree?: boolean;
-            sandbox?: boolean | "daytona" | "box" | "tart";
+            sandbox?: boolean | "daytona" | "box" | "tart" | "usecomputer";
             accountId?: string;
             forkFrom?: { sourceId: string; messageId?: string };
           },
@@ -1513,7 +1516,10 @@ export function createSessionsMcpServer(
               "'code' (default) can edit files / open PRs; 'ask' is read-only.",
             ),
           sandbox: z
-            .union([z.boolean(), z.enum(["daytona", "box", "tart"])])
+            .union([
+              z.boolean(),
+              z.enum(["daytona", "box", "tart", "usecomputer"]),
+            ])
             .optional()
             .describe(
               "Run the child in an isolated sandbox: true = the server's default provider, or an explicit configured provider id.",

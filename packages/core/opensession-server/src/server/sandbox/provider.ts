@@ -24,7 +24,12 @@ import type { RunHostSpec } from "../../runner-host/protocol";
  *  Persisted sessions may still carry a retired id (docker, modal, e2b,
  *  microvm, lambda-microvm); those fail explicitly at dispatch. `tart` is a
  *  macOS VM on a paired Mac Runner (adapters/tart.ts). */
-export type SandboxProviderId = "local" | "daytona" | "box" | "tart";
+export type SandboxProviderId =
+  | "local"
+  | "daytona"
+  | "box"
+  | "tart"
+  | "usecomputer";
 
 /** Selection authority for starting new work on a configured provider. */
 export type SandboxProviderUsability =

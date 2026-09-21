@@ -63,6 +63,12 @@ const PROVIDERS: Array<{
     description:
       "macOS virtual machines with Xcode on a Mac you paired as a Runner, one VM per session.",
   },
+  {
+    id: "usecomputer",
+    label: "use.computer",
+    description:
+      "macOS virtual machines with Xcode on Mac minis reserved in your use.computer account, connected with your account API key.",
+  },
 ];
 
 /** Apple allows two macOS guests per host; the server's default. */
@@ -255,6 +261,14 @@ const MACHINE_PROFILES: Record<
       settings: { cpu: 6, memoryMb: 10_240 },
     },
   ],
+  usecomputer: [
+    {
+      id: "split",
+      label: "Split",
+      detail: "5 CPU · 8 GB (two VMs per reserved Mac)",
+      settings: { cpu: 5, memoryMb: 8192 },
+    },
+  ],
   daytona: [
     {
       id: "small",
@@ -306,7 +320,9 @@ function machineProfiles(
 function defaultMachineProfile(
   provider: SandboxConnectionInfo["provider"],
 ): string {
-  return provider === "box" ? "default" : "medium";
+  if (provider === "box") return "default";
+  if (provider === "usecomputer") return "split";
+  return "medium";
 }
 
 function machineProfileForSettings(
@@ -350,6 +366,10 @@ function ConnectDialog({
     String(connection.settings.memoryMb || ""),
   );
   const isMac = connection.provider === "tart";
+  const isUseComputer = connection.provider === "usecomputer";
+  const [reservation, setReservation] = useState(
+    String(connection.settings.reservation || ""),
+  );
   const [image, setImage] = useState(String(connection.settings.image || ""));
   const [hosts, setHosts] = useState<MacHostRow[]>(() =>
     macHostsOf(connection.settings).map((host) => ({
@@ -399,6 +419,7 @@ function ConnectDialog({
       if (snapshot) settings.snapshot = snapshot;
       if (cpu) settings.cpu = Number(cpu);
       if (memoryMb) settings.memoryMb = Number(memoryMb);
+      if (isUseComputer && reservation) settings.reservation = reservation;
       if (isMac) {
         const chosen = hosts.filter((row) => row.runner);
         if (!chosen.length) throw new Error("Add at least one Mac");
@@ -464,7 +485,9 @@ function ConnectDialog({
               ? "No credential needed: each Mac is a paired Runner. Open Session installs Tart on it, pulls the image once (about 70 GB, up to an hour), prepares a base VM, then proves a disposable VM and deletes it. Sessions land on whichever Mac has a free slot."
               : connection.provider === "box"
                 ? "Credentials stay on this server. Open Session tests ingress, creates a disposable Boat sandbox, verifies archive/resume and snapshot restore, then archives it."
-                : "Credentials stay on this server. Open Session tests ingress, creates a disposable sandbox, restores a snapshot, and cleans up."
+                : isUseComputer
+                  ? "Credentials stay on this server. Open Session tests ingress, checks your active Mac reservation, creates a disposable sandbox on it, proves a snapshot restore (about six minutes), and deletes everything."
+                  : "Credentials stay on this server. Open Session tests ingress, creates a disposable sandbox, restores a snapshot, and cleans up."
           }
         />
 
@@ -507,7 +530,11 @@ function ConnectDialog({
         ) : (
           <Field
             label={
-              connection.provider === "box" ? "Boat API key" : "Daytona API key"
+              connection.provider === "box"
+                ? "Boat API key"
+                : isUseComputer
+                  ? "use.computer API key"
+                  : "Daytona API key"
             }
           >
             <Input
@@ -517,7 +544,7 @@ function ConnectDialog({
               placeholder={
                 connection.hasCredentials
                   ? "Leave blank to keep current key"
-                  : `Enter ${connection.provider === "box" ? "boat_…" : "API key"}`
+                  : `Enter ${connection.provider === "box" ? "boat_…" : isUseComputer ? "uc_live_…" : "API key"}`
               }
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
@@ -530,6 +557,26 @@ function ConnectDialog({
             Sandboxes reach this server through Public callback under Domains
             for run streaming and workload identity.
           </p>
+          {isUseComputer && (
+            <details className="rounded-lg bg-surface p-3 text-supporting text-dim">
+              <summary className="cursor-pointer font-medium text-fg">
+                Provider settings
+              </summary>
+              <div className="mt-3 grid gap-3">
+                <Field label="Reservation id">
+                  <Input
+                    value={reservation}
+                    onChange={(event) => setReservation(event.target.value)}
+                    placeholder="The account's active reservation"
+                  />
+                </Field>
+                <p className="m-0 text-meta text-faint">
+                  Needed only when the account holds more than one active Mac
+                  reservation. Reserve Macs at use.computer; each runs two VMs.
+                </p>
+              </div>
+            </details>
+          )}
           {connection.provider === "daytona" && (
             <details className="rounded-lg bg-surface p-3 text-supporting text-dim">
               <summary className="cursor-pointer font-medium text-fg">
@@ -978,6 +1025,8 @@ function ProjectEnvironmentDialog({
             "Boat exposes three fixed machine types. Stop and resume retain the disk, and new sandboxes restore from this project's named snapshot."}
           {provider === "tart" &&
             "The VM shape applies when a VM boots. Memory is shared with the Mac itself, so keep the total of running VMs below what the host can spare."}
+          {provider === "usecomputer" &&
+            "Every sandbox is one of the two VMs on a reserved Mac (5 CPU, 8 GB). The reservation's layout sets the size, not the project."}
         </div>
 
         <Modal.Footer>

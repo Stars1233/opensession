@@ -4,7 +4,11 @@
  * sandbox/connections.ts (the connection store) both need it and must not
  * import each other.
  */
-export type WorkspaceSandboxProvider = "daytona" | "box" | "tart";
+export type WorkspaceSandboxProvider =
+  | "daytona"
+  | "box"
+  | "tart"
+  | "usecomputer";
 
 /** Providers whose connection is a paired Runner rather than an account
  *  credential: nothing is stored in the workspace secret store for them. */

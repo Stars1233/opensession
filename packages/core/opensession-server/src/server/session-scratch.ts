@@ -61,13 +61,16 @@ function scratchName(sessionId: string): string | null {
 export function sandboxSessionScratchDir(
   sessionId: string,
   /** The Sandbox's provider, which decides the guest home (macOS guests on
-   *  tart live under /Users/admin). Absent = the Linux layout. */
+   *  tart live under /Users/admin, on use.computer under /Users/lume).
+   *  Absent = the Linux layout. */
   provider?: string | null,
 ): string {
   const root =
     provider === "tart"
       ? "/Users/admin/.opensession/session-scratch"
-      : "/home/ubuntu/.opensession/session-scratch";
+      : provider === "usecomputer"
+        ? "/Users/lume/.opensession/session-scratch"
+        : "/home/ubuntu/.opensession/session-scratch";
   return join(root, scratchName(sessionId) ?? "_");
 }
 

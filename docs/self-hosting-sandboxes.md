@@ -32,9 +32,11 @@ for GPT in a Sandbox.
    The same fail-closed listener on `:3860` receives signed integration
    webhooks, Sandbox callbacks, and workload identity; the private app on
    `:3850` is never part of it.
-2. **Connect a provider.** In **Workspace → Sandboxes**, connect Daytona or
-   Boat with an API key, or **Mac VM** with a paired macOS Runner (no
-   credential; see [Mac VM](#mac-vm-tart-on-a-mac-runner) below). Credentials
+2. **Connect a provider.** In **Workspace → Sandboxes**, connect Daytona,
+   Boat, or **use.computer** (macOS on reserved Macs; see
+   [use.computer](#usecomputer) below) with an API key, or **Mac VM** with a
+   paired macOS Runner (no credential; see
+   [Mac VM](#mac-vm-tart-on-a-mac-runner) below). Credentials
    are written once to the server-side workspace secret store and never
    returned to the browser or placed in a Sandbox. Connecting runs a
    qualification: ingress is verified, a disposable sandbox is created, a
@@ -344,9 +346,10 @@ fails clearly rather than silently running on the host.
 ## Certification
 
 All providers passed the live conformance matrix (Daytona 2026-08-11, Boat
-2026-08-13, then called Box; Mac VM 2026-09-20 on the office Mac mini): engine
-round trip, exec semantics, in-sandbox workspace git, Portal relay,
-sleep/wake, snapshot restore with credential scrub, and cleanup.
+2026-08-13, then called Box; Mac VM 2026-09-20 on the office Mac mini;
+use.computer 2026-09-21 on a reserved Mac): engine round trip, exec
+semantics, in-sandbox workspace git, Portal relay, sleep/wake, snapshot
+restore with credential scrub, and cleanup.
 Re-run it with `bun run deploy/sandbox/conformance.ts [daytona] [box]`; it
 uses scratch state and never touches live sessions. The certification dates in
 `src/server/sandbox/config.ts` gate which providers can be selected.
@@ -463,7 +466,50 @@ policy-enforced.
 More capacity is more Macs: pair another Mac and add it under **Configure**
 on the Mac VM card. [mac-vm-hosts.md](mac-vm-hosts.md) walks through
 preparing a Mac mini or an EC2 Mac instance as a host, including the
-`deploy/mac-host/prepare.sh` script that does the machine-side steps.
+`deploy/mac-host/prepare.sh` script that does the machine-side steps. For
+Macs you do not want to own or run, see use.computer below.
+
+### use.computer
+
+Provider id `usecomputer`. Each session gets a macOS virtual machine (Apple
+silicon, Xcode) on a Mac mini reserved in your [use.computer](https://use.computer)
+account; the service places it, keeps a warm pool of booted VMs, and stores
+snapshots. Reservations are the unit of capacity: a Mac reserved for 24
+hours or more runs two VMs (5 CPU, 8 GB each), and sandboxes inside the
+reservation are free to create and delete. **Connect** takes the account API
+key (`uc_live_…`) from the service's Settings; add a reservation id under
+**Provider settings** only when the account holds more than one active
+reservation. The qualification checks the reservation and its free slots,
+creates a disposable sandbox, proves exec semantics, file upload, and guest
+preparation, restores a snapshot of it into a second sandbox, and deletes
+everything. It takes about six minutes; the snapshot dominates.
+
+The guest user is `lume` with home `/Users/lume`; the workspace lives under
+`/Users/lume/worktrees`, and guest preparation aliases `/home/ubuntu` to that
+home so the session's canonical path resolves. The runner payload bootstrap on
+first use takes a few minutes as on other providers; project snapshots (service
+snapshots, restored on any reserved Mac) remove that, and prewarms adopt as on
+Daytona. Prewarms are never parked, since a stopped VM would still hold one of
+the reservation's slots: they are adopted or destroyed.
+
+Sleep is a snapshot followed by deleting the VM, which frees its slot
+(measured: about four minutes to seal a fresh VM); wake restores the snapshot
+into a fresh VM (about two minutes) and runs `.agents/resume`. Because the
+service names VMs itself, the sandbox id a session records here is stable
+(`uc-<session>`) and the state file maps it to the VM the service currently
+holds. Idle sessions are put to sleep by the server after `idleStopMinutes`,
+since the service's own idle timeout deletes the VM outright. Destroy deletes
+the VM and its sleep snapshot. The reservation's end deletes every sandbox on
+it: push your work, or extend the reservation, before then.
+
+The Desktop tab relays the service's VNC stream on this origin, like the Mac
+VM provider; the agent's `opensession-desktop` tools use the service's input
+and screenshot API, with window titles from AppleScript inside the guest. A
+Terminal tab is a local `ssh` whose transport is the service's SSH WebSocket
+proxy (`scripts/ws-stdio-proxy.ts` as the ProxyCommand); the VM's login
+password reaches `ssh` through `SSH_ASKPASS`, never argv. Portals ride the
+outbound relay. Automations never run here: the guest network is not
+policy-enforced.
 
 ## Security posture
 

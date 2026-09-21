@@ -259,7 +259,9 @@ function prewarmSignature(
       ? getSandboxConnection("daytona")?.settings.snapshot || "default"
       : provider === "box"
         ? "named-snapshot"
-        : "";
+        : provider === "usecomputer"
+          ? "snapshot"
+          : "";
   return `${bootstrapSignature()}|${shape}|${JSON.stringify(resources || {})}`;
 }
 
@@ -345,6 +347,11 @@ async function adapterFor(provider: string): Promise<PrewarmAdapter | null> {
   if (provider === "tart") {
     const { tartPrewarmAdapter } = await import("./adapters/tart");
     return tartPrewarmAdapter;
+  }
+  if (provider === "usecomputer") {
+    const { useComputerPrewarmAdapter } =
+      await import("./adapters/usecomputer");
+    return useComputerPrewarmAdapter;
   }
   return null;
 }

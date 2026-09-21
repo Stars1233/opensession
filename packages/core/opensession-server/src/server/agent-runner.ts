@@ -1896,7 +1896,8 @@ export async function resumeInterruptedRuns(
       run.sandboxId &&
       (run.sandboxProvider === "daytona" ||
         run.sandboxProvider === "box" ||
-        run.sandboxProvider === "tart")
+        run.sandboxProvider === "tart" ||
+        run.sandboxProvider === "usecomputer")
     ) {
       rememberHandledSession(run);
       trackRecovery(run);

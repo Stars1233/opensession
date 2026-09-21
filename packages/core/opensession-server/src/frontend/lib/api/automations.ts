@@ -345,7 +345,7 @@ export interface SandboxStatusInfo {
   enabled: boolean;
   defaultProvider: string;
   providers: Array<{
-    id: "daytona" | "box" | "tart";
+    id: "daytona" | "box" | "tart" | "usecomputer";
     configured: boolean;
     certified: boolean;
     lastPassedAt?: string;
@@ -398,6 +398,9 @@ export interface SandboxConnectionSettings {
   cpu?: number;
   memoryMb?: number;
   image?: string;
+  /** use.computer: the Mac reservation to use when the account holds
+   *  several. */
+  reservation?: string;
   /** Mac VM: the older single-host form; `hosts` supersedes it. */
   runner?: string;
   maxVms?: number;
@@ -408,7 +411,7 @@ export interface SandboxConnectionSettings {
 
 export interface SandboxConnectionInfo {
   id: string;
-  provider: "daytona" | "box" | "tart";
+  provider: "daytona" | "box" | "tart" | "usecomputer";
   enabled: boolean;
   settings: SandboxConnectionSettings;
   qualification?: {

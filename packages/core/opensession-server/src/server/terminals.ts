@@ -125,6 +125,7 @@ type TermTargetKind =
   | "daytona"
   | "box"
   | "tart"
+  | "usecomputer"
   | "microvm"
   | "runner";
 
@@ -269,6 +270,24 @@ async function resolveTarget(
         user: session.createdBy || undefined,
         vm: guest.vm,
       });
+    }
+
+    if (
+      sb.provider === "usecomputer" &&
+      sandboxProviderConfigured("usecomputer")
+    ) {
+      // A local ssh whose transport is the service's SSH WebSocket proxy;
+      // the login password reaches ssh through SSH_ASKPASS, never argv.
+      const { useComputerTerminalTarget } =
+        await import("./sandbox/adapters/usecomputer");
+      const target = await useComputerTerminalTarget(sb.sandboxId);
+      return {
+        kind: "spawn",
+        target: "usecomputer",
+        displayCwd: target.cwd,
+        argv: target.argv,
+        env: target.env,
+      };
     }
 
     if (sb.provider === "box" && sandboxProviderConfigured("box")) {
