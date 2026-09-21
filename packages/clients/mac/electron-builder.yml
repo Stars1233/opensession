@@ -41,6 +41,8 @@ extraResources:
     to: os1-dictation
   - from: build/vendor/os-keychain
     to: os-keychain
+  - from: build/vendor/os1-voice-audio
+    to: os1-voice-audio
   - from: ../../../LICENSE
     to: LICENSE
   - from: ../../../THIRD-PARTY-NOTICES.md
@@ -78,7 +80,7 @@ mac:
     # dictation fails as "denied" on the first try. This string is what the
     # system prompt shows. Pairs with com.apple.security.device.audio-input in
     # the entitlements.
-    NSMicrophoneUsageDescription: Dictate prompts into the composer.
+    NSMicrophoneUsageDescription: Dictate prompts and talk to agents in voice sessions.
     NSSpeechRecognitionUsageDescription: Transcribe prompts while you speak.
     CFBundleURLTypes:
       - CFBundleURLName: Open Session deep link

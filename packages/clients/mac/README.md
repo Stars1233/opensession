@@ -157,6 +157,90 @@ The release workflow also runs these tests and checks the packaged helper's
 signature. A live **Allow / Always Allow / Deny** prompt still needs verification
 in a signed app on an interactive Mac, using a disposable item.
 
+## Realtime voice audio
+
+Voice sessions benefit from separate microphone and output choices, echo
+cancellation, and quieter music while someone talks. Chromium already offers
+microphone selection and echo cancellation, but Electron does not expose
+Apple's speech-aware other-audio ducking settings. The shell therefore exposes
+`window.os1.voiceAudio` backed by a signed native helper,
+`native/VoiceAudioHelper.swift`, packaged as `Contents/Resources/os1-voice-audio`.
+
+The helper owns the real microphone and speaker through `AVAudioEngine` with
+voice processing enabled (Apple's echo cancellation and noise suppression).
+The renderer never opens a microphone on this path: it receives processed
+48 kHz mono Float32 PCM and sends the agent's 48 kHz mono PCM back, which the
+helper plays through the same voice-processing engine to provide the playback
+reference for echo cancellation and remote-speech detection. Input and output devices are chosen separately per session
+(`ducking`, `inputDeviceId`, `outputDeviceId`), by persistent CoreAudio UID;
+an empty id means the system default. Choosing the built-in microphone with
+AirPods as output avoids opening the headset microphone, the usual trigger
+for a lower-quality hands-free profile. Device
+choice is applied to this engine only (`kAudioOutputUnitProperty_CurrentDevice`
+on the voice-processing unit's output and input elements, verified by
+read-back), never to the system defaults.
+
+Ducking: on macOS 14 and later the helper sets
+`voiceProcessingOtherAudioDuckingConfiguration` to advanced ducking at the
+maximum level when `ducking` is true, so other apps' audio ducks while either
+side speaks. With `ducking` false it sets advanced ducking off at the minimum
+level. This configuration API exposes a minimum ducking level, not a zero
+level, so the off setting minimizes ducking rather than promising to disable
+it. `devices()` reports `advancedDucking` so the frontend disables the control
+on macOS 13 and earlier, where the
+engine runs with the system's default ducking.
+
+The API on `window.os1.voiceAudio` (present only when the packaged helper
+exists; a dev run without it keeps the browser path):
+
+- `devices(): Promise<{ inputs, outputs, advancedDucking }>`
+- `start(id, { inputDeviceId, outputDeviceId, ducking }): Promise<void>`,
+  resolves once the engine runs; rejects when macOS denies the microphone, a
+  chosen device is missing, or the request was cancelled meanwhile.
+- `push(id, samples: Float32Array)`: agent audio, 48 kHz mono.
+- `setPaused(id, paused)`: pause tears the engine down (microphone, speaker
+  and ducking released) and discards queued playback; resume rebuilds it and
+  re-resolves the devices, reporting a missing one through `onError`.
+- `clearPlayback(id)`: discard queued agent audio on barge-in.
+- `stop(id)`.
+- `onAudio(cb)`, `onError(cb)`: microphone frames and terminal errors, each
+  returning an unsubscribe.
+
+Realtime bounds: the renderer's AudioWorklet delivers WebRTC playback in
+20 ms chunks at the audio clock's pace, not as faster-than-realtime TTS bursts.
+The helper keeps 250 ms of agent audio in a ring buffer and
+drops the oldest when delivery runs ahead; it drops microphone frames when
+250 ms already waits on the pipe. The preload acknowledges every delivered
+microphone packet and the main process every push, and both sides drop
+beyond eight outstanding microphone packets or sixteen pushes, so a stalled
+renderer or main process never queues IPC without bound.
+
+Ownership and teardown: one native voice session exists at a time, owned by
+the main frame of a visible, focused app window. The owner is recorded
+before the macOS microphone prompt, so a stop, main-frame navigation,
+renderer crash, closed window or competing start during the prompt cancels
+the request and no capture begins. The same events, and quitting the app,
+stop a running session. The shell sends a stop frame, then SIGTERM, then
+SIGKILL on a bounded schedule, and the helper stops its engine before it
+tries to drain stdout, so the microphone and ducking are always released.
+The helper does no file I/O and logs drop counts from its main thread only.
+
+Verification: `bun test ./packages/clients/mac/src/` covers the protocol,
+bounds and ownership rules with a fake helper. On macOS, the helper's pure
+parts (framing, device JSON, resampling, the ring buffer) compile and run as:
+
+```sh
+xcrun swiftc -DVOICE_AUDIO_TESTING native/VoiceAudioHelper.swift native/VoiceAudioHelperTests.swift \
+  -parse-as-library -framework AVFoundation -framework AudioToolbox -framework CoreAudio \
+  -o /tmp/os1-voice-audio-tests
+/tmp/os1-voice-audio-tests
+```
+
+The release workflow runs these and checks the packaged helper's signature
+and audio-input entitlement. Echo cancellation quality, AirPods routing and
+how far music actually ducks depend on the hardware and still need listening
+tests on a real Mac; a compile cannot prove them.
+
 ## Local Tailscale profiles
 
 **OS → Organizations → Tailscale profiles…** binds an organization to a saved
@@ -216,7 +300,7 @@ verification with two already signed-in Tailscale profiles.
   persists across launches.
 - `src/preload.js`: exposes `window.os1` with `desktop`, `materialBackdrop`,
   `setBadge`, `clearBadge`, `focusWindow`, `organizations`, `updates`,
-  `dictation`, and `server`. The main process refuses `server` calls from
+  `dictation`, `voiceAudio` (when the packaged helper exists), and `server`. The main process refuses `server` calls from
   anything but a `file://` page, so the app a server serves cannot repoint the
   shell.
 - Native dictation: Electron exposes Chromium's speech-recognition API without
@@ -226,6 +310,10 @@ verification with two already signed-in Tailscale profiles.
   recorded clip stays available as the server fallback if native recognition
   is unavailable. `scripts/before-pack.js` compiles the helper before every
   local or release package.
+- Native voice audio: `native/VoiceAudioHelper.swift`, the signed helper
+  behind `window.os1.voiceAudio` (see "Realtime voice audio");
+  `src/native-voice-audio.js` runs it and `src/voice-audio-bridge.js` decides
+  which page may.
 - `src/setup.html`: the server prompt, shown when nothing is stored yet and
   when adding from the native app menu or editing an organization. The in-app
   organization menu uses its own modal instead. Both probe the address by

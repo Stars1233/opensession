@@ -16,7 +16,7 @@ interface MeterChannel {
 }
 
 /** Observe both streams without routing either to the speakers. The existing
- * audio element owns playback; connecting a destination here would echo it. */
+ * audio element or native engine owns playback. This meter never plays audio. */
 export class SessionVoiceAudioMeter {
   private context: AudioContext | null = null;
   private channels: Partial<Record<"input" | "output", MeterChannel>> = {};
@@ -32,7 +32,12 @@ export class SessionVoiceAudioMeter {
     )
       return;
     try {
-      const context = (this.context ??= new AudioContext());
+      // Chromium's silent sink avoids opening a second physical output when
+      // native voice processing owns playback. Other browsers ignore it.
+      const options: AudioContextOptions & { sinkId: { type: "none" } } = {
+        sinkId: { type: "none" },
+      };
+      const context = (this.context ??= new AudioContext(options));
       void context.resume().catch(() => {});
       this.channels[side]?.source.disconnect();
       this.channels[side]?.analyser.disconnect();

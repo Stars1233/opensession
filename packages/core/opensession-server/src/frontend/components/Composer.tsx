@@ -128,6 +128,7 @@ import {
   type ComposerMenu,
 } from "./composer/ComposerControls";
 import { ModelRow } from "./composer/ModelRow";
+import { VoiceAudioSettingsAction } from "./composer/VoiceAudioSettings";
 import { VoiceControl } from "./composer/VoiceControl";
 
 interface Props {
@@ -1835,6 +1836,22 @@ export function Composer({
                 </Button>
               </Tooltip>
             </motion.div>
+          )}
+
+          {/* Audio routing for the call above: only the Mac shell with the
+              native audio bridge draws it (the action renders nothing
+              elsewhere), and it sits with the handset it configures. */}
+          {onToggleCall && (
+            <VoiceAudioSettingsAction
+              placement="composer"
+              minimized={minimized}
+              className={cn(
+                composerIconButtonClass,
+                "hover:bg-transparent data-[popup-open]:bg-transparent phone:min-h-11 phone:min-w-11",
+              )}
+              callActive={!!call?.active}
+              disabled={dictating}
+            />
           )}
 
           {busy && onStop && (

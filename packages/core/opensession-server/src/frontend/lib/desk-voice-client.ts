@@ -10,6 +10,8 @@
 import { z } from "zod";
 import { DeskNavigationClient } from "./desk-navigation-client";
 import { BASE_PATH } from "./base";
+import { os1Shell } from "./os1-shell";
+import { NativeVoiceAudio } from "./native-voice-audio";
 import type { VoiceCaptionFragment, VoiceCaptionRole } from "./voice-captions";
 
 export type DeskVoiceState =
@@ -141,6 +143,7 @@ export class DeskVoiceClient {
   private dc: RTCDataChannel | null = null;
   private micStream: MediaStream | null = null;
   private audioEl: HTMLAudioElement | null = null;
+  private nativeAudio: NativeVoiceAudio | null = null;
   private liveSessionId: string | null = null;
   private navigation: DeskNavigationClient | null = null;
 
@@ -232,23 +235,43 @@ export class DeskVoiceClient {
     this.onState("connecting");
     let mic: MediaStream;
     try {
-      mic = await navigator.mediaDevices.getUserMedia({
-        // Explicit processing constraints: mobile browsers don't reliably
-        // default to echo cancellation, and without it the phone's own
-        // speaker output comes back in as user speech.
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-    } catch {
+      const native = os1Shell()?.voiceAudio;
+      if (native) {
+        this.nativeAudio = new NativeVoiceAudio(native, (message) => {
+          this.aborted = true;
+          this.closeReason = "native audio failed";
+          this.lastError = message;
+          if (this.liveSessionId) this.closeServerSide(this.liveSessionId);
+          this.startWaiter?.reject(new Error(message));
+          this.teardown();
+          this.onState("error", message);
+        });
+        mic = await this.nativeAudio.start();
+      } else {
+        mic = await navigator.mediaDevices.getUserMedia({
+          // Mobile browsers don't reliably default to echo cancellation.
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      }
+    } catch (error) {
       if (this.aborted) return;
       this.micGranted = false;
-      this.onState("error", "Microphone permission denied");
-      this.closeReason = "microphone denied";
+      const message =
+        this.nativeAudio &&
+        error instanceof Error &&
+        error.name !== "NotAllowedError"
+          ? error.message
+          : "Microphone permission denied";
+      this.onState("error", message);
+      this.closeReason = this.nativeAudio
+        ? "audio start failed"
+        : "microphone denied";
       this.teardown();
-      throw new Error("Microphone permission denied");
+      throw new Error(message);
     }
     this.micGranted = true;
     if (this.aborted) {
@@ -264,12 +287,15 @@ export class DeskVoiceClient {
     for (const track of mic.getTracks()) pc.addTrack(track, mic);
 
     pc.ontrack = (event) => {
-      const [stream] = event.streams;
-      if (!stream) return;
-      const audio = document.createElement("audio");
-      audio.autoplay = true;
-      audio.srcObject = stream;
-      this.audioEl = audio;
+      if (this.aborted) return;
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
+      if (this.nativeAudio) this.nativeAudio.attachOutput(stream);
+      else {
+        const audio = document.createElement("audio");
+        audio.autoplay = true;
+        audio.srcObject = stream;
+        this.audioEl = audio;
+      }
     };
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
@@ -401,6 +427,8 @@ export class DeskVoiceClient {
   }
 
   private teardown() {
+    this.nativeAudio?.stop();
+    this.nativeAudio = null;
     this.navigation?.stop();
     this.navigation = null;
     this.postDiag("teardown");

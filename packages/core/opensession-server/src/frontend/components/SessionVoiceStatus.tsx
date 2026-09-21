@@ -1,6 +1,7 @@
 import { Button } from "../ui/button";
 import { SessionVoiceOrb } from "./SessionVoiceOrb";
 import { SessionVoicePauseButton } from "./SessionVoicePauseButton";
+import { VoiceAudioSettingsAction } from "./composer/VoiceAudioSettings";
 import type { SessionVoiceLevels } from "../lib/session-voice-audio";
 import {
   SESSION_VOICE_STATUS,
@@ -46,7 +47,12 @@ export function SessionVoiceStatus({
           )}
         </div>
         {!error && state !== "idle" && (
-          <SessionVoicePauseButton state={state} onToggle={onTogglePause} />
+          <>
+            {/* Mac shell only; the action renders nothing elsewhere. The
+                dialog says the choice reaches the next call, not this one. */}
+            <VoiceAudioSettingsAction placement="status" callActive />
+            <SessionVoicePauseButton state={state} onToggle={onTogglePause} />
+          </>
         )}
         {error && (
           <Button
