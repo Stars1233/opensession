@@ -811,6 +811,9 @@ if (!g.__opensessionBooted) {
         const { startTartIdleSweep } =
           await import("./src/server/sandbox/adapters/tart");
         startTartIdleSweep();
+        const { startUseComputerIdleSweep } =
+          await import("./src/server/sandbox/adapters/usecomputer");
+        startUseComputerIdleSweep();
         await poolStartup;
       })
       .catch((e) => console.error("[sandbox-prewarm] startup failed:", e));

@@ -1,12 +1,14 @@
 /**
  * The display of a Mac VM, bridged to the browser.
  *
- * A Mac VM (Tart) shows its screen through a VNC server that the hosting Mac
- * runs on its own loopback. The browser's viewer connects here, on the app's
- * authenticated origin, and every byte crosses the Runner channel as a typed
- * `vm_display_*` frame. The Runner alone resolves which loopback port belongs
- * to the named VM; nothing on this side names a host or a port, and the
- * per-viewer connection id is random and known only to this socket.
+ * A Mac VM shows its screen through a VNC server the browser cannot reach
+ * directly: on a paired Mac (Tart) it listens on the Mac's own loopback; on
+ * use.computer it sits behind the service's authenticated WebSocket. The
+ * browser's viewer connects here, on the app's authenticated origin, and
+ * every byte crosses either the Runner channel as a typed `vm_display_*`
+ * frame or a socket this server opens to the service. Nothing on the browser
+ * side names a host, a port, or a credential; the per-viewer connection id is
+ * random and known only to this socket.
  */
 
 import { randomBytes } from "crypto";
@@ -19,13 +21,22 @@ import {
 export interface VmDisplayWsData {
   vmDisplay: {
     connectionId: string;
-    runnerId: string;
-    vm: string;
     sessionId: string;
+    /** A VM on a paired Mac: frames ride the Runner channel. */
+    runnerId?: string;
+    vm?: string;
+    /** A hosted VM: frames ride a socket this server opens to the service. */
+    socket?: { url: string; headers: Record<string, string> };
   };
 }
 
-type Viewer = { ws: any; runnerId: string };
+type Viewer = {
+  ws: any;
+  runnerId?: string;
+  upstream?: WebSocket;
+  /** Browser bytes sent before the upstream socket opened. */
+  queue: Uint8Array[];
+};
 const state = globalThis as {
   __opensessionVmDisplayViewers?: Map<string, Viewer>;
   __opensessionVmDisplayFramesInstalled?: boolean;
@@ -44,7 +55,8 @@ export function isVmDisplayRoute(path: string): boolean {
 }
 
 /** Upgrade an authenticated viewer. The request already passed the API sign-in
- * gate; this resolves the session's VM and its Mac host before accepting. */
+ * gate; this resolves the session's VM and where its display is before
+ * accepting. */
 export async function handleVmDisplayUpgrade(
   req: Request,
   server: { upgrade(req: Request, opts?: { data?: unknown }): boolean },
@@ -56,14 +68,28 @@ export async function handleVmDisplayUpgrade(
   const session = await findSessionAsync(decodeURIComponent(match[1]!));
   if (!session) return new Response("Session not found", { status: 404 });
   const recorded = session.sandbox;
-  if (recorded?.provider !== "tart" || !recorded.sandboxId)
+  if (
+    !recorded?.sandboxId ||
+    (recorded.provider !== "tart" && recorded.provider !== "usecomputer")
+  )
     return new Response("This session has no Mac VM display", {
       status: 400,
     });
-  let host: { runnerId: string; vm: string };
+  const display: Omit<
+    VmDisplayWsData["vmDisplay"],
+    "connectionId" | "sessionId"
+  > = {};
   try {
-    const { tartDisplayHost } = await import("./sandbox/adapters/tart");
-    host = await tartDisplayHost(recorded.sandboxId);
+    if (recorded.provider === "tart") {
+      const { tartDisplayHost } = await import("./sandbox/adapters/tart");
+      const host = await tartDisplayHost(recorded.sandboxId);
+      display.runnerId = host.runnerId;
+      display.vm = host.vm;
+    } else {
+      const { useComputerDisplayUpstream } =
+        await import("./sandbox/adapters/usecomputer");
+      display.socket = await useComputerDisplayUpstream(recorded.sandboxId);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return new Response(message, {
@@ -73,9 +99,8 @@ export async function handleVmDisplayUpgrade(
   const data: VmDisplayWsData = {
     vmDisplay: {
       connectionId: randomBytes(16).toString("hex"),
-      runnerId: host.runnerId,
-      vm: host.vm,
       sessionId: session.id,
+      ...display,
     },
   };
   audit({
@@ -97,13 +122,54 @@ function viewerOf(ws: any): VmDisplayWsData["vmDisplay"] | undefined {
   return (ws?.data as Partial<VmDisplayWsData> | undefined)?.vmDisplay;
 }
 
+/** Open the socket to the service and pipe it to the viewer both ways. */
+function openUpstream(
+  viewer: Viewer,
+  connectionId: string,
+  socket: NonNullable<VmDisplayWsData["vmDisplay"]["socket"]>,
+): void {
+  const upstream = new WebSocket(socket.url, {
+    headers: socket.headers,
+  } as unknown as string[]);
+  upstream.binaryType = "arraybuffer";
+  viewer.upstream = upstream;
+  const closeViewer = (code: number, reason: string) => {
+    if (viewers.get(connectionId) === viewer) viewers.delete(connectionId);
+    try {
+      viewer.ws.close(code, closeReason(reason));
+    } catch {}
+  };
+  upstream.onopen = () => {
+    for (const chunk of viewer.queue) upstream.send(chunk);
+    viewer.queue.length = 0;
+  };
+  upstream.onmessage = (event) => {
+    if (typeof event.data === "string") return;
+    try {
+      viewer.ws.send(Buffer.from(event.data as ArrayBuffer));
+    } catch {}
+  };
+  upstream.onerror = () => closeViewer(1011, "Display connection failed");
+  upstream.onclose = (event) =>
+    closeViewer(
+      event.code === 1000 ? 1000 : 1011,
+      event.reason || "Display closed",
+    );
+}
+
 // ── WS event dispatch (early-return hooks for ws-handlers.ts) ─────────────────
 
 export function vmDisplayOpen(ws: any): boolean {
   const viewer = viewerOf(ws);
   if (!viewer) return false;
-  viewers.set(viewer.connectionId, { ws, runnerId: viewer.runnerId });
+  const entry: Viewer = { ws, runnerId: viewer.runnerId, queue: [] };
+  viewers.set(viewer.connectionId, entry);
+  if (viewer.socket) {
+    openUpstream(entry, viewer.connectionId, viewer.socket);
+    return true;
+  }
   if (
+    !viewer.runnerId ||
     !sendRunnerDisplayFrame(viewer.runnerId, {
       t: "vm_display_open",
       connectionId: viewer.connectionId,
@@ -123,7 +189,18 @@ export function vmDisplayMessage(ws: any, message: string | Buffer): boolean {
   if (!viewer) return false;
   // RFB is a binary protocol; a text frame is not part of it.
   if (typeof message === "string") return true;
+  const entry = viewers.get(viewer.connectionId);
+  if (viewer.socket) {
+    const upstream = entry?.upstream;
+    if (!entry || !upstream) return true;
+    const bytes = new Uint8Array(message);
+    if (upstream.readyState === WebSocket.OPEN) upstream.send(bytes);
+    else if (upstream.readyState === WebSocket.CONNECTING)
+      entry.queue.push(bytes);
+    return true;
+  }
   if (
+    !viewer.runnerId ||
     !sendRunnerDisplayFrame(viewer.runnerId, {
       t: "vm_display_send",
       connectionId: viewer.connectionId,
@@ -140,12 +217,19 @@ export function vmDisplayMessage(ws: any, message: string | Buffer): boolean {
 export function vmDisplayClose(ws: any): boolean {
   const viewer = viewerOf(ws);
   if (!viewer) return false;
-  if (viewers.get(viewer.connectionId)?.ws === ws)
-    viewers.delete(viewer.connectionId);
-  sendRunnerDisplayFrame(viewer.runnerId, {
-    t: "vm_display_close",
-    connectionId: viewer.connectionId,
-  });
+  const entry = viewers.get(viewer.connectionId);
+  if (entry?.ws === ws) viewers.delete(viewer.connectionId);
+  if (viewer.socket) {
+    try {
+      entry?.upstream?.close();
+    } catch {}
+    return true;
+  }
+  if (viewer.runnerId)
+    sendRunnerDisplayFrame(viewer.runnerId, {
+      t: "vm_display_close",
+      connectionId: viewer.connectionId,
+    });
   return true;
 }
 

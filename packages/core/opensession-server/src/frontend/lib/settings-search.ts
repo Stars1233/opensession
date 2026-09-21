@@ -152,6 +152,8 @@ export const SETTINGS_KEYWORDS = {
     "tart",
     "mac vm",
     "macos",
+    "use.computer",
+    "usecomputer",
     "isolation",
     "compute",
   ],

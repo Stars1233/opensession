@@ -165,7 +165,13 @@ export interface SandboxConfig {
   runnerSha?: string;
 }
 
-const PROVIDER_IDS = new Set<string>(["local", "daytona", "box", "tart"]);
+const PROVIDER_IDS = new Set<string>([
+  "local",
+  "daytona",
+  "box",
+  "tart",
+  "usecomputer",
+]);
 
 function asProviderId(v: unknown): SandboxProviderId | undefined {
   return typeof v === "string" && PROVIDER_IDS.has(v)
@@ -375,7 +381,12 @@ export function sandboxAutomationAvailability(): SandboxAutomationAvailability {
 // ── Provider capability status (per-session provider picker) ────────────────
 
 /** The providers a session can explicitly pick ("local" = no sandbox). */
-export const RUNNABLE_SANDBOX_PROVIDERS = ["daytona", "box", "tart"] as const;
+export const RUNNABLE_SANDBOX_PROVIDERS = [
+  "daytona",
+  "box",
+  "tart",
+  "usecomputer",
+] as const;
 export type RunnableSandboxProviderId =
   (typeof RUNNABLE_SANDBOX_PROVIDERS)[number];
 
@@ -440,6 +451,11 @@ export const SANDBOX_PROVIDER_CERTIFICATIONS: Record<
     behavioralPassedAt: "2026-09-20",
     warmRestorePassedAt: "2026-09-20",
     note: "macOS VM on a paired Mac Runner: live remote run, lifecycle, and clone restore passed on the office Mac mini",
+  }),
+  usecomputer: certification({
+    behavioralPassedAt: "2026-09-21",
+    warmRestorePassedAt: "2026-09-21",
+    note: "macOS VM on a reserved use.computer Mac: live qualification, remote run, snapshot sleep/wake, desktop, and terminal passed",
   }),
 };
 
@@ -848,7 +864,7 @@ function sandboxProviderSelectionError(
     }
     return `Sandbox provider "${id}" is not currently available.`;
   }
-  return `Sandbox provider "${id}" is not configured: connect ${id === "box" ? "Boat" : id === "tart" ? "a Mac VM host" : "Daytona"} in Workspace > Sandboxes.`;
+  return `Sandbox provider "${id}" is not configured: connect ${id === "box" ? "Boat" : id === "tart" ? "a Mac VM host" : id === "usecomputer" ? "use.computer" : "Daytona"} in Workspace > Sandboxes.`;
 }
 
 /** Whether the provider has enabled connection configuration. */
