@@ -1,7 +1,6 @@
 import { Button } from "../ui/button";
 import { SessionVoiceOrb } from "./SessionVoiceOrb";
 import { SessionVoicePauseButton } from "./SessionVoicePauseButton";
-import { VoiceAudioSettingsAction } from "./composer/VoiceAudioSettings";
 import type { SessionVoiceLevels } from "../lib/session-voice-audio";
 import {
   SESSION_VOICE_STATUS,
@@ -46,13 +45,11 @@ export function SessionVoiceStatus({
             </>
           )}
         </div>
+        {/* Audio routing for the call lives on the handset's chevron in the
+            composer, not here: a change reaches the next call, so the live
+            row only offers what acts on this one. */}
         {!error && state !== "idle" && (
-          <>
-            {/* Mac shell only; the action renders nothing elsewhere. The
-                dialog says the choice reaches the next call, not this one. */}
-            <VoiceAudioSettingsAction placement="status" callActive />
-            <SessionVoicePauseButton state={state} onToggle={onTogglePause} />
-          </>
+          <SessionVoicePauseButton state={state} onToggle={onTogglePause} />
         )}
         {error && (
           <Button

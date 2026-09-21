@@ -1,6 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { NativeVoiceAudio } from "./native-voice-audio";
 import type { NativeVoiceAudioBridge } from "./os1-shell";
+import {
+  readVoiceAudioSettings,
+  writeVoiceAudioSettings,
+} from "./voice-audio-settings";
 
 interface TestPacket {
   type: string;
@@ -286,4 +290,33 @@ test("native startup failure cleans up and never falls back to a different micro
   expect(h.state.closed).toBe(1);
   expect(h.state.stopped.length).toBe(1);
   expect(h.state.unsubscribed).toBe(2);
+});
+
+test("each capture reads the source and ducking choices used by both split menus", async () => {
+  const previous = readVoiceAudioSettings();
+  restores.push(() => {
+    writeVoiceAudioSettings(previous);
+  });
+  const settings = {
+    inputDeviceId: "built-in-mic",
+    outputDeviceId: "headphones",
+    ducking: false,
+  };
+  writeVoiceAudioSettings(settings);
+  const h = setup();
+  await h.audio.start();
+  expect(h.state.started[0].settings).toEqual(settings);
+  h.audio.stop();
+  writeVoiceAudioSettings({
+    ...settings,
+    inputDeviceId: "external-mic",
+    ducking: true,
+  });
+  const next = setup();
+  await next.audio.start();
+  expect(next.state.started[0].settings).toEqual({
+    ...settings,
+    inputDeviceId: "external-mic",
+    ducking: true,
+  });
 });

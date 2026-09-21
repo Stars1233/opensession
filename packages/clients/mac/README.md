@@ -166,6 +166,14 @@ Apple's speech-aware other-audio ducking settings. The shell therefore exposes
 `window.os1.voiceAudio` backed by a signed native helper,
 `native/VoiceAudioHelper.swift`, packaged as `Contents/Resources/os1-voice-audio`.
 
+The dictation microphone and conversation handset are split buttons: the main
+button starts its action, and the attached chevron opens an audio menu without
+starting capture. Both menus share microphone and ducking choices for the next
+use; the conversation menu also selects the output. Choices stay on this device.
+Dictation feeds the selected native microphone into its recorder and speech
+recognizer, so its menu changes the actual capture source too. Older shells
+without the helper keep the plain buttons and browser capture.
+
 The helper owns the real microphone and speaker through `AVAudioEngine` with
 voice processing enabled (Apple's echo cancellation and noise suppression).
 The renderer never opens a microphone on this path: it receives processed
