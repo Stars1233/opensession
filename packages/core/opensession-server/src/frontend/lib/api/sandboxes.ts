@@ -32,11 +32,14 @@ export interface SandboxCheckpointInfo {
 }
 
 export interface SandboxDesktopLink {
-  url: string;
+  /** A page that is the live desktop (Daytona, Boat). */
+  url?: string;
+  /** A VNC stream on this origin (Mac VMs), drawn by the in-app viewer. */
+  vnc?: { streamPath: string; password: string };
   expiresAt?: number;
 }
 
-/** Mints a one-viewer desktop URL. Open it in a new tab; never persist it. */
+/** Mints a one-viewer desktop link. Open it in a new tab; never persist it. */
 export function openSandboxDesktop(
   sessionId: string,
 ): Promise<SandboxDesktopLink> {

@@ -429,7 +429,16 @@ guest user is `admin` with home `/Users/admin`; the workspace lives under
 `/Users/admin/worktrees`. Sleep is `tart stop` (disk kept, processes gone);
 wake boots the VM again and runs `.agents/resume`. Idle VMs are stopped
 after `idleStopMinutes` by the server, since Tart has no idle timer of its
-own. Destroy deletes the VM. A full host refuses to start another VM and
+own. Destroy deletes the VM.
+
+The Desktop tab shows the guest's screen: Tart serves each running VM over
+VNC on the Mac's own loopback, and the Runner relays that stream frame by
+frame to the viewer in the browser, so the guest still needs no address of
+its own. A Terminal tab is a shell inside the guest, opened by the Runner
+over SSH with the same host-local key. Both are typed Runner operations that
+name only the VM (the Runner resolves the port and the guest address itself)
+and ride the `commands` permission the provider already needs; they require
+the Runner to run this release or later. A full host refuses to start another VM and
 says which sessions hold the slots.
 
 Portals ride the outbound relay like every remote provider. The agent's

@@ -24,8 +24,12 @@
  *    a VM starts; a full host refuses clearly instead of thrashing.
  *  - Portals ride the same outbound relay as every remote provider (the
  *    in-guest agent dials back), so a guest-only network is enough.
- *  - Desktop control is the macOS control (screencapture + cliclick) over
- *    exec; a person-facing desktop URL is not exposed yet.
+ *  - Desktop: the agent drives it with the macOS control (screencapture +
+ *    cliclick) over exec. A person watches and takes over through Tart's
+ *    own VNC server on the Mac's loopback, relayed frame by frame over the
+ *    Runner channel to the viewer in the Desktop tab (../../vm-display.ts).
+ *  - Terminal tabs are Runner PTYs that SSH into the guest with the same
+ *    host-local key; the Runner resolves the guest address from the VM name.
  *
  * Adding hosts later: the connection names one Runner today. The same adapter
  * works for any paired Mac (an EC2 Mac running the Runner client included);
@@ -39,12 +43,15 @@ import type {
   ExecResult,
   PortMap,
   Sandbox,
+  SandboxDesktop,
   SandboxDesktopControl,
   SandboxProvider,
   SandboxSessionSpec,
   SandboxStatus,
 } from "../provider";
 import { macDesktopControl } from "../macos-desktop";
+import type { RunnerVmTerminal } from "../../runner-ws";
+import { vmDisplayStreamPath } from "../../vm-display";
 import {
   assertDialbackReachable,
   bootstrapRemoteSandbox,
@@ -1149,6 +1156,27 @@ export class TartProvider implements SandboxProvider {
     return macDesktopControl((cmd, opts) => sandbox.exec(cmd, opts));
   }
 
+  /** The person's view: Tart's VNC server for this VM (the Mac's loopback),
+   *  streamed through the Runner channel. The password is minted by Tart per
+   *  boot and lives in the VM's log on the Mac. */
+  async desktop(sandboxId: string): Promise<SandboxDesktop> {
+    const { host, state } = await runningVm(sandboxId);
+    const line = await tartHostExec(
+      host,
+      `grep -o 'vnc://[^ ]*' ${HOST_DIR}/vms/${q(`${sandboxId}.log`)} 2>/dev/null | tail -1`,
+      { label: `desktop ${sandboxId}`, sessionId: state.sessionId },
+    );
+    const endpoint = parseTartVncUrl(line.stdout);
+    if (!endpoint)
+      throw new Error("The VM has not published its display yet; try again");
+    return {
+      vnc: {
+        streamPath: vmDisplayStreamPath(state.sessionId),
+        password: endpoint.password,
+      },
+    };
+  }
+
   async pause(sandboxId: string): Promise<void> {
     const host = await resolveTartHost();
     const state = readRemoteState(this.id, sandboxId);
@@ -1213,6 +1241,61 @@ export class TartProvider implements SandboxProvider {
 
 /** Tart has no provider-side idle timer. Stop session VMs whose last
  *  activity is older than idleStopMinutes; the next turn wakes them. */
+/** Tart prints `VNC server is running at vnc://:<password>@127.0.0.1:<port>`
+ *  once the guest's display is up; the last line wins after a reboot. */
+export function parseTartVncUrl(
+  text: string,
+): { port: number; password: string } | null {
+  const matches = [
+    ...text.matchAll(/vnc:\/\/(?:[^:@\s]*):([^@\s]*)@127\.0\.0\.1:(\d+)/g),
+  ];
+  const last = matches.at(-1);
+  if (!last) return null;
+  const port = Number(last[2]);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  return { port, password: decodeURIComponent(last[1]!) };
+}
+
+async function runningVm(sandboxId: string) {
+  const state = readRemoteState("tart", sandboxId);
+  if (!state) throw new Error(`Unknown Mac VM ${sandboxId}`);
+  const host = await resolveTartHost();
+  if ((await vmState(host, sandboxId)) !== "running")
+    throw new Error("Wake the sandbox first");
+  return { host, state };
+}
+
+/** The Runner and VM a viewer's display stream attaches to. */
+export async function tartDisplayHost(
+  sandboxId: string,
+): Promise<{ runnerId: string; vm: string }> {
+  const { host } = await runningVm(sandboxId);
+  return { runnerId: host.runnerId, vm: sandboxId };
+}
+
+/** A Terminal tab inside the guest: the Runner opens the PTY and SSHes in
+ *  with its host-local key (../../terminals.ts). A stopped VM is woken, as a
+ *  terminal is an interactive gesture. */
+export async function tartTerminalTarget(sandboxId: string): Promise<{
+  runnerId: string;
+  sessionId: string;
+  vm: RunnerVmTerminal;
+}> {
+  const state = readRemoteState("tart", sandboxId);
+  if (!state) throw new Error(`Unknown Mac VM ${sandboxId}`);
+  const host = await resolveTartHost();
+  if ((await vmState(host, sandboxId)) !== "running") {
+    const { getSandboxProvider } = await import("../index");
+    const woken = await getSandboxProvider("tart").resume?.(sandboxId);
+    if (!woken) throw new Error("The Mac VM could not be woken");
+  }
+  return {
+    runnerId: host.runnerId,
+    sessionId: state.sessionId,
+    vm: { name: sandboxId, user: GUEST_USER, cwd: state.cwd },
+  };
+}
+
 export async function sweepIdleTartVms(now = Date.now()): Promise<string[]> {
   const settings = tartSettings();
   if (!settings.runner) return [];

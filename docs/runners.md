@@ -277,6 +277,12 @@ Revoking a Runner invalidates its credential and closes its control connection
 immediately. Runner-backed full sessions, managed workspace roots, terminals,
 and Portals are not currently available.
 
+A macOS Runner that hosts Mac VM Sandboxes (`docs/self-hosting-sandboxes.md`)
+additionally carries two typed streams for those VMs: a PTY that SSHes into a
+named guest, and the guest's display from the Mac's loopback VNC port. The
+Runner resolves both from the VM name; the server never names a host or a
+port, and the streams ride the `commands` permission the provider needs.
+
 Interactive sessions can use the `opensession-runners` MCP tools for audited
 command delegation subject to those allowlists. Delegated commands are time-
 and output-bounded, but they are not filesystem-sandboxed or confined to a

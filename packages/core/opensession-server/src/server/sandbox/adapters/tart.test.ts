@@ -8,6 +8,7 @@ import {
   launchdPlist,
   localNetworkHintFor,
   parseTartList,
+  parseTartVncUrl,
   tartSettings,
   tartTemplateVmName,
   tartVmName,
@@ -132,6 +133,25 @@ describe("tart guest commands", () => {
   test("the base signature changes with the image", () => {
     expect(baseSignature("a")).not.toBe(baseSignature("b"));
     expect(baseSignature("a")).toContain("tart@");
+  });
+});
+
+describe("tart display", () => {
+  test("reads the password and port of the latest VNC line", () => {
+    const log = [
+      "VNC server is running at vnc://:old-word@127.0.0.1:61790",
+      "Stopping VM...",
+      "VNC server is running at vnc://:calm-hazard-later-chest@127.0.0.1:61792",
+    ].join("\n");
+    expect(parseTartVncUrl(log)).toEqual({
+      port: 61792,
+      password: "calm-hazard-later-chest",
+    });
+  });
+
+  test("reports no display while the guest is still booting", () => {
+    expect(parseTartVncUrl("")).toBeNull();
+    expect(parseTartVncUrl("vnc://:pw@10.0.0.5:5900")).toBeNull();
   });
 });
 
