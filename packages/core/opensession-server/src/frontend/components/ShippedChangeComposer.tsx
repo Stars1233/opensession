@@ -109,6 +109,9 @@ export interface ShippedChangeComposerProps {
   defaultChannel?: string;
   /** The pending composer to update while the human edits it. */
   draftId?: string;
+  /** A better first draft is still being written; `defaultMessage` will
+   *  change once it lands, unless the person has started editing. */
+  drafting?: boolean;
   nextMessage?: string;
   sent?: SlackSent;
   /** Offered on the receipt while the message is still deletable in Slack. */
@@ -128,6 +131,7 @@ export function ShippedChangeComposer({
   loadChannels,
   defaultChannel,
   draftId,
+  drafting = false,
   nextMessage,
   sent,
   onUndo,
@@ -154,13 +158,15 @@ export function ShippedChangeComposer({
     : "";
 
   useEffect(() => {
-    if (!draftId || !draftDirtyRef.current) {
+    const sessionChanged = sessionRef.current !== sessionId;
+    if (sessionChanged) draftDirtyRef.current = false;
+    // A new default (the written draft arriving after the title fallback, a
+    // walkthrough landing) replaces the text only while it is still ours;
+    // once the person has typed, their words stay.
+    if (!draftDirtyRef.current) {
       setMessage(defaultMessage);
     }
-    if (
-      sessionRef.current !== sessionId ||
-      (draftId && !draftDirtyRef.current)
-    ) {
+    if (sessionChanged || (draftId && !draftDirtyRef.current)) {
       sessionRef.current = sessionId;
       setScreenshots(
         [...(screenshot ? [screenshot] : []), ...(initialScreenshots || [])]
@@ -342,6 +348,16 @@ export function ShippedChangeComposer({
       <div className="mb-2 flex items-center gap-1.5 px-1 text-label leading-5 text-dim">
         <BrandMark name="slack" size={12} />
         <span className="font-semibold">Send to Slack</span>
+        {drafting && (
+          <>
+            <span aria-hidden className="text-faint">
+              ·
+            </span>
+            <span className="text-faint" role="status">
+              Drafting…
+            </span>
+          </>
+        )}
         {onCancel && (
           <Tooltip label="Close" side="bottom">
             <Button
