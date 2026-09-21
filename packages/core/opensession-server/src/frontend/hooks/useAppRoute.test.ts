@@ -22,11 +22,13 @@ function fakeBrowser({
   state = null,
   user = "Ada",
   stored = {},
+  singleHistoryEntry = false,
 }: {
   path?: string;
   state?: unknown;
   user?: string;
   stored?: Record<string, string>;
+  singleHistoryEntry?: boolean;
 } = {}): FakeBrowser {
   const origin = "https://app.test";
   const calls: HistoryCall[] = [];
@@ -108,6 +110,7 @@ function fakeBrowser({
   const browser: AppRouteBrowser = {
     location,
     history,
+    singleHistoryEntry,
     storage: {
       getItem(key) {
         return storage.get(key) ?? null;
@@ -479,6 +482,74 @@ describe("back behavior", () => {
       state: { d: 0 },
       path: "/",
     });
+  });
+});
+
+describe("single-entry history", () => {
+  test("restores the last session in place at depth zero", () => {
+    const fake = fakeBrowser({ stored: remembered, singleHistoryEntry: true });
+    const controller = new AppRouteController(fake.browser);
+
+    expect(controller.getCurrentRoute()).toEqual({
+      view: "session",
+      id: "session-last",
+    });
+    expect(controller.restoredSessionId).toBe("session-last");
+    expect(fake.calls.map((call) => call.type)).toEqual(["replace", "replace"]);
+    expect(fake.calls.at(-1)).toEqual({
+      type: "replace",
+      state: { d: 0, restoredSession: "session-last" },
+      path: "/session/session-last",
+    });
+  });
+
+  test("never pushes, and goes back to the root without popping", () => {
+    const fake = fakeBrowser({ singleHistoryEntry: true });
+    const controller = new AppRouteController(fake.browser);
+    controller.start(false);
+    fake.calls.length = 0;
+
+    controller.navigate({ view: "session", id: "one" });
+    controller.navigate({ view: "session", id: "two" });
+    controller.goBack("parent");
+    controller.goBack();
+
+    expect(fake.calls).toEqual([
+      { type: "replace", state: { d: 0 }, path: "/session/one" },
+      { type: "replace", state: { d: 0 }, path: "/session/two" },
+      { type: "replace", state: { d: 0 }, path: "/session/parent" },
+      { type: "replace", state: { d: 0 }, path: "/" },
+    ]);
+    expect(fake.scheduledDelays).toEqual([]);
+    expect(controller.getCurrentRoute()).toEqual({ view: "prs" });
+  });
+
+  test("leaves settings and the deck in place", () => {
+    const fake = fakeBrowser({
+      path: "/session/one?mode=review",
+      singleHistoryEntry: true,
+    });
+    const controller = new AppRouteController(fake.browser);
+    controller.start(false);
+
+    controller.navigate({ view: "settings" });
+    controller.navigate({ view: "settings", section: "preferences" });
+    controller.leaveSettings();
+    expect(controller.getCurrentRoute()).toEqual({
+      view: "session",
+      id: "one",
+    });
+    expect(fake.browser.location.search).toBe("?mode=review");
+
+    controller.openFirstMile();
+    expect(controller.snapshot().forceFirstMile).toBe(true);
+    controller.finishFirstMileNavigation();
+    controller.navigate({ view: "catchup" });
+    controller.leaveDeck();
+    expect(controller.getCurrentRoute()).toEqual({ view: "prs" });
+
+    expect(fake.calls.every((call) => call.type === "replace")).toBe(true);
+    expect(fake.scheduledDelays).toEqual([]);
   });
 });
 
