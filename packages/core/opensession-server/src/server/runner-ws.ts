@@ -116,6 +116,9 @@ function publishRunnerTerminalFrame(
   }
 }
 
+/** Input, resize, and stop for an open terminal. The Runner accepts a
+ * terminal frame only when it carries the protocol version, like every other
+ * frame the server sends. */
 function sendRunnerTerminalFrame(
   runnerId: string,
   message: Record<string, unknown>,
@@ -123,7 +126,9 @@ function sendRunnerTerminalFrame(
   const connection = connections.get(runnerId);
   if (!connection || connection.protocolVersion !== PROTOCOL_VERSION) return;
   try {
-    connection.ws.send(JSON.stringify(message));
+    connection.ws.send(
+      JSON.stringify({ ...message, version: PROTOCOL_VERSION }),
+    );
   } catch {}
 }
 

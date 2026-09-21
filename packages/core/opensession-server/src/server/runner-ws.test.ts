@@ -15,9 +15,12 @@ import {
   launchRunnerHost,
   openRunnerTerminal,
   prepareRunnerWorkspace,
+  resizeRunnerTerminal,
   runnerWsClose,
   runnerWsMessage,
   runnerWsOpen,
+  stopRunnerTerminal,
+  writeRunnerTerminal,
 } from "./runner-ws";
 
 const HOME = mkdtempSync(join(tmpdir(), "os-runner-ws-test-"));
@@ -185,6 +188,16 @@ describe("Runner WebSocket policy", () => {
       terminalId: frame.id,
       cwd: "/home/ubuntu/worktrees/renderer-s1",
     });
+
+    // Every later frame carries the protocol version, or the Runner drops it.
+    writeRunnerTerminal(registered.runner.id, frame.id, "bHM K");
+    resizeRunnerTerminal(registered.runner.id, frame.id, 80, 24);
+    stopRunnerTerminal(registered.runner.id, frame.id);
+    expect(sent.map((raw) => JSON.parse(raw))).toEqual([
+      { t: "terminal_input", id: frame.id, data: "bHM K", version: 1 },
+      { t: "terminal_resize", id: frame.id, cols: 80, rows: 24, version: 1 },
+      { t: "terminal_stop", id: frame.id, version: 1 },
+    ]);
     runnerWsClose(ws);
   });
 
