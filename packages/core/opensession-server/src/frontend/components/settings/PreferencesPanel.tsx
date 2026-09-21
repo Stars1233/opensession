@@ -107,6 +107,11 @@ import {
   setAgentationPref,
 } from "../../lib/agentation-pref";
 import { AGENTATION_ENABLED } from "../../lib/brand";
+import {
+  getViewportReadoutPref,
+  onViewportReadoutChanged,
+  setViewportReadoutPref,
+} from "../../lib/viewport-readout";
 import { Input, Textarea } from "../../ui/input";
 import { Button } from "../../ui/button";
 import {
@@ -320,20 +325,42 @@ function DebugSection() {
     () => onAgentationChanged(() => setAgentation(getAgentationPref())),
     [],
   );
-  if (!AGENTATION_ENABLED) return null;
+  const [viewportReadout, setViewportReadout] = useState(
+    getViewportReadoutPref,
+  );
+  useEffect(
+    () =>
+      onViewportReadoutChanged(() =>
+        setViewportReadout(getViewportReadoutPref()),
+      ),
+    [],
+  );
 
   return (
     <>
       <SettingsGroupLabel>Debug</SettingsGroupLabel>
       <SettingCard>
+        {AGENTATION_ENABLED && (
+          <SettingRow
+            title="Agentation"
+            desc="Show the page annotation toolbar on desktop. Only affects you."
+            control={
+              <Switch
+                aria-label="Agentation"
+                checked={agentation}
+                onCheckedChange={setAgentationPref}
+              />
+            }
+          />
+        )}
         <SettingRow
-          title="Agentation"
-          desc="Show the page annotation toolbar on desktop. Only affects you."
+          title="Viewport readout"
+          desc="Show live window, keyboard, and scroll numbers in a corner of the screen. Only this device."
           control={
             <Switch
-              aria-label="Agentation"
-              checked={agentation}
-              onCheckedChange={setAgentationPref}
+              aria-label="Viewport readout"
+              checked={viewportReadout}
+              onCheckedChange={setViewportReadoutPref}
             />
           }
         />
