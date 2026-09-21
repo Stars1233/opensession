@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { getConfigAsync } from "../config";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
@@ -134,6 +135,101 @@ describe("instance general settings", () => {
     expect(stored.future).toEqual({ keep: true });
   });
 
+  test("workspace uploads supply resized PWA icons, refresh on replacement, and fall back on removal", async () => {
+    await seed();
+    const paths = [
+      ["/apple-touch-icon.png", 180],
+      ["/icon-192.png", 192],
+      ["/icon.png", 512],
+    ] as const;
+    const bundled = new Map<string, ArrayBuffer>();
+    for (const [path] of paths) {
+      const response = await handleStaticAssetsRoutes(context(path));
+      expect(response?.status).toBe(200);
+      bundled.set(path, await response!.arrayBuffer());
+    }
+    const macBefore = await (await handleStaticAssetsRoutes(
+      context("/mac-app-icon.png"),
+    ))!.arrayBuffer();
+    let previousRevision = "";
+    for (const color of ["#ff0000", "#0000ff"]) {
+      const bytes = await sharp({
+        create: { width: 256, height: 256, channels: 4, background: color },
+      })
+        .png()
+        .toBuffer();
+      const uploaded = await handleInstanceSettingsRoutes(
+        context("/api/settings/general/icon", "POST", { login: "ada", bytes }),
+      );
+      expect(uploaded?.status).toBe(200);
+      const { organizationIconRevision: revision } = await uploaded!.json();
+      expect(revision).not.toBe(previousRevision);
+      previousRevision = revision;
+      for (const [path, size] of paths) {
+        // Like Safari's installer, fetch without an authenticated API identity.
+        const response = await handleStaticAssetsRoutes(context(path));
+        expect(response?.headers.get("content-type")).toBe("image/png");
+        expect(response?.headers.get("cache-control")).toBe("no-cache");
+        const image = sharp(await response!.arrayBuffer());
+        const metadata = await image.metadata();
+        expect([metadata.width, metadata.height]).toEqual([size, size]);
+        expect(metadata.hasAlpha).toBe(false);
+        const pixel = await image.raw().toBuffer();
+        expect([...pixel.subarray(0, 3)]).toEqual(
+          color === "#ff0000" ? [255, 0, 0] : [0, 0, 255],
+        );
+      }
+      const manifestResponse = await handleStaticAssetsRoutes({
+        ...context("/manifest.webmanifest"),
+        publicPrefix: "/backstage",
+      });
+      expect(manifestResponse?.headers.get("cache-control")).toBe("no-cache");
+      const manifest = await manifestResponse!.json();
+      expect(manifest.start_url).toBe("/backstage/");
+      expect(manifest.icons.map((icon: { src: string }) => icon.src)).toEqual([
+        `/backstage/icon-192.png?v=${revision}`,
+        `/backstage/icon.png?v=${revision}`,
+      ]);
+      expect(manifest.shortcuts[0].icons[0].src).toBe(
+        `/backstage/icon-192.png?v=${revision}`,
+      );
+    }
+    const macAfter = await (await handleStaticAssetsRoutes(
+      context("/mac-app-icon.png"),
+    ))!.arrayBuffer();
+    expect(macAfter).toEqual(macBefore);
+    const removed = await handleInstanceSettingsRoutes(
+      context("/api/settings/general/icon", "DELETE", { login: "ada" }),
+    );
+    expect(removed?.status).toBe(200);
+    for (const [path] of paths) {
+      const response = await handleStaticAssetsRoutes(context(path));
+      expect(await response!.arrayBuffer()).toEqual(bundled.get(path)!);
+    }
+    const manifest = await (await handleStaticAssetsRoutes(
+      context("/manifest.webmanifest"),
+    ))!.json();
+    expect(manifest.icons[0].src).toBe("/icon-192.png?v=6");
+  });
+
+  test("unreadable PNG artwork keeps the bundled install icon", async () => {
+    await seed();
+    const before = await (await handleStaticAssetsRoutes(
+      context("/apple-touch-icon.png"),
+    ))!.arrayBuffer();
+    // Older uploads validate the PNG header, not the complete image stream.
+    await handleInstanceSettingsRoutes(
+      context("/api/settings/general/icon", "POST", {
+        login: "ada",
+        bytes: squarePngHeader(),
+      }),
+    );
+    const after = await (await handleStaticAssetsRoutes(
+      context("/apple-touch-icon.png"),
+    ))!.arrayBuffer();
+    expect(after).toEqual(before);
+  });
+
   test("persists the worktree policy for new shared-checkout sessions", async () => {
     const { config } = await seed();
     const initial = await handleInstanceSettingsRoutes(
@@ -256,9 +352,6 @@ describe("instance general settings", () => {
     expect(uploaded.organizationIconUrl).toMatch(
       /^\/organization-icon\.png\?v=[a-f0-9]{12}$/,
     );
-    expect(uploaded.homeScreenProfileUrl).toMatch(
-      /^\/organization-icon\.mobileconfig\?v=[a-f0-9]{12}$/,
-    );
 
     const asset = await handleStaticAssetsRoutes(
       context("/organization-icon.png"),
@@ -269,32 +362,14 @@ describe("instance general settings", () => {
       Array.from(bytes),
     );
 
-    const profile = await handleStaticAssetsRoutes(
-      context("/organization-icon.mobileconfig"),
-    );
-    expect(profile?.status).toBe(200);
-    expect(profile?.headers.get("Content-Type")).toBe(
-      "application/x-apple-aspen-config",
-    );
-    const plist = await profile!.text();
-    expect(plist).toContain("<string>com.apple.webClip.managed</string>");
-    expect(plist).toContain("<string>os1://</string>");
-    expect(plist).toContain(
-      `<data>${Buffer.from(bytes).toString("base64")}</data>`,
-    );
-
     const removed = await handleInstanceSettingsRoutes(
       context("/api/settings/general/icon", "DELETE", { login: "ada" }),
     );
-    const removedBody = await removed?.json();
-    expect(removedBody.organizationIconUrl).toBeNull();
-    expect(removedBody.homeScreenProfileUrl).toBeNull();
-    for (const path of [
-      "/organization-icon.png",
-      "/organization-icon.mobileconfig",
-    ]) {
-      expect((await handleStaticAssetsRoutes(context(path)))?.status).toBe(404);
-    }
+    expect((await removed?.json()).organizationIconUrl).toBeNull();
+    expect(
+      (await handleStaticAssetsRoutes(context("/organization-icon.png")))
+        ?.status,
+    ).toBe(404);
   });
 
   test("rejects non-square or oversized icon dimensions", async () => {

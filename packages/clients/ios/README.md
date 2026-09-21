@@ -367,12 +367,7 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   copy arrives.
 - **Settings** — native SwiftUI Tools, Personal, and Workspace administration,
   plus multi-organization server/GitHub/token configuration and a connection
-  test. Settings > General on iOS offers the organization icon as a Home
-  Screen tile: the server builds a Web Clip profile
-  (`/organization-icon.mobileconfig`) aimed at the app's `os1://` scheme, since
-  iOS only swaps an app's own icon between artwork compiled into it. The same
-  scheme takes `os1://session/<id>` (`AppDeepLink`), mirroring the desktop
-  shell. The top-bar logo on iOS and the row above Feed on macOS switch servers
+  test. The top-bar logo on iOS and the row above Feed on macOS switch servers
   and show the active connection; each account keeps its own keychain token, and
   passive WebSockets remain connected for inactive accounts
   while the app is active so mentions can badge the picker. Cross-device

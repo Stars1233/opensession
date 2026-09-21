@@ -336,8 +336,6 @@ export interface OrganizationSettingsDto {
   organizationName: string;
   organizationIconUrl: string | null;
   organizationIconRevision: string | null;
-  /** An iOS configuration profile that puts the icon on the Home Screen. */
-  homeScreenProfileUrl: string | null;
   configPath: string;
 }
 
@@ -345,8 +343,6 @@ const ORGANIZATION_SETTINGS_SCHEMA = z.object({
   organizationName: z.string(),
   organizationIconUrl: z.string().nullable(),
   organizationIconRevision: z.string().nullable(),
-  // Optional so a server that predates the profile still parses.
-  homeScreenProfileUrl: z.string().nullable().default(null),
   configPath: z.string(),
 });
 const ERROR_RESPONSE_SCHEMA = z.object({ error: z.string() });

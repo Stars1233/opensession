@@ -20,7 +20,6 @@ struct GeneralSettingsView: View {
     @State private var iconHovered = false
     @FocusState private var nameFocused: Bool
     @FocusState private var focusedIdentityField: IdentityField?
-    @Environment(\.openURL) private var openURL
 
     private enum IdentityField: Hashable { case persona, product }
 
@@ -65,24 +64,6 @@ struct GeneralSettingsView: View {
                 } footer: {
                     Text("Shared by everyone in this workspace. Clearing the name restores the product name.")
                 }
-                #if os(iOS)
-                // iOS only swaps an app's icon between artwork built into it,
-                // so the organization icon reaches the Home Screen as a Web
-                // Clip that opens this app. Safari has to fetch the profile:
-                // it is the one place that can hand one to Settings.
-                if let profileURL = SettingsAPI.organizationIconURL(settings?.homeScreenProfileUrl) {
-                    Section {
-                        Button {
-                            openURL(profileURL)
-                        } label: {
-                            Label("Add icon to Home Screen", systemImage: "apps.iphone")
-                        }
-                        .disabled(saving)
-                    } footer: {
-                        Text("Safari downloads a profile that puts this icon on the Home Screen as a tile that opens \(AppBrand.appName). Install it under Settings > General > VPN & Device Management.")
-                    }
-                }
-                #endif
             }
             if identityLoading, identity == nil {
                 settingsLoadingRow

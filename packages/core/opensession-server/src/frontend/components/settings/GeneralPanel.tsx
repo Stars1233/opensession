@@ -30,7 +30,6 @@ import {
 } from "../../ui/settings";
 import { toast } from "../../ui/toast";
 import { InlineAlert } from "../../ui/state";
-import { Button } from "../../ui/button";
 import { IconArrowUpToLine, IconTrash } from "../icons";
 import { IdentityRows } from "../SetupIdentity";
 
@@ -293,6 +292,9 @@ export function OrganizationProfileSection({
                 <SettingRow className="items-center">
                   <SettingRowText>
                     <SettingRowTitle>Upload icon</SettingRowTitle>
+                    <SettingRowDescription>
+                      Also used for the installed web app on your Home Screen.
+                    </SettingRowDescription>
                   </SettingRowText>
                   <SettingRowControl className="flex flex-wrap items-center justify-end gap-2">
                     {iconEditor}
@@ -304,29 +306,6 @@ export function OrganizationProfileSection({
                   </SettingRowText>
                   {organizationNameInput}
                 </SettingRow>
-                {settings.homeScreenProfileUrl && (
-                  // iOS only swaps an app's icon between artwork built into
-                  // it, so the organization icon reaches the Home Screen as
-                  // a Web Clip that opens the app. The profile is a plain
-                  // download: Safari on the phone offers to install it.
-                  <SettingRow>
-                    <SettingRowText>
-                      <SettingRowTitle>iPhone app icon</SettingRowTitle>
-                      <SettingRowDescription>
-                        Put this icon on the Home Screen as a tile that opens
-                        the iOS app. Open this page on the iPhone, download the
-                        profile, then install it under Settings.
-                      </SettingRowDescription>
-                    </SettingRowText>
-                    <SettingRowControl>
-                      <Button
-                        render={<a href={settings.homeScreenProfileUrl} />}
-                      >
-                        Download profile
-                      </Button>
-                    </SettingRowControl>
-                  </SettingRow>
-                )}
                 <IdentityRows />
               </>
             )}
@@ -334,7 +313,8 @@ export function OrganizationProfileSection({
           {!onboarding && (
             <SettingsHint>
               Shared by everyone in this organization. Clearing the name
-              restores the product name.
+              restores the product name. On iOS, remove and re-add the web app
+              from Safari’s Share menu to update its Home Screen icon.
             </SettingsHint>
           )}
         </>

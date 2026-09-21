@@ -11,8 +11,6 @@ import type { RouteContext } from "./context";
 import {
   configuredIntegration,
   configuredRepos,
-  configuredServer,
-  organizationName,
   productMark,
   productName,
 } from "../config";
@@ -27,9 +25,10 @@ import {
 import { trimIconMargin } from "../png-trim";
 import { resolveRepoIcon } from "../repo-appearance";
 import {
-  homeScreenProfile,
   organizationIconBytes,
+  organizationIconRevision,
 } from "../organization-settings";
+import { organizationPwaIcon } from "../pwa-icons";
 
 // Icons normalized for the tile, keyed by path and invalidated by mtime.
 // Trimming decodes and re-encodes a PNG, which is silly to repeat for a file
@@ -50,7 +49,11 @@ export function builtAssetContentType(name: string): string | null {
 
 // Per-prefix PWA identity keeps legacy /backstage installs distinct, while the
 // shortcut still opens the new-agent flow in that same deployed shell.
-export function pwaManifest(publicPrefix: string) {
+export function pwaManifest(
+  publicPrefix: string,
+  iconRevision: string | null = null,
+) {
+  const version = iconRevision || "6";
   return {
     name: productName(),
     // The label under the icon once the web app is installed, where there is
@@ -73,13 +76,13 @@ export function pwaManifest(publicPrefix: string) {
     theme_color: "#222222",
     icons: [
       {
-        src: `${publicPrefix}/icon-192.png?v=5`,
+        src: `${publicPrefix}/icon-192.png?v=${version}`,
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: `${publicPrefix}/icon.png?v=5`,
+        src: `${publicPrefix}/icon.png?v=${version}`,
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
@@ -91,7 +94,7 @@ export function pwaManifest(publicPrefix: string) {
         url: `${publicPrefix}/new`,
         icons: [
           {
-            src: `${publicPrefix}/icon-192.png?v=5`,
+            src: `${publicPrefix}/icon-192.png?v=${version}`,
             sizes: "192x192",
             type: "image/png",
           },
@@ -161,9 +164,25 @@ export async function handleStaticAssetsRoutes(
     });
   }
 
-  // App icons (approved native artwork, gen by scripts/gen-icons.py) — real PNGs so iOS home-screen and PWA installs
-  // pick them up; data-URI apple-touch-icons don't work on iOS. Short cache
-  // + must-revalidate so a refreshed design isn't pinned by a stale copy.
+  // PWA installs use the workspace artwork; the native Mac download stays
+  // on its bundled icon. Real, correctly sized PNGs also work before sign-in.
+  const pwaSize = {
+    "/apple-touch-icon.png": 180,
+    "/icon-192.png": 192,
+    "/icon.png": 512,
+  }[path];
+  if (pwaSize) {
+    const bytes = await organizationPwaIcon(pwaSize);
+    if (bytes) {
+      return new Response(bytes.slice().buffer as ArrayBuffer, {
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "no-cache",
+        },
+      });
+    }
+  }
+  // Without workspace artwork, retain the shipped Open Session icons.
   const iconFiles: Record<string, { name: string; sourcePath?: string }> = {
     "/apple-touch-icon.png": { name: "apple-touch-icon.png" }, // 180×180
     "/icon-192.png": { name: "icon-192.png" },
@@ -181,13 +200,15 @@ export async function handleStaticAssetsRoutes(
     return new Response(file, {
       headers: {
         "Content-Type": "image/png",
-        "Cache-Control": "public, max-age=3600, must-revalidate",
+        "Cache-Control": pwaSize
+          ? "no-cache"
+          : "public, max-age=3600, must-revalidate",
       },
     });
   }
 
   if (path === "/organization-icon.png" && req.method === "GET") {
-    const bytes = organizationIconBytes();
+    const bytes = await organizationIconBytes();
     if (!bytes) return new Response("Not found", { status: 404 });
     return new Response(bytes.slice().buffer as ArrayBuffer, {
       headers: {
@@ -195,31 +216,6 @@ export async function handleStaticAssetsRoutes(
         "Cache-Control": "public, max-age=3600, must-revalidate",
       },
     });
-  }
-
-  // The organization icon as an iOS Home Screen tile that opens the native
-  // app (see homeScreenProfile). Served beside the icon, on the same open
-  // terms: Safari must be able to fetch it, since only Safari can hand a
-  // profile to Settings, and it carries nothing the icon and the sign-in
-  // screen do not already show.
-  if (path === "/organization-icon.mobileconfig" && req.method === "GET") {
-    const icon = organizationIconBytes();
-    if (!icon) return new Response("Not found", { status: 404 });
-    return new Response(
-      homeScreenProfile({
-        label: organizationName(),
-        icon,
-        instance: configuredServer().publicBaseUrl,
-      }),
-      {
-        headers: {
-          "Content-Type": "application/x-apple-aspen-config",
-          "Content-Disposition":
-            'attachment; filename="home-screen-icon.mobileconfig"',
-          "Cache-Control": "no-store",
-        },
-      },
-    );
   }
 
   // The exact fixed light/dark artwork used behind opensession.com. Keep the
@@ -394,9 +390,15 @@ export async function handleStaticAssetsRoutes(
       });
   }
   if (path === "/manifest.webmanifest") {
-    return Response.json(pwaManifest(publicPrefix), {
-      headers: { "Content-Type": "application/manifest+json" },
-    });
+    return Response.json(
+      pwaManifest(publicPrefix, await organizationIconRevision()),
+      {
+        headers: {
+          "Content-Type": "application/manifest+json",
+          "Cache-Control": "no-cache",
+        },
+      },
+    );
   }
 
   // Universal links for the desktop app (packages/clients/mac): lets plain
