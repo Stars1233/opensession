@@ -1460,6 +1460,12 @@ struct SessionsListView: View {
     /// valid; the composer owns plain Data after that, so Files can revoke the
     /// source URL without breaking the upload.
     private func openFile(_ url: URL) {
+        // The same modifier delivers the app's own URL scheme: the Home
+        // Screen tile and os1://session/<id> links, which are not files.
+        if let link = AppDeepLink.parse(url) {
+            if case .session(let id) = link { requestedSession.ask(sessionId: id) }
+            return
+        }
         Task {
             do {
                 let attachment = try await Task.detached(priority: .userInitiated) {

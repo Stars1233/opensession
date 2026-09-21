@@ -20,6 +20,7 @@ import {
   SettingCardSkeleton,
   SettingRow,
   SettingRowControl,
+  SettingRowDescription,
   SettingRowText,
   SettingRowTitle,
   SettingsHeader,
@@ -29,6 +30,7 @@ import {
 } from "../../ui/settings";
 import { toast } from "../../ui/toast";
 import { InlineAlert } from "../../ui/state";
+import { Button } from "../../ui/button";
 import { IconArrowUpToLine, IconTrash } from "../icons";
 import { IdentityRows } from "../SetupIdentity";
 
@@ -302,6 +304,29 @@ export function OrganizationProfileSection({
                   </SettingRowText>
                   {organizationNameInput}
                 </SettingRow>
+                {settings.homeScreenProfileUrl && (
+                  // iOS only swaps an app's icon between artwork built into
+                  // it, so the organization icon reaches the Home Screen as
+                  // a Web Clip that opens the app. The profile is a plain
+                  // download: Safari on the phone offers to install it.
+                  <SettingRow>
+                    <SettingRowText>
+                      <SettingRowTitle>iPhone app icon</SettingRowTitle>
+                      <SettingRowDescription>
+                        Put this icon on the Home Screen as a tile that opens
+                        the iOS app. Open this page on the iPhone, download the
+                        profile, then install it under Settings.
+                      </SettingRowDescription>
+                    </SettingRowText>
+                    <SettingRowControl>
+                      <Button
+                        render={<a href={settings.homeScreenProfileUrl} />}
+                      >
+                        Download profile
+                      </Button>
+                    </SettingRowControl>
+                  </SettingRow>
+                )}
                 <IdentityRows />
               </>
             )}

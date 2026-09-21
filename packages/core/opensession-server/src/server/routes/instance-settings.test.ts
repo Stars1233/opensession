@@ -256,6 +256,9 @@ describe("instance general settings", () => {
     expect(uploaded.organizationIconUrl).toMatch(
       /^\/organization-icon\.png\?v=[a-f0-9]{12}$/,
     );
+    expect(uploaded.homeScreenProfileUrl).toMatch(
+      /^\/organization-icon\.mobileconfig\?v=[a-f0-9]{12}$/,
+    );
 
     const asset = await handleStaticAssetsRoutes(
       context("/organization-icon.png"),
@@ -266,14 +269,32 @@ describe("instance general settings", () => {
       Array.from(bytes),
     );
 
+    const profile = await handleStaticAssetsRoutes(
+      context("/organization-icon.mobileconfig"),
+    );
+    expect(profile?.status).toBe(200);
+    expect(profile?.headers.get("Content-Type")).toBe(
+      "application/x-apple-aspen-config",
+    );
+    const plist = await profile!.text();
+    expect(plist).toContain("<string>com.apple.webClip.managed</string>");
+    expect(plist).toContain("<string>os1://</string>");
+    expect(plist).toContain(
+      `<data>${Buffer.from(bytes).toString("base64")}</data>`,
+    );
+
     const removed = await handleInstanceSettingsRoutes(
       context("/api/settings/general/icon", "DELETE", { login: "ada" }),
     );
-    expect((await removed?.json()).organizationIconUrl).toBeNull();
-    expect(
-      (await handleStaticAssetsRoutes(context("/organization-icon.png")))
-        ?.status,
-    ).toBe(404);
+    const removedBody = await removed?.json();
+    expect(removedBody.organizationIconUrl).toBeNull();
+    expect(removedBody.homeScreenProfileUrl).toBeNull();
+    for (const path of [
+      "/organization-icon.png",
+      "/organization-icon.mobileconfig",
+    ]) {
+      expect((await handleStaticAssetsRoutes(context(path)))?.status).toBe(404);
+    }
   });
 
   test("rejects non-square or oversized icon dimensions", async () => {

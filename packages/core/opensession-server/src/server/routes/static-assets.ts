@@ -11,6 +11,8 @@ import type { RouteContext } from "./context";
 import {
   configuredIntegration,
   configuredRepos,
+  configuredServer,
+  organizationName,
   productMark,
   productName,
 } from "../config";
@@ -24,7 +26,10 @@ import {
 } from "../frontend-build";
 import { trimIconMargin } from "../png-trim";
 import { resolveRepoIcon } from "../repo-appearance";
-import { organizationIconBytes } from "../organization-settings";
+import {
+  homeScreenProfile,
+  organizationIconBytes,
+} from "../organization-settings";
 
 // Icons normalized for the tile, keyed by path and invalidated by mtime.
 // Trimming decodes and re-encodes a PNG, which is silly to repeat for a file
@@ -190,6 +195,31 @@ export async function handleStaticAssetsRoutes(
         "Cache-Control": "public, max-age=3600, must-revalidate",
       },
     });
+  }
+
+  // The organization icon as an iOS Home Screen tile that opens the native
+  // app (see homeScreenProfile). Served beside the icon, on the same open
+  // terms: Safari must be able to fetch it, since only Safari can hand a
+  // profile to Settings, and it carries nothing the icon and the sign-in
+  // screen do not already show.
+  if (path === "/organization-icon.mobileconfig" && req.method === "GET") {
+    const icon = organizationIconBytes();
+    if (!icon) return new Response("Not found", { status: 404 });
+    return new Response(
+      homeScreenProfile({
+        label: organizationName(),
+        icon,
+        instance: configuredServer().publicBaseUrl,
+      }),
+      {
+        headers: {
+          "Content-Type": "application/x-apple-aspen-config",
+          "Content-Disposition":
+            'attachment; filename="home-screen-icon.mobileconfig"',
+          "Cache-Control": "no-store",
+        },
+      },
+    );
   }
 
   // The exact fixed light/dark artwork used behind opensession.com. Keep the

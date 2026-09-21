@@ -41,6 +41,14 @@ targets:
         NSSpeechRecognitionUsageDescription: Turn what you say into text in the message box.
         NSSupportsLiveActivities: true
         LSSupportsOpeningDocumentsInPlace: true
+        # os1:// opens the app (see AppDeepLink). The organization's Home
+        # Screen tile, a Web Clip the server hands out from Settings > General,
+        # is aimed at it; os1://session/<id> mirrors the desktop shell's
+        # links. iOS only: on the Mac the Electron shell owns the scheme.
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
+            CFBundleURLSchemes:
+              - os1
         CFBundleDocumentTypes:
           - CFBundleTypeName: File
             CFBundleTypeRole: Viewer

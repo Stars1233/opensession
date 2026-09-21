@@ -91,6 +91,11 @@ function generalDto(publicPrefix: string) {
         ? null
         : `${publicPrefix}/organization-icon.png?v=${revision}`,
     organizationIconRevision: revision,
+    // The iOS Home Screen profile built from the same icon (static-assets.ts).
+    homeScreenProfileUrl:
+      revision === null
+        ? null
+        : `${publicPrefix}/organization-icon.mobileconfig?v=${revision}`,
     configPath: configPath(),
   };
 }
