@@ -1,6 +1,6 @@
 ---
 name: auto-capture
-description: Record a short production demo of this session's shipped PR using Tella's remote auto capture. Use when the user says "run auto capture", "auto capture", "record the PR on prod", or invokes /auto-capture. Infer the demo from session context, verify it is live, start the recording, and return the video link.
+description: Record a short production demo of this session's shipped PR using Tella's remote auto capture. Use when the user says "run auto capture", "auto capture", "record the PR on prod", or invokes /auto-capture. Infer the demo from session context, verify it is live and publicly accessible without login, capture a source, and place it in a private video to return its link.
 ---
 
 # Auto capture
@@ -29,109 +29,141 @@ on-demand action, not something to run automatically after every merge.
 - If it is not live or production cannot be identified, stop with the specific
   blocker. Do not merge, deploy, flip feature flags, or substitute a preview,
   localhost, Portal, or staging URL just to make a recording possible.
-- Pick an existing safe demo account/resource on production, if needed. The
-  remote browser does not inherit this session's cookies or local browser
-  login. An internet-reachable URL is not proof of authenticated access. If
-  access is missing, ask for an approved demo access route; do not copy cookies,
-  tokens, passwords, or customer data into URLs or capture instructions.
+- **The target must load without signing in.** The current tool films public
+  web pages; a page behind login films the login page. Check the feature route
+  without authenticated cookies. MCP authorization grants access to Tella's
+  recording tools, not a logged-in browser on the target site. Even approved
+  test-account credentials do not make authenticated capture supported. Do not
+  put passwords, cookies, tokens, or customer data in the skill, target URL,
+  capture instructions, or scheduled prompts. For authenticated screens, stop
+  and ask for an approved public demo surface with synthetic data; do not expose
+  private data or weaken authentication to produce one. Clearly label such a
+  demo as a demo surface, not a recording of the live private workspace.
 - If the change has no meaningful visible demo (for example, an internal
   refactor), explain that rather than inventing a product benefit or filming
   an unrelated page.
 
-## 2. Write the demo brief yourself
+## 2. Write an outcome-focused brief
 
-Aim for **30–60 seconds**, one user journey, and 3–5 deliberate actions. This is
-a pacing request, not a guaranteed tool duration. Briefly tell the user what
-you will record, then proceed without requiring script approval unless a
-blocking access or safety decision remains.
+Aim for **30–60 seconds** and one focused user journey. This is a pacing request,
+not a guaranteed clip duration; generating the take typically takes **3–6
+minutes**. Briefly tell the user what you will record, then proceed without
+requiring script approval unless a blocking access or safety decision remains.
 
-The remote author does **not** have this conversation. Supply a self-contained
-`instructions` brief, distilled from the PR rather than a raw diff or transcript:
+The remote author does **not** have this conversation. Supply self-contained
+`instructions` distilled from the PR, not a raw diff, transcript, click script,
+or selector list. Describe the outcome a viewer should see; the agent finds
+the clicks itself. Include the starting and ending state, what to dwell on,
+and what to skip:
 
 ```text
 Make a concise 30–60 second screen demo of [feature] on production.
 Audience: [who benefits]. Main point: [observable improvement].
-Start at [exact production URL], using [approved non-sensitive demo resource].
-1. Establish [starting state] so the viewer can understand the feature.
-2. [Action using the actual visible control label].
-3. [Action that demonstrates the new behavior].
-4. Pause on [observable result] long enough to read it.
-Keep the cursor deliberate, text readable, and navigation minimal. End on the
-result, not a tour of unrelated settings. Do not claim behavior you cannot see.
-Stay on this journey and use only the approved demo resource. Do not send,
-publish, purchase, invite, delete, or change access or account settings. Do not
-show secrets, customer records, inboxes, or unrelated private information.
+Start at [exact public production URL] with [safe starting state].
+Show the viewer how [one user journey] leads to [observable new result].
+Dwell on [important visual detail] long enough to read it. End on [result].
+Skip [unrelated navigation or settings]. Keep the cursor deliberate and text
+readable. Do not claim behavior you cannot see.
+Use only approved demo data. Do not send, publish, purchase, invite, delete,
+or change access or account settings. Do not show secrets or private records.
 If login, missing data, a feature flag, or an unexpected state blocks the demo,
 stop and ask for guidance rather than guessing or working around access controls.
 ```
 
-Adapt the beats to the actual feature. Default to read-only interactions;
-production mutations require explicit authorization for the exact demo action
-and resource. Include those limits in the remote brief too. Do not promise
-voiceover, captions, or editing controls the tool does not offer.
+Default to read-only interactions; production mutations require explicit
+permission for the exact demo action and resource. Include those limits in the
+remote brief too. Do not promise voiceover, captions, or editing controls the
+tool does not offer. One capture is one page or flow. Multiple takes require a
+clear multi-flow request, not an unsolicited longer tour.
 
-## 3. Start Tella auto capture
+## 3. Create the capture source
 
 Discover the **production Tella MCP** tools with `mcp_search` before calling
-`mcp_call`. Search for `start_auto_capture` and `get_auto_capture_status`; use
-the returned names and live schemas exactly. Do not use `tella-stage` or the
-internal support recording-recovery tools as substitutes.
+`mcp_call`. Use the returned names and live schemas exactly. Do not substitute
+staging or internal support recording-recovery tools.
 
-The expected contract is:
+The current contract is:
 
-- `start_auto_capture`: `targetUrl`, optional `instructions`, `storyId`,
-  `guidance`, and `guidanceKind` (`answer` or `correction`). Returns `workflowId`.
-- `get_auto_capture_status`: `workflowId`. Returns `status`, optional `storyId`,
-  `progress.phase`, and an `outcome` with `result`, `sceneId`, or `question`.
+- `create_auto_capture`: `targetUrl`, optional `instructions` and `model`.
+  Returns `sourceId`. Leave the model at its default unless requested otherwise.
+- `get_auto_capture`: `sourceId`. Returns status and progress; terminal results
+  include a `handoff`, `question`, or `error` as appropriate.
+- `cancel_auto_capture`: `sourceId`. Stops a running take; an already-ended take
+  is returned unchanged.
 
-The live schema is authoritative. If discovery does not expose these tools,
-stop and explain that the session needs the production Tella connection and
-an account entitled to auto capture (the `autoCapture` feature). Do not bypass
-MCP access controls with direct HTTP calls or change account entitlements.
+The live schema is authoritative. If these tools are unavailable, report the
+connection or permission blocker. Do not assume a particular feature flag is
+missing or bypass MCP controls with direct HTTP calls.
 
-Start **one** capture with the production `targetUrl` and the brief in
-`instructions`. Omit `storyId` to create a new video unless the user explicitly
-asked to append to an existing one. Creating a recording does not authorize
-making it public: use only organization-controlled storage and keep access
-restricted. If the tool's destination/sharing policy is unknown, establish that
-it is private or organization-only before starting; never upload to public hosts.
+Create **one** take with the production `targetUrl` and the outcome brief in
+`instructions`. It records a 4K source; it does **not** create a video or append
+any clip yet. Save the `sourceId`, target URL, brief, and PR/commit reference in
+the conversation for continuation. Creation is not idempotent: a timeout or lost
+response is not permission to create another take. Recover the existing source
+if possible; otherwise report the uncertainty.
 
-Save the returned `workflowId`, target URL, brief, PR/commit reference, and any
-returned story ID in the conversation for continuation. Start is **not
-idempotent**: a timeout or lost response is not permission to create a duplicate.
-Recover the existing run if possible; otherwise report the uncertainty.
+Use only organization-controlled storage and keep resulting videos private.
+Never upload recordings or data to public hosts, enable public sharing, or
+export elsewhere as part of this skill.
 
-## 4. Follow through without blocking the session
+## 4. Follow the take without blocking the session
 
-Check `get_auto_capture_status` once. If still `running`, use
-`opensession-schedule` to schedule a later status check in this same session,
-including the workflow ID and instruction to check the existing run, not start
-a new one. End the turn with an honest “recording in progress” update. Do not
-sleep, busy-poll, or leave a shell loop running. If scheduling is unavailable,
-report the workflow ID and that another status check is needed; do not promise
-an automatic follow-up you did not arrange.
+Use `opensession-schedule` to check `get_auto_capture` in this same session
+**every 30–60 seconds**, starting 30–60 seconds after creation. Include the
+source ID, brief, PR/commit reference, and instruction to check the existing
+take, not create another. End the turn with an honest “recording in progress”
+update. Do not sleep, busy-poll, or leave a shell loop running. If scheduling is
+unavailable, report the source ID and that another status check is needed; do
+not promise an automatic follow-up you did not arrange.
 
 Handle the result explicitly:
 
-- `completed` with `outcome.result = delivered`: the clip was appended. Record
-  the returned `storyId` and `outcome.sceneId`. Use Tella's discovered video
-  lookup tool to get the existing viewer/editor URL and confirm sharing is
-  restricted; do not fabricate a URL or enable public sharing. Review the clip
-  if available and say whether you actually watched it. Delivery alone is not
-  proof that every requested action was shown.
-- `completed` with `outcome.result = needs_guidance`: this is **not a finished
-  demo**. Read `outcome.question`. Answer from established session facts if
-  possible; otherwise ask the user that question. For a follow-up, reuse the
-  returned `storyId`, original target and instructions, and send the answer in
-  `guidance` with `guidanceKind: "answer"`. If no story ID was returned, resolve
-  the existing video before retrying rather than accidentally creating another.
-- `failed`, `cancelled`, or completed without a delivered outcome: report the
-  available reason and identifiers honestly. Do not retry automatically.
-- If the user requests a correction to a delivered clip, reuse its story and
-  send `guidanceKind: "correction"` with their feedback. This appends a clip;
-  do not delete or replace existing footage without permission.
+- `queued`, `authoring`, `validating`, `recording`, `processing`: still running.
+  Read `progress` and schedule the next check 30–60 seconds later. Queued can
+  include waiting a few minutes for a machine; 3–6 minutes is an estimate, not
+  a timeout or reason to start a duplicate.
+- `delivered`: read `handoff` **before placing the source**. It explains what the
+  clip shows and where it departed from the instructions. If it missed the core
+  feature, filmed login, or contains unsafe material, report that and do not
+  place it as a successful demo. Otherwise continue to video placement below.
+  A delivered source is not yet a video link.
+- `needs_guidance`: ask the user the returned `question`. Once answered, start
+  a new take with the original brief plus their answer in `instructions`, then
+  track its new source ID. Do not invent separate guidance fields or silently
+  retry. If the question requires login, retain the public-page restriction.
+- `failed`: report `error` and the source ID. Do not retry automatically.
+- `cancelled`: report cancellation; there is nothing to place.
+- Unknown or missing status: report the unexpected response, preserve the source
+  ID, and do not place it or declare success.
 
+If the user asks to stop, or the take was started with the wrong URL or brief,
+call `cancel_auto_capture` with that source ID and cancel its scheduled status
+checks. Inspect the returned status: an already-ended take was not cancelled.
+Do not place a source after a stop request, even if it completed first.
+
+## 5. Place the source and return the video
+
+Discover `create_video`, `upload_clip`, and the video lookup tool when needed.
+The delivered capture's `sourceId` is already usable: do **not** call
+`create_source`, upload bytes, download, or re-upload the recording.
+
+- By default call `create_video` with the delivered `sourceId`, a short feature
+  title in `name`, and `linkScope: "private"`. Disable search indexing with
+  `searchEngineIndexingEnabled: false`. These fields must still match the live
+  schema. If private creation is unsupported, stop rather than use public defaults.
+- Only when the user explicitly asked to append to an existing video, verify
+  that video's access is restricted before calling `upload_clip` with its
+  `videoId` and the delivered `sourceId`. Do not change an existing video's
+  sharing policy without permission. Place multiple requested takes in order.
+- Record the placement result and returned video/clip identifiers before ending
+  the turn. Never repeat a successful placement on the next scheduled check.
+  If placement times out, inspect the existing video/source linkage before
+  retrying to avoid duplicate videos or clips. A placement failure is not a
+  reason to record the source again.
+
+Get the actual viewer/editor URL from the placement response or a video lookup;
+do not fabricate a URL or make a private video public to obtain a link. Review
+playback if available and distinguish that from reading the agent's handoff.
 Finish concisely with the Tella video link, what it demonstrates, and the PR or
-commit reference. Mention any missing beat, access limitation, or unreviewed
-playback. Do not post to Slack, comment on the PR, or export/upload elsewhere
-unless separately requested.
+commit reference. Mention deviations or unreviewed playback. Do not post to
+Slack, comment on the PR, or export/upload elsewhere unless separately requested.

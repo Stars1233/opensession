@@ -192,6 +192,20 @@ describe("expandSkillCommand", () => {
       const expanded = expandSkillCommand(command, loaded.skills);
       expect(expanded).toContain('<skill name="auto-capture"');
       expect(expanded).toContain("# Auto capture");
+      for (const tool of [
+        "create_auto_capture",
+        "get_auto_capture",
+        "cancel_auto_capture",
+        "create_video",
+        "upload_clip",
+      ]) {
+        expect(expanded).toContain(`\`${tool}\``);
+      }
+      expect(expanded).toContain("load without signing in");
+      expect(expanded).toContain('linkScope: "private"');
+      expect(expanded).not.toMatch(
+        /start_auto_capture|get_auto_capture_status|workflowId|guidanceKind|storyId/,
+      );
       expect(expanded).not.toContain("\nname: auto-capture");
       expect(
         expandSkillCommand(`${command} focus on the new menu`, loaded.skills),
