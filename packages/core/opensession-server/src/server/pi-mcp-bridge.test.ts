@@ -23,6 +23,8 @@ function fakeRuntime(catalog: McpRuntimeTool[]): McpRuntime & {
       return catalog;
     },
     async callExact(id, args, options) {
+      if (!catalog.some((tool) => tool.id === id))
+        throw new Error(`MCP tool "${id}" is unavailable`);
       calls.push({
         id,
         args,
