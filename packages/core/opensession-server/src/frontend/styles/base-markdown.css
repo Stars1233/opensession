@@ -702,6 +702,24 @@ html[data-theme="light"] .composer-hl .cmp-fence {
   position: relative;
   line-height: 0;
 }
+/* A Tella share link framed as its player (markdown.ts, lib/tella-embed.ts).
+   Tella serves 16:9; the width is capped where a .md-video's 480px height
+   cap would land it, and the corner and hairline are the video's own. */
+.md-embed-frame {
+  display: block;
+  width: 100%;
+  max-width: 720px;
+  aspect-ratio: 16 / 9;
+  margin: 6px 0;
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: calc(8px * var(--rf));
+  corner-shape: var(--cs);
+  background: #000;
+  background-clip: padding-box;
+}
+.md-figure .md-embed-frame {
+  margin: 0;
+}
 /* Always visible (not hover-gated) so it works on touch/iOS. top offsets the
    video's own 6px top margin inside the wrapper; a diagram's margin is on the
    wrapper instead, so it sits at the plain inset. */
