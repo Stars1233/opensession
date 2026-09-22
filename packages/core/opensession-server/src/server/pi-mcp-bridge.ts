@@ -33,7 +33,6 @@ export async function createPiMcpBridge(
   runtime: McpRuntime,
 ): Promise<PiMcpBridge> {
   const tools: ToolDefinition<any, any, any>[] = [];
-  const byName = new Map<string, ToolDefinition<any, any, any>>();
   const seen = new Set<string>();
   const syncCatalog = async (hydrate: boolean) => {
     for (const tool of await runtime.catalog({ hydrate })) {
@@ -41,7 +40,6 @@ export async function createPiMcpBridge(
       seen.add(tool.id);
       const definition = definitionOf({ ...tool, runtime } as BoundTool);
       tools.push(definition);
-      byName.set(definition.name, definition);
     }
   };
   await syncCatalog(false);
@@ -134,18 +132,18 @@ export async function createPiMcpBridge(
       },
       required: ["name", "arguments"],
     } as any,
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
+    async execute(toolCallId, params, signal) {
       const name = String((params as { name?: unknown })?.name ?? "");
-      const definition = byName.get(name);
-      if (!definition)
-        throw new Error(
-          `MCP tool "${name}" is unavailable. Search the catalog first.`,
-        );
       const args = (params as { arguments?: unknown })?.arguments;
       if (!args || typeof args !== "object" || Array.isArray(args)) {
         throw new Error("mcp_call arguments must be an object");
       }
-      return definition.execute(toolCallId, args as any, signal, onUpdate, ctx);
+      const { content } = await runtime.callExact(
+        name,
+        args as Record<string, unknown>,
+        { toolCallId, signal },
+      );
+      return { content, details: undefined };
     },
   };
 

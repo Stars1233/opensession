@@ -90,7 +90,15 @@ test("the real text MCP uses server-owned prompt identity and the same acknowled
       server: "opensession-desk",
       promptEntryId,
     });
-    expect(forged).toMatchObject({ kind: "immediate", body: { tools: [] } });
+    expect(forged).toMatchObject({
+      kind: "immediate",
+      status: 404,
+      body: {
+        error: expect.stringContaining(
+          'MCP server "opensession-desk" is not available',
+        ),
+      },
+    });
     const called = await dispatchRunRpc("/mcp/call", {
       token,
       server: "opensession-desk",
@@ -128,7 +136,15 @@ test("the real text MCP uses server-owned prompt identity and the same acknowled
     finish();
     expect(
       await dispatchRunRpc("/mcp/list", { token, server: "opensession-desk" }),
-    ).toMatchObject({ kind: "immediate", body: { tools: [] } });
+    ).toMatchObject({
+      kind: "immediate",
+      status: 404,
+      body: {
+        error: expect.stringContaining(
+          'MCP server "opensession-desk" is not available',
+        ),
+      },
+    });
   } finally {
     finish();
     deskTextNavigation.disconnect(

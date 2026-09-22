@@ -187,13 +187,8 @@ export async function dispatchRunRpc(
       )
     )[serverName];
   if (!cfg?.instance) {
-    // tools/list for a server this session doesn't carry (shared servers list
-    // the union of in-process servers in their config) answers with an empty
-    // tool list rather than an error — the proxy stays healthy and the
-    // session simply sees no tools from it. Calls still 404.
-    if (path === "/mcp/list") return imm(200, { tools: [] });
     return imm(404, {
-      error: `no interactive MCP server "${serverName}" for this run`,
+      error: `MCP server "${serverName}" is not available in this session: not bound by this run's MCP policy.`,
     });
   }
 

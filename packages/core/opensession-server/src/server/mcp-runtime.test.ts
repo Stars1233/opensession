@@ -5,7 +5,6 @@ import { createSdkMcpServer, tool } from "./inprocess-mcp";
 import {
   boundedSafeJson,
   createMcpRuntime,
-  legacyProxyToolsCacheKey,
   MAX_MCP_SAFE_JSON_BYTES,
   splitMcpMigrationBoundary,
   type McpRuntime,
@@ -165,7 +164,7 @@ describe("bounded safe JSON", () => {
 });
 
 describe("legacy migration boundary", () => {
-  test("separates SDK mounts from runner-host proxy configs and ignores token in cache indirectly", () => {
+  test("separates SDK mounts from runner-host proxy configs", () => {
     const sdk = server();
     const split = splitMcpMigrationBoundary({
       alpha: sdk,
@@ -174,15 +173,5 @@ describe("legacy migration boundary", () => {
     });
     expect(Object.keys(split.sdk)).toEqual(["alpha"]);
     expect(Object.keys(split.legacyProxy!.configs)).toEqual(["proxy"]);
-    const proxy = (token: string) => ({
-      command: "/bun",
-      env: { OPENSESSION_RPC_TOKEN: token, OPENSESSION_MCP_SERVER: "sessions" },
-    });
-    expect(legacyProxyToolsCacheKey(proxy("one"))).toBe(
-      legacyProxyToolsCacheKey(proxy("two")),
-    );
-    expect(legacyProxyToolsCacheKey(proxy("one"))).not.toBe(
-      legacyProxyToolsCacheKey({ ...proxy("one"), command: "/other" }),
-    );
   });
 });
