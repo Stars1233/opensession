@@ -86,6 +86,61 @@ describe("Pi MCP adapter", () => {
     expect(verbose.content[0].text).toContain("… [truncated]");
   });
 
+  test("required server terms exclude unrelated session tools", async () => {
+    const bridge = await createPiMcpBridge(
+      fakeRuntime([
+        tool("opensession-sessions_list_sessions", "List sessions"),
+        tool("opensession-sessions_get_session", "Get session detail"),
+        tool("workos_list_sessions", "List sessions for a user"),
+        tool("vercel_get_session", "Get session detail"),
+      ]),
+    );
+    const search = bridge.discoveryTools[0]!;
+    for (const query of [
+      "+opensession-sessions list_sessions get_session",
+      "+opensession-sessions_",
+      "+opensession-sessions",
+    ]) {
+      const result = await exec(search, { query, limit: 12 });
+      expect(result.content[0].text).toContain(
+        "opensession-sessions_list_sessions",
+      );
+      expect(result.content[0].text).toContain(
+        "opensession-sessions_get_session",
+      );
+      expect(result.content[0].text).not.toContain("workos_list_sessions");
+      expect(result.content[0].text).not.toContain("vercel_get_session");
+    }
+    const ranked = await exec(search, {
+      query: "+opensession-sessions get_session",
+      limit: 1,
+    });
+    expect(ranked.content[0].text).toContain(
+      "opensession-sessions_get_session",
+    );
+    expect(ranked.content[0].text).not.toContain("list_sessions");
+  });
+
+  test("every required term must match the permitted catalog", async () => {
+    const bridge = await createPiMcpBridge(
+      fakeRuntime([
+        tool("alpha_echo", "Echo text"),
+        tool("alpha_list", "List items"),
+        tool("beta_echo", "Echo text"),
+      ]),
+    );
+    const search = bridge.discoveryTools[0]!;
+    const result = await exec(search, { query: "+alpha +echo" });
+    expect(result.content[0].text).toContain("alpha_echo");
+    expect(result.content[0].text).not.toContain("alpha_list");
+    expect(result.content[0].text).not.toContain("beta_echo");
+    const missing = await exec(search, { query: "+unavailable echo" });
+    expect(missing.content[0].text).toContain("No permitted MCP tools matched");
+    await expect(exec(search, { query: "+" })).rejects.toThrow(
+      "requires a term after +",
+    );
+  });
+
   test("mcp_call preserves exact identity, toolCallId, signal and Pi result shape", async () => {
     const runtime = fakeRuntime([tool("alpha_echo", "Echo")]);
     const bridge = await createPiMcpBridge(runtime);
