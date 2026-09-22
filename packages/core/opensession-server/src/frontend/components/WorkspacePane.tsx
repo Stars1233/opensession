@@ -103,10 +103,7 @@ import { mainSession } from "../lib/landing-session";
 import { sessionCarriesPr } from "../lib/session-prs";
 import type { NewTabMorphOrigin } from "../lib/session-tabs-types";
 import { ArchivedSessionItems } from "./ArchivedSessionItems";
-import {
-  workspaceSummaryOpen,
-  WS_SUMMARY_ROOM_W,
-} from "../lib/workspace-summary-open";
+import { WS_SUMMARY_ROOM_W } from "../lib/workspace-summary-open";
 
 interface Props {
   workspace: Workspace;
@@ -613,8 +610,6 @@ export function WorkspacePane({
   const [reviewSessionActionTarget, setReviewSessionActionTarget] =
     useState<HTMLDivElement | null>(null);
   const [headerW, setHeaderW] = useState(0);
-  const [reviewSummaryOpen, setReviewSummaryOpen] =
-    useState(workspaceSummaryOpen);
   useLayoutEffect(() => {
     const el = headerRef.current;
     if (!el) return;
@@ -631,14 +626,6 @@ export function WorkspacePane({
     return () => observer.disconnect();
   }, [topbarEl]);
   const reviewSummaryHasRoom = headerW === 0 || headerW >= WS_SUMMARY_ROOM_W;
-  const reviewSummaryVisible =
-    tab === "review" &&
-    reviewPage !== "files" &&
-    !!presentationSession &&
-    reviewSummaryOpen &&
-    reviewSummaryHasRoom &&
-    !panelOpen &&
-    !isPhone;
 
   function commitWorkspaceRename() {
     const name = renameDraft?.trim();
@@ -853,10 +840,9 @@ export function WorkspacePane({
             onOpenChecks={() => setReviewPage("overview")}
             onOpenSession={onOpenSession}
             send={connected && !presentationSession.archived ? send : undefined}
-            onOpenChange={setReviewSummaryOpen}
             tabStripVisible={tabStripVisible}
             reviewMode
-            forcePopover={reviewPage === "files"}
+            forcePopover
             hasRoom={reviewSummaryHasRoom}
           />
         )}
@@ -915,10 +901,8 @@ export function WorkspacePane({
             reviewSession ? () => onOpenSession(reviewSession.id) : undefined
           }
           walkthrough={presentationSession?.walkthrough}
-          hideWideOverviewRail={Boolean(presentationSession)}
           page={reviewPage}
           onPageChange={setReviewPage}
-          compactToolbar={reviewSummaryVisible}
           flushToolbarTop={!tabStripVisible}
           phoneNavigation={
             onBack ? (

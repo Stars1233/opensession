@@ -1163,7 +1163,7 @@ export function SessionViewerChrome({
                       onOpenChange={setSummaryOpen}
                       tabStripVisible={tabStripVisible}
                       reviewMode={showReview}
-                      forcePopover={showReview && reviewPage === "files"}
+                      forcePopover={showReview}
                       // Too narrow for both, and the card gets out of the way
                       // until someone asks for it from the same button.
                       hasRoom={summaryHasRoom}

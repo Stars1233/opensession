@@ -248,12 +248,9 @@ export function PrFilesPage({
               )}
             </>
           )}
-          {reviewProvider && (
-            <span className="text-supporting text-faint phone:order-1 phone:min-w-[50%] phone:flex-1">
-              {pendingCount > 0
-                ? `${pendingCount} pending comment${pendingCount === 1 ? "" : "s"} · `
-                : ""}
-              Sent to {reviewProvider} on finish
+          {pendingCount > 0 && (
+            <span className="text-supporting text-faint">
+              {pendingCount} pending comment{pendingCount === 1 ? "" : "s"}
             </span>
           )}
         </div>

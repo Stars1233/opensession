@@ -1392,9 +1392,12 @@ export function PrPanel({
     </Segmented>
   );
 
-  const fileControls = page === "files" && (
+  const fileControls = (
     <div
-      className={`flex shrink-0 items-center gap-1.5 phone:gap-2 ${compactToolbar ? "" : "ml-auto"}`}
+      // Keep display controls separate from the trailing, fixed page navigation.
+      className={`flex shrink-0 items-center gap-1.5 phone:gap-2 ${compactToolbar ? "" : "ml-auto"} ${page === "files" ? "" : "invisible"}`}
+      inert={page !== "files"}
+      aria-hidden={page !== "files"}
     >
       {diffSource === "worktree" ? (
         <div
@@ -1631,8 +1634,8 @@ export function PrPanel({
                 </a>
               </Tooltip>
             </h1>
-            {titlePageSwitcher}
             {(compactToolbar || !phoneLayout) && fileControls}
+            {titlePageSwitcher}
             {/* A stack is secondary navigation, not page content. Keep its compact
             position/size chip in the identity bar and reveal the full rail in
             the shared popover instead of spending permanent canvas height. */}

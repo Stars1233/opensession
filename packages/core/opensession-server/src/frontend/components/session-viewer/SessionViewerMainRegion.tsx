@@ -629,7 +629,6 @@ export function SessionViewerMainRegion({
     actionClearance,
     summaryStep,
     summaryStepStyle,
-    summaryVisible,
     tabStripVisible,
     setViewerInput,
     leaveLatest,
@@ -780,12 +779,10 @@ export function SessionViewerMainRegion({
             linkedPrs={session.linkedPrs}
             discoveredPrs={discoveredPrs}
             focusTarget={reviewFocus}
-            hideWideOverviewRail
             linkable
             walkthrough={session.walkthrough}
             page={reviewPage}
             onPageChange={setReviewPage}
-            compactToolbar={reviewPage !== "files" && summaryVisible}
             flushToolbarTop={!tabStripVisible}
             phoneNavigation={
               openCurrentWorkspace ? (

@@ -85,20 +85,15 @@ test("the first workspace session receives its draft attachments", () => {
   expect(source).toContain("dropStagingAttachments(draftKey)");
 });
 
-test("workspace Overview keeps the implementation summary beside the PR canvas", () => {
+test("workspace Review keeps metadata without resizing the canvas", () => {
   expect(source).toContain("sessionCarriesPr(s, reviewTarget)");
   expect(source).toContain("s.workspaceId === workspace.id");
   expect(source).toContain("fetchWorkspaceOverview(workspace.id)");
   expect(source).toContain("<WorkspaceSummary");
   expect(source).toContain("session={presentationSession}");
-  expect(source).toContain("onOpenChange={setReviewSummaryOpen}");
-  expect(source).toContain("compactToolbar={reviewSummaryVisible}");
-  expect(source).toMatch(
-    /const reviewSummaryVisible =\s*tab === "review" &&\s*reviewPage !== "files" &&\s*!!presentationSession &&/,
-  );
-  expect(viewerSource).toContain(
-    'compactToolbar={reviewPage !== "files" && summaryVisible}',
-  );
+  expect(source).not.toContain("compactToolbar={reviewSummaryVisible}");
+  expect(source).not.toContain("hideWideOverviewRail={");
+  expect(viewerSource).not.toContain('compactToolbar={reviewPage !== "files"');
   expect(viewerSource).not.toContain("WS_SUMMARY_REVIEW_CLEARANCE");
   expect(source).toContain("walkthrough={presentationSession?.walkthrough}");
 });
@@ -215,35 +210,10 @@ test("sidebar Changes shares Review's code display options", () => {
     'stickyFileHeaders ? "gap-[7px]" : "gap-4"',
   );
   expect(commentableDiffSource).toContain(
-    '"--diffs-bg": "var(--review-code-light)"',
+    'from "../lib/commentable-diff-appearance"',
   );
   expect(commentableDiffSource).toContain(
-    'backgroundColor: "var(--review-code-light)"',
-  );
-  expect(commentableDiffSource).toContain('"--diffs-bg-separator-override":');
-  expect(commentableDiffSource).toContain(
-    '"color-mix(in srgb, var(--blue) 12%, var(--review-code-light))"',
-  );
-  expect(commentableDiffSource).toContain(
-    '"color-mix(in srgb, var(--review-code-light) 96%, var(--review-code-dark))"',
-  );
-  expect(commentableDiffSource).toContain(
-    '"color-mix(in srgb, var(--review-code-light) 90%, var(--review-code-dark))"',
-  );
-  expect(commentableDiffSource).toContain(
-    '"--diffs-bg": "var(--review-code-dark)"',
-  );
-  expect(commentableDiffSource).toContain(
-    'backgroundColor: "var(--review-code-dark)"',
-  );
-  expect(commentableDiffSource).toContain(
-    '"color-mix(in srgb, var(--blue) 12%, var(--review-code-dark))"',
-  );
-  expect(commentableDiffSource).toContain(
-    '"color-mix(in srgb, var(--review-code-dark) 94%, var(--review-code-light))"',
-  );
-  expect(commentableDiffSource).toContain(
-    '"color-mix(in srgb, var(--review-code-dark) 90%, var(--review-code-light))"',
+    "...diffAppearanceOptions(theme, structuralHighlighting)",
   );
   expect(commentableDiffSource).toContain("style={DIFF_SURFACE_STYLE[theme]}");
   expect(baseCssSource).toContain("--review-code-light: #ffffff");
@@ -268,7 +238,7 @@ test("CommentableDiff delegates pending-comment state behind one options prop", 
 test("wide Review keeps page navigation in the identity bar", () => {
   expect(source).toContain("page={reviewPage}");
   expect(source).not.toContain("onReviewPageChange={setReviewPage}");
-  expect(source).toContain("compactToolbar={reviewSummaryVisible}");
+  expect(source).not.toContain("compactToolbar={reviewSummaryVisible}");
   expect(source).toContain("ref={setReviewSessionActionTarget}");
   expect(source).toContain("sessionActionTarget={");
   expect(prPanelSource).toContain(
@@ -362,12 +332,20 @@ test("the PR top bar leaves merge to the summary and actions menu", () => {
 });
 
 test("Files uses the full workspace canvas with summary available on request", () => {
-  expect(source).toContain('forcePopover={reviewPage === "files"}');
-  expect(source).toContain('reviewPage !== "files" &&');
+  expect(source).toContain("forcePopover\n");
+  expect(source).not.toContain('forcePopover={reviewPage === "files"}');
   expect(summarySource).toContain(
     "!forcePopover && (forceOpen || workspaceSummaryCanStand(hasRoom))",
   );
   expect(summarySource).toContain(
     '(details.reason === "escape-key" && !forcePopover)',
   );
+});
+
+test("Review reserves the file-control slot and only labels actual pending comments", () => {
+  expect(prPanelSource).toContain('inert={page !== "files"}');
+  expect(prPanelSource).toContain('aria-hidden={page !== "files"}');
+  expect(prPanelSource).toContain('page === "files" ? "" : "invisible"');
+  expect(prFilesPageSource).not.toContain("Sent to");
+  expect(prFilesPageSource).toContain("pendingCount > 0 &&");
 });
