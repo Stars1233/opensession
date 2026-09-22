@@ -6,6 +6,25 @@
    Grep for BOTH spellings before assuming one of these is unused: the
    underscores in an arbitrary value hide the name from a naive search. */
 
+/* Measured only during motion; open panels return to natural content height. */
+@keyframes collapsible-open {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--collapsible-panel-height);
+  }
+}
+
+@keyframes collapsible-close {
+  from {
+    height: var(--collapsible-panel-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
 @keyframes composer-agents-pulse {
   0%,
   100% {
