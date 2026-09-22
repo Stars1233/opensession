@@ -372,7 +372,7 @@ export function parseMergeRiskOutput(text: string): MergeRiskOutput | null {
  *  review survives exhaustion through the agent runner's own fallback; this
  *  scorer is a bare one-shot and needs its own chain, strongest first. Models
  *  on the primary's provider are skipped by the one-shot helper. */
-export const MERGE_RISK_FALLBACK_MODELS = ["gpt-6-astra", "gpt-5.6-sol"];
+export const MERGE_RISK_FALLBACK_MODELS = ["gpt-6-astra", "gpt-6-sol"];
 
 export async function runMergeRiskCheck(opts: {
   pr: PrDetails;

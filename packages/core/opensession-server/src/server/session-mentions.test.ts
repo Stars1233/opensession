@@ -63,12 +63,12 @@ describe("foldSessionUsage cost accounting", () => {
     const first = foldSessionUsage(
       undefined,
       zeroCostTurn,
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-sol",
     );
     const next = foldSessionUsage(
       first,
       { ...zeroCostTurn, costUsd: 0.123456 },
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-sol",
     );
 
     expect(first.costUsd).toBe(0);
@@ -80,10 +80,10 @@ describe("foldSessionUsage cost accounting", () => {
     const beforeRestart = foldSessionUsage(
       undefined,
       { ...zeroCostTurn, costUsd: 1.25 },
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-sol",
     );
     const recovered = foldRecoveredSessionUsage(
-      { model: "pi/openai/gpt-5.6-sol", usage: beforeRestart },
+      { model: "pi/openai/gpt-6-sol", usage: beforeRestart },
       { usage: { ...zeroCostTurn, costUsd: 5.5 } },
     );
 

@@ -109,6 +109,8 @@ export function modelEfforts(
       : id.slice(0, slash);
   const slug = slash === -1 ? id : id.slice(slash + 1);
 
+  if (provider === "openai" && /^(?:gpt-6-sol|gpt-6-luna)$/.test(slug))
+    return [...OPENAI_EFFORTS, "max"];
   if (
     provider === "openai" &&
     (/^gpt-5\./.test(slug) || slug === "gpt-6-astra")
@@ -174,9 +176,9 @@ export const DEFAULT_BRIDGE_PICKER_MODELS = [
   "claude-sonnet-5",
   "claude-haiku-4-5",
   "gpt-6-astra",
-  "gpt-5.6-sol",
+  "gpt-6-sol",
   "gpt-5.6-terra",
-  "gpt-5.6-luna",
+  "gpt-6-luna",
 ] as const;
 
 export const KNOWN_MODELS: ModelInfo[] = [
@@ -244,10 +246,16 @@ export const KNOWN_MODELS: ModelInfo[] = [
     aliases: ["astra", "gpt6"],
   },
   {
+    id: "gpt-6-sol",
+    provider: "codex",
+    label: "GPT-6 Sol",
+    aliases: ["sol", "sol6", "codex", "gpt"],
+  },
+  {
     id: "gpt-5.6-sol",
     provider: "codex",
     label: "GPT-5.6 Sol",
-    aliases: ["sol", "gpt5.6", "codex", "gpt"],
+    aliases: ["sol5.6", "gpt5.6"],
   },
   {
     id: "gpt-5.6-terra",
@@ -256,14 +264,20 @@ export const KNOWN_MODELS: ModelInfo[] = [
     aliases: ["terra"],
   },
   {
+    id: "gpt-6-luna",
+    provider: "codex",
+    label: "GPT-6 Luna",
+    aliases: ["luna", "luna6"],
+  },
+  {
     id: "gpt-5.6-luna",
     provider: "codex",
     label: "GPT-5.6 Luna",
-    aliases: ["luna"],
+    aliases: ["luna5.6"],
   },
   // Retired (operator decision: drop 5.5/5.4 and spark) but
   // kept resolvable for old sessions' labels/pricing — toPiModel
-  // reroutes any dispatch of them to a 5.6 model (see RETIRED_CODEX_REROUTE
+  // reroutes any dispatch of them to a current model (see RETIRED_CODEX_REROUTE
   // for why: 272k backend window − 128k output reservation leaves a 144k
   // input cap, which our ~125k fixed session payload turns into a
   // compact-every-turn loop).
@@ -343,11 +357,11 @@ export const DIAL_ORACLE_AGENTS: Record<
       "architecture decisions, deep debugging, reviewing significant work. Read-only advisor.",
   },
   "oracle-sol": {
-    model: "openai/gpt-5.6-sol",
+    model: "openai/gpt-6-sol",
     variant: "xhigh",
-    label: "GPT-5.6 Sol",
+    label: "GPT-6 Sol",
     description:
-      "Oracle: senior-engineer second opinion on GPT-5.6 Sol at extra-high reasoning — " +
+      "Oracle: senior-engineer second opinion on GPT-6 Sol at extra-high reasoning — " +
       "plan review, architecture decisions, deep debugging, reviewing significant work. " +
       "Read-only advisor.",
   },
@@ -427,7 +441,7 @@ export const DIAL_PRESETS: DialPreset[] = [
     label: "Dial · High",
     description:
       "Deep reasoning for hard tasks — Sol at extra-high effort with a Fable 5.1-high oracle",
-    model: "gpt-5.6-sol",
+    model: "gpt-6-sol",
     effort: "xhigh",
     oracleAgent: "oracle-fable",
   },
@@ -436,7 +450,7 @@ export const DIAL_PRESETS: DialPreset[] = [
     label: "Dial · Medium",
     description:
       "Balanced depth and speed for everyday work — Sol-high with a Sol-xhigh oracle",
-    model: "gpt-5.6-sol",
+    model: "gpt-6-sol",
     effort: "high",
     oracleAgent: "oracle-sol",
   },
@@ -445,7 +459,7 @@ export const DIAL_PRESETS: DialPreset[] = [
     label: "Dial · Low",
     description:
       "Fast edits and small tasks — Luna-high with a Sol-xhigh oracle",
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     effort: "high",
     oracleAgent: "oracle-sol",
   },
@@ -548,7 +562,7 @@ export const ORCHESTRATOR_WORKER_AGENTS: Record<
         label: "Haiku 4.5",
       },
       openai: {
-        model: "openai/gpt-5.6-luna",
+        model: "openai/gpt-6-luna",
         variant: "low",
         label: "Luna low",
       },
@@ -638,7 +652,7 @@ export const ORCHESTRATOR_PRESETS: OrchestratorPreset[] = [
     id: "orchestrator/sol",
     label: "Orchestrator · Sol",
     description: "Sol xhigh leads planning, review, and integration",
-    model: "gpt-5.6-sol",
+    model: "gpt-6-sol",
     effort: "xhigh",
     workerAgents: ["worker", "worker-fast"],
   },
@@ -795,8 +809,8 @@ export function refreshPickerModels(): void {
       ...piPickerModels(),
       ...configuredPickerModels(),
     ];
-    // Deduplicate after routing: the seeded native id `gpt-5.6-sol` and a
-    // retained compatibility id `pi/openai/gpt-5.6-sol` are different input
+    // Deduplicate after routing: the seeded native id `gpt-6-sol` and a
+    // retained compatibility id `pi/openai/gpt-6-sol` are different input
     // strings, but both become the same picker row.
     const ids = new Set<string>();
     for (const configured of configuredModels) {
@@ -814,12 +828,12 @@ export function refreshPickerModels(): void {
 }
 refreshPickerModels();
 
-/** Per-provider defaults: claude-fable-5-1 for Anthropic, gpt-5.6-sol for OpenAI. */
+/** Per-provider defaults: claude-fable-5-1 for Anthropic, gpt-6-sol for OpenAI. */
 export const DEFAULT_CLAUDE_MODEL = "claude-fable-5-1";
-export const DEFAULT_CODEX_MODEL = "gpt-5.6-sol";
+export const DEFAULT_CODEX_MODEL = "gpt-6-sol";
 export const BEST_AVAILABLE_CODEX_MODEL = "codex-best-available";
 
-const CODEX_MODEL_ORDER = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+const CODEX_MODEL_ORDER = ["gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna"];
 
 /**
  * Fallback ROUTING tiers (higher = smarter). NOT an absolute capability
@@ -835,11 +849,11 @@ const CODEX_MODEL_ORDER = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 const FALLBACK_TIER: Record<string, number> = {
   "claude-fable-5-1": 3,
   "gpt-6-astra": 3,
-  "gpt-5.6-sol": 3,
+  "gpt-6-sol": 3,
   "claude-opus-5-5": 3,
   "claude-opus-5": 3,
   "gpt-5.6-terra": 3,
-  "gpt-5.6-luna": 3,
+  "gpt-6-luna": 3,
   "claude-opus-4-8": 2,
   "gpt-5.5": 2,
   "claude-sonnet-5": 1,
@@ -861,12 +875,12 @@ const FALLBACK_TIER: Record<string, number> = {
  */
 const FALLBACK_DESTINATIONS = [
   "gpt-6-astra",
-  "gpt-5.6-sol",
-  // Prefer Opus before the cheaper 5.6 siblings once Sol is unavailable.
+  "gpt-6-sol",
+  // Prefer Opus before Terra/Luna once Sol is unavailable.
   "claude-opus-5-5",
   // Terra/Luna remain automatic top-tier fallbacks after Opus.
   "gpt-5.6-terra",
-  "gpt-5.6-luna",
+  "gpt-6-luna",
   // gpt-5.5 / gpt-5.4 / gpt-5.4-mini / spark removed 2026-07-25: retired
   // 272k-window models (RETIRED_CODEX_REROUTE) — falling back onto them would
   // land every session in the compact-every-turn loop.
@@ -1007,7 +1021,7 @@ export const DEFAULT_FALLBACK_MODEL: string | undefined = (() => {
 
 /** Haiku is primarily used for fast/cheap work. When its Claude pool is dry,
  * keep that work automatic and cross providers to the matching OpenAI tier. */
-export const DEFAULT_HAIKU_FALLBACK_MODEL = "gpt-5.6-luna";
+export const DEFAULT_HAIKU_FALLBACK_MODEL = "gpt-6-luna";
 
 export function configuredHaikuFallbackModel(): string | undefined {
   const configured = (
@@ -1094,12 +1108,14 @@ export function interactiveFallbackModel(
   return automaticFallbackModel(primaryModel);
 }
 
-/** Retired OpenAI slugs map onto their 5.6 equivalents. */
+/** Retired OpenAI slugs map onto their current equivalents. */
 const RETIRED_CODEX_REROUTE: Record<string, string> = {
-  "gpt-5.5": "gpt-5.6-sol",
-  "gpt-5.4": "gpt-5.6-sol",
-  "gpt-5.4-mini": "gpt-5.6-luna",
-  "gpt-5.3-codex-spark": "gpt-5.6-luna",
+  "gpt-5.6-sol": "gpt-6-sol",
+  "gpt-5.6-luna": "gpt-6-luna",
+  "gpt-5.5": "gpt-6-sol",
+  "gpt-5.4": "gpt-6-sol",
+  "gpt-5.4-mini": "gpt-6-luna",
+  "gpt-5.3-codex-spark": "gpt-6-luna",
 };
 
 function isAppRoutedPiProvider(provider: string): boolean {
@@ -1248,7 +1264,7 @@ export function interactiveDefaultModel(): string {
   return toPiModel(configured) || toPiModel(getDefaultModel())!;
 }
 
-/** Strip the engine prefix so a mapped id ("Pi/openai/gpt-5.6-sol",
+/** Strip the engine prefix so a mapped id ("Pi/openai/gpt-6-sol",
  *  "pi/anthropic/claude-opus-5", "claude/anthropic/claude-opus-5") resolves to
  *  its native key for tier lookup. Native ids pass through unchanged. */
 function nativeModelId(id: string | undefined | null): string {
@@ -1454,7 +1470,9 @@ const CONTEXT_WINDOWS: Record<string, number> = {
   "claude-sonnet-5": 1_000_000,
   "claude-sonnet-4-6": 1_000_000,
   "claude-haiku-4-5": 200_000,
-  // Codex/GPT — approximate.
+  "gpt-6-sol": 1_050_000,
+  "gpt-6-luna": 1_050_000,
+  // Older Codex/GPT — approximate.
   "gpt-5.5": 400_000,
   "gpt-5.4": 400_000,
   "gpt-5.4-mini": 400_000,

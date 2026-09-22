@@ -44,23 +44,25 @@ engine and dispatch id `routeModel()` returns for it.
 | `claude-sonnet-5` | Claude Sonnet 5 | pi | `pi/anthropic/claude-sonnet-5` |
 | `claude-sonnet-4-6` | Claude Sonnet 4.6 | pi | `pi/anthropic/claude-sonnet-4-6` |
 | `claude-haiku-4-5` | Claude Haiku 4.5 | pi | `pi/anthropic/claude-haiku-4-5` |
-| `codex-best-available` | Best available (Codex) | pi | `pi/openai/gpt-5.6-sol` |
+| `codex-best-available` | Best available (Codex) | pi | `pi/openai/gpt-6-sol` |
 | `gpt-6-astra` | GPT-6 Astra | pi | `pi/openai/gpt-6-astra` |
-| `gpt-5.6-sol` | GPT-5.6 Sol | pi | `pi/openai/gpt-5.6-sol` |
+| `gpt-6-sol` | GPT-6 Sol | pi | `pi/openai/gpt-6-sol` |
+| `gpt-5.6-sol` | GPT-5.6 Sol | pi | `pi/openai/gpt-6-sol` |
 | `gpt-5.6-terra` | GPT-5.6 Terra | pi | `pi/openai/gpt-5.6-terra` |
-| `gpt-5.6-luna` | GPT-5.6 Luna | pi | `pi/openai/gpt-5.6-luna` |
-| `gpt-5.5` | GPT-5.5 (Codex) | pi | `pi/openai/gpt-5.6-sol` |
-| `gpt-5.4` | GPT-5.4 (Codex) | pi | `pi/openai/gpt-5.6-sol` |
-| `gpt-5.4-mini` | GPT-5.4 mini (Codex) | pi | `pi/openai/gpt-5.6-luna` |
-| `gpt-5.3-codex-spark` | GPT-5.3 Codex Spark | pi | `pi/openai/gpt-5.6-luna` |
+| `gpt-6-luna` | GPT-6 Luna | pi | `pi/openai/gpt-6-luna` |
+| `gpt-5.6-luna` | GPT-5.6 Luna | pi | `pi/openai/gpt-6-luna` |
+| `gpt-5.5` | GPT-5.5 (Codex) | pi | `pi/openai/gpt-6-sol` |
+| `gpt-5.4` | GPT-5.4 (Codex) | pi | `pi/openai/gpt-6-sol` |
+| `gpt-5.4-mini` | GPT-5.4 mini (Codex) | pi | `pi/openai/gpt-6-luna` |
+| `gpt-5.3-codex-spark` | GPT-5.3 Codex Spark | pi | `pi/openai/gpt-6-luna` |
 | `dial/ultra` | Dial · Ultra | pi | `pi/anthropic/claude-fable-5-1` |
-| `dial/high` | Dial · High | pi | `pi/openai/gpt-5.6-sol` |
-| `dial/medium` | Dial · Medium | pi | `pi/openai/gpt-5.6-sol` |
-| `dial/low` | Dial · Low | pi | `pi/openai/gpt-5.6-luna` |
+| `dial/high` | Dial · High | pi | `pi/openai/gpt-6-sol` |
+| `dial/medium` | Dial · Medium | pi | `pi/openai/gpt-6-sol` |
+| `dial/low` | Dial · Low | pi | `pi/openai/gpt-6-luna` |
 | `dial/opus-fable` | Opus 5.5 + Fable oracle | pi | `pi/anthropic/claude-opus-5-5` |
 | `orchestrator/fable` | Orchestrator · Fable 5.1 | pi | `pi/anthropic/claude-fable-5-1` |
 | `orchestrator/fable-sol` | Orchestrator · Fable + Astra | pi | `pi/anthropic/claude-fable-5-1` |
-| `orchestrator/sol` | Orchestrator · Sol | pi | `pi/openai/gpt-5.6-sol` |
+| `orchestrator/sol` | Orchestrator · Sol | pi | `pi/openai/gpt-6-sol` |
 
 Every accepted id resolves to Pi before dispatch.
 

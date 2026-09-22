@@ -76,7 +76,7 @@ for (const model of ["luna", "terra"] as const) {
         new AbortController().signal,
       ),
     ).toBe("The retry limit prevents duplicate work.");
-    expect(body?.model).toBe(`gpt-5.6-${model}`);
+    expect(body?.model).toBe(model === "luna" ? "gpt-6-luna" : "gpt-5.6-terra");
     expect(body?.reasoning).toEqual({ effort: "low" });
     expect(body?.tools).toEqual([]);
     expect(body?.store).toBe(false);
@@ -104,8 +104,8 @@ test("conversation target resolves the session's stored model and effort like di
     effort: "high",
   });
   expect(
-    sessionConversationModel({ model: "pi/openai/gpt-5.6-sol", effort: "" }),
-  ).toEqual({ model: "pi/openai/gpt-5.6-sol" });
+    sessionConversationModel({ model: "pi/openai/gpt-6-sol", effort: "" }),
+  ).toEqual({ model: "pi/openai/gpt-6-sol" });
   // Unknown effort strings never reach the one-shot options.
   expect(
     sessionConversationModel({ model: "claude-opus-5-5", effort: "turbo" }),
@@ -185,7 +185,7 @@ test("helper endpoint requires human authentication and the exact target allowli
     ["luna", false, 401],
     ["conversation", false, 401],
     ["other-model", true, 400],
-    ["gpt-5.6-sol", true, 400],
+    ["gpt-6-sol", true, 400],
     ["session_agent", true, 400],
   ] as const) {
     const req = new Request(

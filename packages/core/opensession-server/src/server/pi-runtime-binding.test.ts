@@ -179,6 +179,77 @@ describe("createPiRuntimeBinding", () => {
     expect(await create[1].credentials.read("openai-codex")).toBeUndefined();
   });
 
+  for (const account of [oauth, apiKey]) {
+    for (const [modelID, rates] of [
+      ["gpt-6-sol", { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }],
+      [
+        "gpt-6-luna",
+        { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+      ],
+    ] as const) {
+      test(`registers ${modelID} metadata for ${account.kind} accounts`, async () => {
+        const h = harness({ account });
+        const binding = await createPiRuntimeBinding(
+          input("openai", modelID, h),
+        );
+        const provider = account.kind === "home" ? "openai-codex" : "openai";
+        expect(binding.model.provider).toBe(provider);
+        expect(binding.usesOpenaiOAuth).toBe(account.kind === "home");
+        const registration = h.calls.find(
+          ([name]) => name === "registerProvider",
+        );
+        expect(registration?.[1]).toBe(provider);
+        expect(registration?.[2].models).toEqual([
+          expect.objectContaining({
+            id: modelID,
+            reasoning: true,
+            input: ["text", "image"],
+            contextWindow: 1_050_000,
+            maxTokens: 128_000,
+            thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
+            cost: {
+              ...rates,
+              tiers: [
+                {
+                  inputTokensAbove: 272_000,
+                  input: rates.input * 2,
+                  output: rates.output * 1.5,
+                  cacheRead: rates.cacheRead * 2,
+                  cacheWrite: rates.cacheWrite * 2,
+                },
+              ],
+            },
+          }),
+        ]);
+      });
+    }
+  }
+
+  test("the bundled Pi runtime resolves GPT-6 Sol and Luna for both account types", async () => {
+    for (const account of [oauth, apiKey]) {
+      for (const modelID of ["gpt-6-sol", "gpt-6-luna"]) {
+        const h = harness({ account });
+        h.deps.loadSdk = prewarmPiSdk;
+        const binding = await createPiRuntimeBinding(
+          input("openai", modelID, h),
+        );
+        expect(binding.model.id).toBe(modelID);
+        expect(binding.model.api).toBe(
+          account.kind === "home"
+            ? "openai-codex-responses"
+            : "openai-responses",
+        );
+        expect(binding.model.contextWindow).toBe(1_050_000);
+        expect(binding.model.maxTokens).toBe(128_000);
+        expect(binding.model.thinkingLevelMap?.max).toBe("max");
+        expect(binding.model.cost.input).toBe(
+          modelID === "gpt-6-sol" ? 2 : 0.1,
+        );
+        expect(binding.model.cost.tiers?.[0].inputTokensAbove).toBe(272_000);
+      }
+    }
+  });
+
   test("registers Anthropic in-process before looking up the model", async () => {
     const h = harness({ transport: "inprocess" });
     await createPiRuntimeBinding(input("anthropic", "claude-test", h));

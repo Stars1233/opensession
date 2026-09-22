@@ -111,15 +111,15 @@ describe("buildRunInstructions", () => {
         workers: [
           {
             role: "Implementation worker",
-            model: "pi/openai/gpt-5.6-sol",
-            modelLabel: "GPT-5.6 Sol",
+            model: "pi/openai/gpt-6-sol",
+            modelLabel: "GPT-6 Sol",
           },
         ],
       },
     });
 
     expect(prompt).toContain(
-      "Implementation worker: GPT-5.6 Sol via `pi/openai/gpt-5.6-sol`",
+      "Implementation worker: GPT-6 Sol via `pi/openai/gpt-6-sol`",
     );
     expect(prompt).toContain("opensession-sessions spawn_task");
   });

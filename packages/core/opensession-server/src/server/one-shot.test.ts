@@ -12,9 +12,7 @@ describe("oneShot", () => {
     expect(oneShotModel("claude-haiku-4-5")).toBe(
       "pi/anthropic/claude-haiku-4-5",
     );
-    expect(oneShotModel("pi/openai/gpt-5.6-luna")).toBe(
-      "pi/openai/gpt-5.6-luna",
-    );
+    expect(oneShotModel("pi/openai/gpt-6-luna")).toBe("pi/openai/gpt-6-luna");
     expect(oneShotModel("pi/anthropic/claude-opus-5-5")).toBe(
       "pi/anthropic/claude-opus-5-5",
     );
@@ -30,13 +28,13 @@ describe("oneShot", () => {
         "pi/anthropic/claude-haiku-4-5",
         "no usable Claude account in the pool",
       ),
-    ).toBe("pi/openai/gpt-5.6-luna");
+    ).toBe("pi/openai/gpt-6-luna");
     expect(
       haikuOneShotFallbackModel(
         "pi/anthropic/claude-haiku-4-5",
         "timed out after 120000ms",
       ),
-    ).toBe("pi/openai/gpt-5.6-luna");
+    ).toBe("pi/openai/gpt-6-luna");
   });
 
   test("uses OpenAI for default name generation on Codex-only installs", () => {
@@ -46,7 +44,7 @@ describe("oneShot", () => {
     const primary = oneShotModel("claude-haiku-4-5");
     expect(haikuOneShotShouldFallOver(error)).toBe(true);
     expect(oneShotFallbackModels(primary, error, undefined)).toEqual([
-      "pi/openai/gpt-5.6-luna",
+      "pi/openai/gpt-6-luna",
     ]);
   });
 
@@ -63,10 +61,7 @@ describe("oneShot", () => {
       ),
     ).toBeUndefined();
     expect(
-      haikuOneShotFallbackModel(
-        "pi/openai/gpt-5.6-luna",
-        "usage limit reached",
-      ),
+      haikuOneShotFallbackModel("pi/openai/gpt-6-luna", "usage limit reached"),
     ).toBeUndefined();
   });
 
@@ -75,16 +70,16 @@ describe("oneShot", () => {
       oneShotFallbackModels(
         "pi/anthropic/claude-fable-5-1",
         "no usable Claude account in the pool (all exhausted or sidelined)",
-        ["gpt-6-astra", "gpt-5.6-sol"],
+        ["gpt-6-astra", "gpt-6-sol"],
       ),
-    ).toEqual(["pi/openai/gpt-6-astra", "pi/openai/gpt-5.6-sol"]);
+    ).toEqual(["pi/openai/gpt-6-astra", "pi/openai/gpt-6-sol"]);
   });
 
   test("skips fallbacks on the primary's own provider and the primary itself", () => {
     expect(
       oneShotFallbackModels("pi/openai/gpt-6-astra", "usage limit reached", [
         "gpt-6-astra",
-        "gpt-5.6-sol",
+        "gpt-6-sol",
         "claude-opus-5-5",
       ]),
     ).toEqual(["pi/anthropic/claude-opus-5-5"]);
@@ -104,7 +99,7 @@ describe("oneShot", () => {
         "no usable Claude account in the pool",
         ["gpt-6-astra"],
       ),
-    ).toEqual(["pi/openai/gpt-5.6-luna"]);
+    ).toEqual(["pi/openai/gpt-6-luna"]);
     expect(
       oneShotFallbackModels(
         "pi/anthropic/claude-fable-5-1",

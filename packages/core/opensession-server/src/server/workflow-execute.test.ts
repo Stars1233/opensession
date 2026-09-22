@@ -492,7 +492,7 @@ describe("workflowExecutor", () => {
       makeCtx({ defaultModel: "gpt-5.5" }),
     );
     expect(calls[0].model).toBe("claude-opus-5-5");
-    expect(calls[1].model).toBe("gpt-5.6-sol");
+    expect(calls[1].model).toBe("gpt-6-sol");
   });
 
   test("effort: sent when the model offers the level, dropped when it doesn't", async () => {
