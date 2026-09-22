@@ -378,6 +378,7 @@ credentials its setup page marks as required. Common operator-facing variables:
 | Var                                              | Default                               | Purpose                                                                         |
 | ------------------------------------------------ | ------------------------------------- | ------------------------------------------------------------------------------- |
 | `OPENSESSION_CLAUDE_BIN`                         | `claude` found on `PATH`              | Claude Code CLI the Anthropic bridge spawns                                     |
+| `OPENSESSION_CLAUDE_AUTO_UPDATE`                 | on                                    | `0` stops the server from running `claude update` when the CLI is too old       |
 | `OPENSESSION_CLAUDE_ACCOUNTS_PATH`               | `~/.opensession/claude-accounts.json` | Claude account store override                                                   |
 | `OPENSESSION_PI_CONFIG`                          | `~/.opensession/pi.json`              | Pi engine config path override (primarily a test/verification seam)             |
 | `OPENSESSION_MODEL_PROVIDERS_CONFIG`             | `~/.opensession/model-providers.json` | provider API-key config path override (primarily a test/verification seam)      |

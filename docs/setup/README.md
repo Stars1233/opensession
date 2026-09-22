@@ -88,7 +88,10 @@ separate app listener on 3850 serves the private UI and API.
   `bun install`. Nothing installs a separate `pi` binary on the box.
 - The `claude` CLI (Claude Code) is required for Anthropic models
   (`OPENSESSION_CLAUDE_BIN`, default: `claude` found on `PATH`). The installer
-  adds it by default.
+  adds it by default. Newer Claude models need a newer CLI, so on start the
+  server runs `claude update` when the installed version is older than the
+  release's minimum. Set `OPENSESSION_CLAUDE_AUTO_UPDATE=0` to manage the CLI
+  yourself; `opensession doctor` still warns when it is too old.
 - The `codex` CLI is required to add a ChatGPT subscription account through the
   in-app device flow. The installer adds it by default.
 - `--no-engine` skips both model CLIs; `--no-codex` skips only Codex.

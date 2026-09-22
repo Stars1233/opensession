@@ -19,7 +19,7 @@ FROM ubuntu:24.04
 
 # --- version pins (bump these when the host bumps; see README) ---
 ARG BUN_VERSION=1.4.0
-ARG CLAUDE_VERSION=2.1.218
+ARG CLAUDE_VERSION=2.1.280
 ARG NODE_MAJOR=24
 
 # Locale parity note: the host runs a full en_US.UTF-8 locale; the image uses
