@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
+import { NativeVoiceAudio } from "./native-voice-audio";
 import {
   SessionVoiceClient,
   type SessionVoiceState,
@@ -574,4 +575,85 @@ test("successful task handoffs ask for a short acknowledgement, never a repeated
       ),
     ),
   ).toBe(true);
+});
+
+test("Mac calls use native audio, pause the engine, clear barge-in playback, and release it", async () => {
+  let browserCapture = 0;
+  const h = setup({
+    mic: async () => {
+      browserCapture++;
+      throw new Error("Browser capture must not open");
+    },
+  });
+  Object.assign(h.windowEvents, { os1: { voiceAudio: {} } });
+  install("MediaStream", {
+    value: class {
+      getTracks() {
+        return [];
+      }
+    },
+  });
+  const start = spyOn(NativeVoiceAudio.prototype, "start").mockResolvedValue(
+    new MediaStream(),
+  );
+  const stop = spyOn(NativeVoiceAudio.prototype, "stop").mockImplementation(
+    () => {},
+  );
+  const pause = spyOn(
+    NativeVoiceAudio.prototype,
+    "setPaused",
+  ).mockImplementation(() => {});
+  const clear = spyOn(
+    NativeVoiceAudio.prototype,
+    "clearPlayback",
+  ).mockImplementation(() => {});
+  try {
+    await h.client.start();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(browserCapture).toBe(0);
+    h.client.setPaused(true);
+    h.client.setPaused(false);
+    expect(pause.mock.calls).toEqual([[true], [false]]);
+    h.emit({ type: "input_audio_buffer.speech_started" });
+    h.emit({ type: "output_audio_buffer.cleared" });
+    expect(clear).toHaveBeenCalledTimes(2);
+    h.client.stop();
+    expect(stop).toHaveBeenCalledTimes(1);
+  } finally {
+    h.client.stop();
+    start.mockRestore();
+    stop.mockRestore();
+    pause.mockRestore();
+    clear.mockRestore();
+  }
+});
+
+test("native startup failure is shown without falling back to browser microphone or a paid call", async () => {
+  let browserCapture = 0;
+  const h = setup({
+    mic: async () => {
+      browserCapture++;
+      throw new Error("No fallback");
+    },
+  });
+  Object.assign(h.windowEvents, { os1: { voiceAudio: {} } });
+  const start = spyOn(NativeVoiceAudio.prototype, "start").mockRejectedValue(
+    new Error("Selected microphone disconnected"),
+  );
+  const stop = spyOn(NativeVoiceAudio.prototype, "stop").mockImplementation(
+    () => {},
+  );
+  try {
+    await h.client.start();
+    expect(browserCapture).toBe(0);
+    expect(h.states.at(-1)).toEqual([
+      "error",
+      "Selected microphone disconnected",
+    ]);
+    expect(h.sent).toEqual([]);
+  } finally {
+    h.client.stop();
+    start.mockRestore();
+    stop.mockRestore();
+  }
 });

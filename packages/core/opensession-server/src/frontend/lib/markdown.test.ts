@@ -1622,6 +1622,81 @@ describe("session media placed in the body", () => {
   });
 });
 
+describe("Tella video links", () => {
+  const pretty = "https://www.tella.tv/video/my-demo-3592";
+  const player = "https://www.tella.tv/video/my-demo-3592/embed";
+  const frame =
+    `<iframe class="md-embed-frame" src="${player}" title="Tella video"` +
+    ` allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+
+  it("frames a pasted link as its player, captioned by the link", () => {
+    const html = renderMarkdown(`Here it is.\n\n${pretty}\n\nDone.`);
+    expect(html).toContain(
+      `<figure class="md-figure">${frame}` +
+        `<figcaption class="md-figcaption"><a href="${pretty}" target="_blank" rel="noopener noreferrer">www.tella.tv/video/my-demo-3592</a></figcaption></figure>`,
+    );
+    expect(html).not.toContain(`<p><a href="${pretty}"`);
+    expect(html).toContain("<p>Done.</p>");
+  });
+
+  it("captions a labelled link with its label", () => {
+    const html = renderMarkdown(`[Watch the demo](${pretty}/view)`);
+    expect(html).toContain(frame);
+    expect(html).toContain(
+      `<figcaption class="md-figcaption"><a href="${pretty}/view" target="_blank" rel="noopener noreferrer">Watch the demo</a></figcaption>`,
+    );
+  });
+
+  it("keeps a link in a sentence in place and plays it after", () => {
+    const html = renderMarkdown(`Recorded at ${pretty}/view for you.`);
+    expect(html).toContain(
+      `<p>Recorded at <a href="${pretty}/view" target="_blank" rel="noopener noreferrer">${pretty}/view</a> for you.</p>\n` +
+        `<figure class="md-figure">${frame}</figure>`,
+    );
+    expect(html).not.toContain("figcaption");
+  });
+
+  it("plays a link from a tight list item inside the item", () => {
+    const html = renderMarkdown(`- Demo: ${pretty}\n- Notes`);
+    expect(html).toContain(
+      `<li>Demo: <a href="${pretty}" target="_blank" rel="noopener noreferrer">${pretty}</a>` +
+        `<figure class="md-figure">${frame}</figure>\n</li>`,
+    );
+    expect(html).toContain("<li>Notes</li>");
+  });
+
+  it("plays each video once however often it is linked", () => {
+    const html = renderMarkdown(
+      `See ${pretty} and again ${pretty}/view, plus https://www.tella.tv/video/other-1/view.\n\n` +
+        `- Again: ${pretty}/embed?title=0\n\n${pretty}`,
+    );
+    expect(html.split("<iframe").length - 1).toBe(2);
+    expect(html.indexOf(player)).toBeLessThan(
+      html.indexOf("https://www.tella.tv/video/other-1/embed"),
+    );
+    // The repeats stay links, the last one a plain paragraph.
+    expect(html).toContain(`<li>Again: <a href="${pretty}/embed?title=0"`);
+    expect(html).toContain(`<p><a href="${pretty}"`);
+  });
+
+  it("starts each message afresh", () => {
+    renderMarkdown(`${pretty}?x=1`);
+    expect(renderMarkdown(`${pretty}?x=2`)).toContain("<iframe");
+  });
+
+  it("leaves other Tella pages and other hosts as links", () => {
+    for (const href of [
+      "https://www.tella.tv/pricing",
+      "https://tella.example/video/x-1",
+      "http://www.tella.tv/video/x-1",
+    ]) {
+      const html = renderMarkdown(href);
+      expect(html).not.toContain("<iframe");
+      expect(html).toContain(`<p><a href="${href}"`);
+    }
+  });
+});
+
 describe("markdownAffordable", () => {
   const fill = (kb: number, piece: string) => {
     let out = "";

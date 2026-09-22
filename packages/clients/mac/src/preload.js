@@ -3,6 +3,75 @@
 // service worker doesn't reach Electron's dock badge).
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Realtime voice: a signed native helper owns the microphone and speaker
+// through Apple's voice-processing engine (echo cancellation, per-session
+// input/output choice, other-audio ducking). The renderer exchanges 48 kHz
+// mono Float32 PCM in both directions and never opens the microphone itself.
+// Device ids are persistent CoreAudio UIDs; "" means the system default.
+//
+// The namespace exists only when the main process found the packaged helper
+// and passed the flag below, so its presence is the capability check: a dev
+// run without the helper keeps the frontend's browser path.
+//
+// Both directions are flow controlled without the frontend taking part:
+// every microphone packet is acknowledged here after delivery, and the main
+// process acknowledges every push. Beyond the caps, packets are dropped
+// rather than queued in IPC.
+const VOICE_AUDIO_FLAG = "--os1-voice-audio";
+const MAX_OUTSTANDING_PUSHES = 16;
+
+function voiceAudioBridge() {
+  if (!process.argv.includes(VOICE_AUDIO_FLAG)) return {};
+  let outstandingPushes = 0;
+  const listeners = new Set();
+  ipcRenderer.on("os1:voice-audio-push-ack", () => {
+    outstandingPushes = Math.max(0, outstandingPushes - 1);
+  });
+  ipcRenderer.on("os1:voice-audio-audio", (_event, payload) => {
+    for (const listener of listeners) {
+      try {
+        listener(payload);
+      } catch {}
+    }
+    ipcRenderer.send("os1:voice-audio-audio-ack", payload?.id);
+  });
+  return {
+    voiceAudio: {
+      devices: () => ipcRenderer.invoke("os1:voice-audio-devices"),
+      start: (id, options) => {
+        outstandingPushes = 0;
+        return ipcRenderer.invoke("os1:voice-audio-start", id, {
+          inputDeviceId: String(options?.inputDeviceId ?? ""),
+          outputDeviceId: String(options?.outputDeviceId ?? ""),
+          ducking: options?.ducking === true,
+        });
+      },
+      push: (id, samples) => {
+        if (outstandingPushes >= MAX_OUTSTANDING_PUSHES) return;
+        outstandingPushes += 1;
+        ipcRenderer.send("os1:voice-audio-push", id, samples);
+      },
+      setPaused: (id, paused) =>
+        ipcRenderer.send("os1:voice-audio-pause", id, paused === true),
+      clearPlayback: (id) => ipcRenderer.send("os1:voice-audio-clear", id),
+      stop: (id) => {
+        outstandingPushes = 0;
+        ipcRenderer.send("os1:voice-audio-stop", id);
+      },
+      onAudio: (cb) => {
+        listeners.add(cb);
+        return () => listeners.delete(cb);
+      },
+      onError: (cb) => {
+        const listener = (_event, payload) => cb(payload);
+        ipcRenderer.on("os1:voice-audio-error", listener);
+        return () =>
+          ipcRenderer.removeListener("os1:voice-audio-error", listener);
+      },
+    },
+  };
+}
+
 contextBridge.exposeInMainWorld("os1", {
   desktop: true,
   // Capability flag rather than `desktop` alone: the remotely served frontend
@@ -55,6 +124,7 @@ contextBridge.exposeInMainWorld("os1", {
       return () => ipcRenderer.removeListener("os1:dictation-text", listener);
     },
   },
+  ...voiceAudioBridge(),
   // Which Open Session server this shell talks to. Only the shell's own
   // file:// pages (setup.html, offline.html) call these, and main.js refuses
   // them from anywhere else: the app served BY a server must not be able to

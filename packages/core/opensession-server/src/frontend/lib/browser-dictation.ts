@@ -100,7 +100,12 @@ function startDesktopDictation(
   let processor: ScriptProcessorNode;
   let silentOutput: GainNode;
   try {
-    context = new Ctx();
+    // Recognition only observes PCM. Do not open a second physical output
+    // when the native voice engine already owns the selected devices.
+    const options: AudioContextOptions & { sinkId: { type: "none" } } = {
+      sinkId: { type: "none" },
+    };
+    context = new Ctx(options);
     source = context.createMediaStreamSource(stream);
     processor = context.createScriptProcessor(2_048, 1, 1);
     silentOutput = context.createGain();

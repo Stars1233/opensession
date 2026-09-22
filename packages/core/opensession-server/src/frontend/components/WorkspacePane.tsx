@@ -38,6 +38,7 @@ import { useSidePanel } from "../hooks/useSidePanel";
 import {
   IconArchive,
   IconArrowUpToLine,
+  IconChevronLeft,
   IconChevronRight,
   IconDotsHorizontal,
   IconHistory,
@@ -55,7 +56,12 @@ import { toast } from "../ui/toast";
 import { Tooltip } from "../ui/tooltip";
 import { OverflowFadeText } from "../ui/overflow-fade-text";
 import { cn } from "../ui/cn";
-import { TopBar, TopBarActions, TopBarLeading } from "../ui/top-bar";
+import {
+  PhoneTopBarAction,
+  TopBar,
+  TopBarActions,
+  TopBarLeading,
+} from "../ui/top-bar";
 import {
   PANEL_BODY,
   PANEL_OVERLAY,
@@ -97,13 +103,12 @@ import { mainSession } from "../lib/landing-session";
 import { sessionCarriesPr } from "../lib/session-prs";
 import type { NewTabMorphOrigin } from "../lib/session-tabs-types";
 import { ArchivedSessionItems } from "./ArchivedSessionItems";
-import {
-  workspaceSummaryOpen,
-  WS_SUMMARY_ROOM_W,
-} from "../lib/workspace-summary-open";
+import { WS_SUMMARY_ROOM_W } from "../lib/workspace-summary-open";
 
 interface Props {
   workspace: Workspace;
+  /** Leave focused phone Review and restore workspace navigation. */
+  onBack?: () => void;
   /** The workspace's live sessions, strip order (empty for a session-less workspace). */
   workspaceSessions: UnifiedSession[];
   /** All sessions — the Review pane matches the PR target against any of them. */
@@ -174,6 +179,7 @@ const VIEW_MAIN =
  */
 export function WorkspacePane({
   workspace,
+  onBack,
   workspaceSessions,
   sessions,
   tab,
@@ -604,8 +610,6 @@ export function WorkspacePane({
   const [reviewSessionActionTarget, setReviewSessionActionTarget] =
     useState<HTMLDivElement | null>(null);
   const [headerW, setHeaderW] = useState(0);
-  const [reviewSummaryOpen, setReviewSummaryOpen] =
-    useState(workspaceSummaryOpen);
   useLayoutEffect(() => {
     const el = headerRef.current;
     if (!el) return;
@@ -622,13 +626,6 @@ export function WorkspacePane({
     return () => observer.disconnect();
   }, [topbarEl]);
   const reviewSummaryHasRoom = headerW === 0 || headerW >= WS_SUMMARY_ROOM_W;
-  const reviewSummaryVisible =
-    tab === "review" &&
-    !!presentationSession &&
-    reviewSummaryOpen &&
-    reviewSummaryHasRoom &&
-    !panelOpen &&
-    !isPhone;
 
   function commitWorkspaceRename() {
     const name = renameDraft?.trim();
@@ -838,14 +835,14 @@ export function WorkspacePane({
             session={presentationSession}
             anchor={headerActionsRef}
             onOpenPanelTab={() => setPanelOpen(true)}
-            onOpenPr={() => {}}
+            onOpenPr={() => setReviewPage("overview")}
             onOpenStackPr={onOpenPr}
-            onOpenChecks={() => {}}
+            onOpenChecks={() => setReviewPage("overview")}
             onOpenSession={onOpenSession}
             send={connected && !presentationSession.archived ? send : undefined}
-            onOpenChange={setReviewSummaryOpen}
             tabStripVisible={tabStripVisible}
             reviewMode
+            forcePopover
             hasRoom={reviewSummaryHasRoom}
           />
         )}
@@ -883,7 +880,15 @@ export function WorkspacePane({
 
   if (tab === "review" && reviewTarget) {
     return withPanel(
-      <div className={cn(VIEW_MAIN, "h-full min-h-0 bg-surface")}>
+      <div
+        className={cn(
+          VIEW_MAIN,
+          "h-full min-h-0 bg-surface",
+          isPhone &&
+            !tabStripVisible &&
+            "phone:pt-[env(safe-area-inset-top,0px)]",
+        )}
+      >
         <PrPanel
           onOpenPr={onOpenPr}
           key={`${reviewTarget.repo}:${reviewTarget.branch}`}
@@ -898,11 +903,18 @@ export function WorkspacePane({
             reviewSession ? () => onOpenSession(reviewSession.id) : undefined
           }
           walkthrough={presentationSession?.walkthrough}
-          hideWideOverviewRail={Boolean(presentationSession)}
           page={reviewPage}
           onPageChange={setReviewPage}
-          compactToolbar={reviewSummaryVisible}
           flushToolbarTop={!tabStripVisible}
+          phoneNavigation={
+            onBack ? (
+              <PhoneTopBarAction
+                onClick={onBack}
+                aria-label="Back to workspace"
+                icon={<IconChevronLeft size={22} />}
+              />
+            ) : undefined
+          }
         />
       </div>,
     );

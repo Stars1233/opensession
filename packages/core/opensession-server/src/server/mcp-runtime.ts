@@ -81,6 +81,7 @@ interface Entry {
   name: string;
   factory: () => Promise<ServerConn>;
   cacheKey?: string;
+  deferred?: boolean;
 }
 interface RegisteredTool extends McpRuntimeTool {
   entry: Entry;
@@ -109,20 +110,6 @@ function isProxyMcpConfig(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object") return false;
   const cfg = value as { command?: unknown; url?: unknown };
   return typeof cfg.command === "string" || typeof cfg.url === "string";
-}
-
-const VOLATILE_PROXY_ENV = [
-  "OPENSESSION_RPC_TOKEN",
-  "OPENSESSION_RPC_WS_AUTH",
-  "OPENSESSION_RPC_WS_HOST",
-] as const;
-export function legacyProxyToolsCacheKey(cfg: Record<string, unknown>): string {
-  const env =
-    cfg.env && typeof cfg.env === "object"
-      ? { ...(cfg.env as Record<string, unknown>) }
-      : undefined;
-  if (env) for (const key of VOLATILE_PROXY_ENV) delete env[key];
-  return toolsCacheKey(env ? { ...cfg, env } : cfg);
 }
 
 /** Separates SDK instances from the legacy proxy config compatibility shape. */
@@ -415,13 +402,16 @@ export async function createMcpRuntime(opts: {
     entries.push({
       name,
       factory: () => connectExternal(name, value),
-      cacheKey: legacyProxyToolsCacheKey(value),
+      // A proxy lists the current run's scoped server, not a shared catalog.
+      // Never reuse another run's listing, even with identical proxy config.
+      deferred: true,
     });
   }
 
   const tools: RegisteredTool[] = [];
   const byId = new Map<string, RegisteredTool>();
   const pending = new Map<string, Entry>();
+  const failures = new Map<string, string>();
   const register = (entry: Entry, listed: Array<Record<string, unknown>>) => {
     for (const raw of listed) {
       const name = raw.name as string;
@@ -461,6 +451,10 @@ export async function createMcpRuntime(opts: {
     return listed;
   };
   const unavailable = (entry: Entry, started: number, error: unknown) => {
+    failures.set(
+      entry.name,
+      error instanceof Error ? error.message : String(error),
+    );
     console.warn(
       `[mcp-runtime] server "${entry.name}" unavailable, skipping:`,
       error,
@@ -478,7 +472,7 @@ export async function createMcpRuntime(opts: {
       ? validListedTools(readCachedTools(entry.name, entry.cacheKey))
       : undefined;
     if (cached) register(entry, cached);
-    else if (entry.cacheKey) pending.set(entry.name, entry);
+    else if (entry.cacheKey || entry.deferred) pending.set(entry.name, entry);
     else {
       try {
         register(entry, await listEntry(entry));
@@ -523,11 +517,31 @@ export async function createMcpRuntime(opts: {
     },
     async callExact(id, args, options) {
       const started = Date.now();
-      const tool = byId.get(id);
-      if (!tool)
+      if (closed) throw new Error("MCP runtime is closed");
+      const entry = entries
+        .filter((candidate) => id.startsWith(`${candidate.name}_`))
+        .sort((a, b) => b.name.length - a.name.length)[0];
+      const server = entry?.name ?? id.split("_")[0];
+      if (!entry)
         throw new Error(
-          `MCP tool "${id}" is unavailable. Search the catalog first.`,
+          `MCP server "${server}" is not available in this session: not bound for this run.`,
         );
+      // Direct calls must use the same run-scoped discovery as search.
+      await hydrate();
+      const failure = failures.get(server);
+      if (failure)
+        throw new Error(
+          `MCP server "${server}" is not available in this session: ${failure}`,
+        );
+      const tool = byId.get(id);
+      if (!tool) {
+        const name = id.slice(server.length + 1);
+        if (isDeniedTool(server, name, opts.deniedToolIds))
+          throw new Error(
+            `MCP tool "${id}" is not permitted by this run's tool policy.`,
+          );
+        throw new Error(`MCP tool "${name}" not found on server "${server}".`);
+      }
       try {
         if (closed) throw new Error("MCP runtime is closed");
         const conn = await withTimeout(
@@ -535,7 +549,12 @@ export async function createMcpRuntime(opts: {
           timeoutMs,
           `MCP server "${tool.server}" connect timed out`,
           options.signal,
-        );
+        ).catch((error: unknown) => {
+          if (options.signal?.aborted) throw error;
+          throw new Error(
+            `MCP server "${tool.server}" is not available in this session: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
         const result = (await conn.client.callTool(
           {
             name: tool.name,

@@ -21,6 +21,8 @@ const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { execFile } = require("node:child_process");
 const { NativeDictation } = require("./native-dictation");
+const { NativeVoiceAudio } = require("./native-voice-audio");
+const { VoiceAudioBridge } = require("./voice-audio-bridge");
 const { MacKeychainReview } = require("./mac-keychain-ui");
 const macKeychainReview = new MacKeychainReview({
   dialog,
@@ -46,6 +48,8 @@ const {
 } = require("./account-navigation");
 const packageConfig = require("../package.json").opensession || {};
 const nativeDictation = new NativeDictation();
+const nativeVoiceAudio = new NativeVoiceAudio();
+let voiceAudioBridge = null;
 const { profileId } = require("./tailscale");
 const { TailnetWindows, fromLocalPage } = require("./tailnet-ui");
 let tailnetWindows = null;
@@ -975,6 +979,12 @@ function createWindow(initialURL = null, initialAccountID = null) {
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
+      // The preload advertises window.os1.voiceAudio only when told to, so a
+      // dev run without the packaged helper keeps the frontend's browser
+      // path. Hidden background windows never get it.
+      additionalArguments: nativeVoiceAudio.available()
+        ? ["--os1-voice-audio"]
+        : [],
     },
   });
 
@@ -1626,6 +1636,29 @@ app.whenReady().then(async () => {
     nativeDictation.cancel(id);
   });
 
+  // ---- Realtime voice audio -------------------------------------------------
+  // A signed native helper owns the microphone and speaker for one voice
+  // session at a time (echo cancellation, per-session device choice,
+  // other-audio ducking). The bridge decides who may drive it: the main frame
+  // of a visible, focused app window, from before the microphone prompt until
+  // it stops, navigates, crashes or closes.
+  voiceAudioBridge = new VoiceAudioBridge({
+    native: nativeVoiceAudio,
+    inWindow,
+    foreground: (wc) => {
+      const owner = BrowserWindow.fromWebContents(wc);
+      return (
+        !!owner &&
+        appWindows.has(owner) &&
+        !owner.isDestroyed() &&
+        owner.isVisible() &&
+        owner.isFocused()
+      );
+    },
+    micAccessAllowed,
+  });
+  voiceAudioBridge.register(ipcMain);
+
   ipcMain.handle("os1:update-state", (e) =>
     inWindow(e.senderFrame?.url ?? "")
       ? updateState
@@ -1744,6 +1777,8 @@ app.on("before-quit", () => {
   rememberWindowAccountUrl(activeWindow());
   quitting = true;
   nativeDictation.cancel();
+  if (voiceAudioBridge) voiceAudioBridge.stopAll();
+  else nativeVoiceAudio.stopAll();
   saveWindowState();
 });
 

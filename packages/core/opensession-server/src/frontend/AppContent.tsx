@@ -42,7 +42,7 @@ import { BlockExpandHost } from "./components/BlockExpandDialog";
 import { MediaLightboxHost } from "./components/MediaLightbox";
 import { NavigationProvider } from "./components/NavigationProvider";
 import { NewSession } from "./components/NewSession";
-import { PrQueuePreview } from "./components/PrQueuePreview";
+import { PrRoutePreview } from "./components/PrQueuePreview";
 import { RestartOverlay } from "./components/RestartOverlay";
 import { RunningCloseDialog } from "./components/RunningCloseDialog";
 import { SessionSplit } from "./components/SessionSplit";
@@ -120,7 +120,6 @@ import {
 import { resyncUserMap, resyncUserMaps } from "./lib/user-map";
 import { ARCHIVED_PAGE_COLUMN } from "./lib/archived-classes";
 import { PR_PAGE_COLUMN } from "./lib/pr-list-classes";
-import { repoLabel } from "./lib/repo-label";
 import { NO_REPO } from "./lib/session-repo";
 import type { NewTabMorphOrigin } from "./lib/session-tabs-types";
 import { SIDEBAR_CHROME_BTN } from "./lib/sidebar-classes";
@@ -1235,6 +1234,16 @@ export function AppContent({
     openCurrentWorkspace: () => setActiveViewTab(null),
   } satisfies NavigationActions;
 
+  // Review owns the phone header, but workspace tabs remain available.
+  const focusedPhoneReview =
+    isPhone &&
+    ((route.view === "pr" && route.branch !== undefined) ||
+      (reviewActive &&
+        ((route.view === "session" && !!currentSession) ||
+          (route.view === "workspace" &&
+            routeWorkspace &&
+            Boolean(routeWorkspace.branch || reviewFocusPr?.branch)))));
+
   const content = (
     <UserGate>
       <RestartOverlay connected={connected} addHandler={addHandler} />
@@ -1256,28 +1265,30 @@ export function AppContent({
           <FirstMile onDone={finishFirstMile} />
         ) : (
           <>
-            <AppMobileHeader
-              route={route}
-              mobileDetail={mobileDetail}
-              currentSession={currentSession}
-              activeWorkspaceId={activeWorkspaceId}
-              workspaces={workspaces}
-              connected={connected}
-              addHandler={addHandler}
-              navigate={navigate}
-              goBack={goBack}
-              topbarTitle={topbarTitle}
-              phoneTitleHandedOver={phoneTitleHandedOver}
-              commandMenuRef={commandMenuRef}
-              deskCallActive={deskCallShown}
-              onOpenDesk={() =>
-                setDeskOverlay({ open: true, origin: "bottom-right" })
-              }
-              setAppHeaderEl={setAppHeaderEl}
-              setHeaderRepoEl={setHeaderRepoEl}
-              setHeaderModelEl={setHeaderModelEl}
-              setHeaderActionsEl={setHeaderActionsEl}
-            />
+            {!focusedPhoneReview && (
+              <AppMobileHeader
+                route={route}
+                mobileDetail={mobileDetail}
+                currentSession={currentSession}
+                activeWorkspaceId={activeWorkspaceId}
+                workspaces={workspaces}
+                connected={connected}
+                addHandler={addHandler}
+                navigate={navigate}
+                goBack={goBack}
+                topbarTitle={topbarTitle}
+                phoneTitleHandedOver={phoneTitleHandedOver}
+                commandMenuRef={commandMenuRef}
+                deskCallActive={deskCallShown}
+                onOpenDesk={() =>
+                  setDeskOverlay({ open: true, origin: "bottom-right" })
+                }
+                setAppHeaderEl={setAppHeaderEl}
+                setHeaderRepoEl={setHeaderRepoEl}
+                setHeaderModelEl={setHeaderModelEl}
+                setHeaderActionsEl={setHeaderActionsEl}
+              />
+            )}
 
             {settingsActive && (
               <Settings
@@ -1420,10 +1431,14 @@ export function AppContent({
                       {panelIcon}
                     </button>
                   </Tooltip>
-                  {/* Top bar: session name + actions (portaled in by SessionViewer)
-						    on session routes, a plain title otherwise. Sits above the tab
-						    strip so the session identity reads first, tabs below it. */}
-                  <TopBar className={DETAIL_TOPBAR} ref={setTopbarEl}>
+                  {/* Session/workspace identity sits above the shared tab strip. */}
+                  <TopBar
+                    className={cn(
+                      DETAIL_TOPBAR,
+                      focusedPhoneReview && "phone:hidden",
+                    )}
+                    ref={setTopbarEl}
+                  >
                     {route.view !== "session" &&
                       // A workspace portals in the same header row a session
                       // does (WorkspacePane) rather than taking the plain title.
@@ -1458,7 +1473,17 @@ export function AppContent({
                         </TopBarTitle>
                       )}
                   </TopBar>
-                  {!activeTabSplit && tabStripVisible && renderTabBar(null)}
+                  {!activeTabSplit && tabStripVisible && (
+                    <div
+                      className={cn(
+                        "shrink-0",
+                        focusedPhoneReview &&
+                          "phone:pt-[env(safe-area-inset-top,0px)]",
+                      )}
+                    >
+                      {renderTabBar(null)}
+                    </div>
+                  )}
                   {splitDropSide && (
                     <div
                       className={tabSplitDropPreviewClass(splitDropSide)}
@@ -1480,6 +1505,7 @@ export function AppContent({
                           navigate({ view: "pr", repo, branch })
                         }
                         focusPr={reviewFocusPr ?? undefined}
+                        onBack={() => setActiveViewTab(null)}
                         workspace={routeWorkspace}
                         workspaceSessions={workspaceSessions}
                         sessions={sessions}
@@ -1524,41 +1550,16 @@ export function AppContent({
                       <LoadingState>Loading workspace…</LoadingState>
                     )
                   ) : route.view === "pr" ? (
-                    route.branch === undefined ? (
-                      // Number-only: nothing to preview until the resolve above
-                      // finds the PR's workspace and replaces this route.
-                      prRefMissing ? (
-                        <EmptyState>{`${repoLabel(route.repo)} has no pull request #${route.number}.`}</EmptyState>
-                      ) : (
-                        <LoadingState>{`Opening #${route.number}…`}</LoadingState>
-                      )
-                    ) : (
-                      <PrQueuePreview
-                        key={`${route.repo}:${route.branch}`}
-                        repo={route.repo}
-                        branch={route.branch}
-                        sessions={sessions}
-                        onOpenSession={(id) =>
-                          navigate({ view: "session", id })
-                        }
-                        onOpenPr={(repo, branch) =>
-                          navigate({ view: "pr", repo, branch })
-                        }
-                        onStartSession={() =>
-                          void (async () => {
-                            // The workspace home is the new tab: a blank
-                            // canvas with the composer at the bottom.
-                            const { workspaceId } = await resolveWorkspaceApi({
-                              pr: { repo: route.repo, branch: route.branch },
-                            });
-                            await refreshWorkspaces();
-                            navigate({ view: "workspace", id: workspaceId });
-                          })().catch((e) => console.error(e))
-                        }
-                        send={send}
-                        addHandler={addHandler}
-                      />
-                    )
+                    <PrRoutePreview
+                      route={route}
+                      missing={prRefMissing}
+                      onBack={goBack}
+                      sessions={sessions}
+                      navigate={navigate}
+                      refreshWorkspaces={refreshWorkspaces}
+                      send={send}
+                      addHandler={addHandler}
+                    />
                   ) : route.view === "reports" ? (
                     <Reports
                       selectedAutomationId={route.automationId}

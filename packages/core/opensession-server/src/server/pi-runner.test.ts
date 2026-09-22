@@ -262,9 +262,9 @@ describe("assistant transcript output", () => {
 
 describe("parsePiModel", () => {
   test("splits pi/<provider>/<model>", () => {
-    expect(parsePiModel("pi/anthropic/claude-opus-5")).toEqual({
+    expect(parsePiModel("pi/anthropic/claude-opus-5-5")).toEqual({
       providerID: "anthropic",
-      modelID: "claude-opus-5",
+      modelID: "claude-opus-5-5",
     });
   });
 
@@ -276,28 +276,28 @@ describe("parsePiModel", () => {
   });
 
   test("rejects non-pi ids and malformed remainders", () => {
-    expect(parsePiModel("anthropic/claude-opus-5")).toBeNull();
-    expect(parsePiModel("claude-opus-5")).toBeNull();
+    expect(parsePiModel("anthropic/claude-opus-5-5")).toBeNull();
+    expect(parsePiModel("claude-opus-5-5")).toBeNull();
     expect(parsePiModel("pi/anthropic")).toBeNull();
     expect(parsePiModel("pi/anthropic/")).toBeNull();
-    expect(parsePiModel("pi//claude-opus-5")).toBeNull();
+    expect(parsePiModel("pi//claude-opus-5-5")).toBeNull();
   });
 });
 
 describe("resolvePiRoutedModel", () => {
   test("routes plain models and both preset families to their concrete Pi model", () => {
-    expect(resolvePiRoutedModel("pi/anthropic/claude-opus-5")).toMatchObject({
+    expect(resolvePiRoutedModel("pi/anthropic/claude-opus-5-5")).toMatchObject({
       providerID: "anthropic",
-      modelID: "claude-opus-5",
+      modelID: "claude-opus-5-5",
     });
     expect(resolvePiRoutedModel("pi/dial/opus-fable")).toMatchObject({
       providerID: "anthropic",
-      modelID: "claude-opus-5",
+      modelID: "claude-opus-5-5",
       dial: { id: "dial/opus-fable" },
     });
     expect(resolvePiRoutedModel("pi/orchestrator/sol")).toMatchObject({
       providerID: "openai",
-      modelID: "gpt-5.6-sol",
+      modelID: "gpt-6-sol",
       orchestrator: { id: "orchestrator/sol" },
     });
     expect(resolvePiRoutedModel("pi/orchestrator/fable-sol")).toMatchObject({
@@ -333,17 +333,17 @@ describe("resolvePiRoutedModel", () => {
       effort: "high",
     });
     expect(
-      resolvePiRoutedModel("pi/openai/gpt-5.6-sol", "pi/orchestrator/sol"),
+      resolvePiRoutedModel("pi/openai/gpt-6-sol", "pi/orchestrator/sol"),
     ).toMatchObject({
       providerID: "openai",
-      modelID: "gpt-5.6-sol",
+      modelID: "gpt-6-sol",
       orchestrator: { id: "orchestrator/sol" },
       effort: "xhigh",
     });
     // A non-preset stored id attaches nothing.
     const plain = resolvePiRoutedModel(
-      "pi/anthropic/claude-opus-5",
-      "pi/anthropic/claude-opus-5",
+      "pi/anthropic/claude-opus-5-5",
+      "pi/anthropic/claude-opus-5-5",
     );
     expect(plain?.dial).toBeUndefined();
     expect(plain?.orchestrator).toBeUndefined();
@@ -358,14 +358,14 @@ const WS_PRESETS: Record<string, ResolvedWorkspaceModelPreset> = {
   opus: {
     id: "pi/workspace-preset/ws-test/opus",
     label: "Opus, my way",
-    model: "pi/anthropic/claude-opus-5",
+    model: "pi/anthropic/claude-opus-5-5",
     effort: "xhigh",
     note: "## Workspace model preset · Opus, my way",
   },
   opusFable: {
     id: "pi/workspace-preset/ws-test/opus-fable",
     label: "Opus + Fable oracle",
-    model: "pi/anthropic/claude-opus-5",
+    model: "pi/anthropic/claude-opus-5-5",
     effort: "xhigh",
     enginePresetId: "dial/opus-fable",
     note: "## Workspace model preset · Opus + Fable oracle",
@@ -388,7 +388,7 @@ describe("resolvePiPresetWiring (workspace presets)", () => {
     );
     expect(out).toMatchObject({
       providerID: "anthropic",
-      modelID: "claude-opus-5",
+      modelID: "claude-opus-5-5",
       workspacePreset: { id: "pi/workspace-preset/ws-test/opus" },
       effort: "xhigh",
     });
@@ -401,7 +401,7 @@ describe("resolvePiPresetWiring (workspace presets)", () => {
       WS_PRESETS.opusFable,
     );
     expect(out).toMatchObject({
-      modelID: "claude-opus-5",
+      modelID: "claude-opus-5-5",
       dial: { id: "dial/opus-fable", oracleAgent: "oracle-fable" },
       // The workspace preset's own pin outranks the built-in tier's.
       effort: "xhigh",
@@ -423,12 +423,12 @@ describe("resolvePiPresetWiring (workspace presets)", () => {
   test("wiring rides the stored id while the routed id is the concrete lead", () => {
     // The agent-runner path: dispatch got the lead, opts.model kept the preset.
     const out = resolvePiPresetWiring(
-      "pi/anthropic/claude-opus-5",
+      "pi/anthropic/claude-opus-5-5",
       WS_PRESETS.opusFable,
-      ["pi/anthropic/claude-opus-5", WS_PRESETS.opusFable.id],
+      ["pi/anthropic/claude-opus-5-5", WS_PRESETS.opusFable.id],
     );
     expect(out).toMatchObject({
-      modelID: "claude-opus-5",
+      modelID: "claude-opus-5-5",
       dial: { id: "dial/opus-fable" },
       effort: "xhigh",
     });
@@ -440,7 +440,7 @@ describe("resolvePiPresetWiring (workspace presets)", () => {
       enginePresetId: "dial/not-real",
     });
     expect(out?.dial).toBeUndefined();
-    expect(out?.modelID).toBe("claude-opus-5");
+    expect(out?.modelID).toBe("claude-opus-5-5");
   });
 });
 
@@ -580,9 +580,9 @@ describe("buildPiThirdPartyProviderPlan", () => {
 
 describe("resolvePiDialModel", () => {
   test("keeps regular Pi models unchanged", () => {
-    expect(resolvePiDialModel("pi/anthropic/claude-opus-5")).toMatchObject({
+    expect(resolvePiDialModel("pi/anthropic/claude-opus-5-5")).toMatchObject({
       providerID: "anthropic",
-      modelID: "claude-opus-5",
+      modelID: "claude-opus-5-5",
     });
   });
 
@@ -821,7 +821,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
   });
 
   test("dry codex pool → flagged terminal so the model-fallback walk engages", async () => {
-    const events = await collect("pi/openai/gpt-5.6-sol");
+    const events = await collect("pi/openai/gpt-6-sol");
     const err = events.find((e) => e.type === "error")!;
     expect(err).toBeDefined();
     expect(String(err.content)).toContain(
@@ -912,7 +912,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     const previousSdkPromise = sdkState.__piSdkPromise;
     sdkState.__piSdkPromise = Promise.resolve(fakeSdk);
     try {
-      const events = await collect("pi/openai/gpt-5.6-sol", {
+      const events = await collect("pi/openai/gpt-6-sol", {
         accountId: "k1",
         accountStrict: true,
         disableLocalWorkspaceTools: true,
@@ -1050,7 +1050,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     const previousSdkPromise = sdkState.__piSdkPromise;
     sdkState.__piSdkPromise = Promise.resolve(fakeSdk);
     try {
-      const events = await collect("pi/openai/gpt-5.6-sol", {
+      const events = await collect("pi/openai/gpt-6-sol", {
         accountId: "k1",
         accountStrict: true,
         sessionId: sessionKey,
@@ -1098,7 +1098,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
         ],
       }),
     );
-    const events = await collect("pi/openai/gpt-5.6-sol");
+    const events = await collect("pi/openai/gpt-6-sol");
     const err = events.find((e) => e.type === "error")!;
     expect(err).toBeDefined();
     expect(String(err.content)).toContain("expired");
@@ -1141,7 +1141,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     // it to the walk's exclusion, which makes the picker skip its pin branch,
     // so attempt 2 falls to the pool and lands on rot-b.
     const warnings = spyOn(console, "warn").mockImplementation(() => {});
-    const events = await collect("pi/openai/gpt-5.6-sol", {
+    const events = await collect("pi/openai/gpt-6-sol", {
       accountId: "rot-a",
     });
     const switches = warnings.mock.calls.filter(([message]) =>
@@ -1343,7 +1343,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
       sdkState.__piSdkPromise = Promise.resolve(fakeSdk);
       const warnings = spyOn(console, "warn").mockImplementation(() => {});
       try {
-        const events = await collect("pi/openai/gpt-5.6-sol", {
+        const events = await collect("pi/openai/gpt-6-sol", {
           accountId: firstAccountId,
           accountStrict: strict,
           sessionId: sessionKey,
@@ -1392,7 +1392,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
           0,
         );
         expect(events.find((event) => event.type === "done")).toMatchObject({
-          model: "pi/openai/gpt-5.6-sol",
+          model: "pi/openai/gpt-6-sol",
           result: "ok",
         });
       } finally {
@@ -1413,7 +1413,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
         accounts: [expiringHomeAccount("pin-a"), expiringHomeAccount("pin-b")],
       }),
     );
-    const events = await collect("pi/openai/gpt-5.6-sol", {
+    const events = await collect("pi/openai/gpt-6-sol", {
       accountId: "pin-a",
       accountStrict: true,
     });
@@ -1440,7 +1440,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     };
     const first = runPi(
       { ...runOpts, sessionId: firstRunKey },
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-sol",
     );
 
     const firstError = await first.next();
@@ -1453,7 +1453,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
 
     const second = runPi(
       { ...runOpts, sessionId: secondRunKey },
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-sol",
     );
     const busy = await second.next();
     expect(busy.value).toMatchObject({

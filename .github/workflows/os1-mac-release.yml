@@ -110,6 +110,16 @@ jobs:
             -parse-as-library -framework Security -o "$RUNNER_TEMP/keychain-tests"
           "$RUNNER_TEMP/keychain-tests"
 
+      - name: Test native voice audio protocol and conversion
+        run: |
+          # Pure-computation tests: framing, device parsing, resampling and the
+          # playback queue. No microphone, speaker or AVAudioEngine is opened.
+          xcrun swiftc -DVOICE_AUDIO_TESTING -target "$(uname -m)-apple-macos12.0" \
+            native/VoiceAudioHelper.swift native/VoiceAudioHelperTests.swift \
+            -parse-as-library -framework AVFoundation -framework AudioToolbox -framework CoreAudio \
+            -o "$RUNNER_TEMP/voice-audio-tests"
+          "$RUNNER_TEMP/voice-audio-tests"
+
       - name: Build, sign & notarize
         run: |
           # Only the top-level app carries the associated-domains entitlement
@@ -159,6 +169,13 @@ jobs:
           codesign --verify --strict --verbose=2 "$KEYCHAIN_HELPER" ||
             { echo '::error::Keychain helper signature is invalid'; exit 1; }
           otool -L "$KEYCHAIN_HELPER" | grep -F 'Security.framework'
+          VOICE_HELPER="$APP/Contents/Resources/os1-voice-audio"
+          test -x "$VOICE_HELPER" || { echo '::error::Voice audio helper is missing'; exit 1; }
+          codesign --verify --strict --verbose=2 "$VOICE_HELPER" ||
+            { echo '::error::Voice audio helper signature is invalid'; exit 1; }
+          codesign -d --entitlements :- "$VOICE_HELPER" | grep -q 'com.apple.security.device.audio-input' ||
+            { echo '::error::Voice audio helper lacks the audio-input entitlement'; exit 1; }
+          otool -L "$VOICE_HELPER" | grep -E 'AVFAudio\.framework|AVFoundation\.framework'
 
       - name: Verify packaged locales and report size
         run: |

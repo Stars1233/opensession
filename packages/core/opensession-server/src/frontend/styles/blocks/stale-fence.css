@@ -1,0 +1,48 @@
+/* The note under a fence whose renderer did not load
+   (lib/fence-load-failure.ts): the page is behind the server's build, and a
+   refresh is the fix. Renderer-emitted markup, which is why it is a
+   stylesheet and not a utility string. It sits tight under the code block
+   it explains, in the supporting size, with the same accent button the
+   update nudge (UpdatePill) uses so the two read as one message. */
+.md-fence-stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: -4px 0 10px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-dim);
+}
+.md-fence-stale-refresh {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: calc(12px * var(--rf));
+  corner-shape: var(--cs);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-micro) var(--ease);
+}
+.md-fence-stale-refresh:hover {
+  background: var(--accent-hover);
+}
+.md-fence-stale-refresh:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* A finger gets the 44px target without the button growing to it: the hit
+   area extends 8px above and below the 28px box. */
+@media (max-width: 720px) {
+  .md-fence-stale-refresh::before {
+    content: "";
+    position: absolute;
+    inset: -8px 0;
+  }
+}

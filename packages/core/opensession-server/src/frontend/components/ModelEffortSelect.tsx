@@ -48,13 +48,13 @@ export const EFFORTS = [
 
 const PRIMARY_MODEL_IDS = [
   "claude-fable-5-1",
-  "claude-opus-5",
+  "claude-opus-5-5",
   "claude-sonnet-5",
   "claude-haiku-4-5",
   "gpt-6-astra",
-  "gpt-5.6-sol",
+  "gpt-6-sol",
   "gpt-5.6-terra",
-  "gpt-5.6-luna",
+  "gpt-6-luna",
 ] as const;
 const PRIMARY_MODEL_ID_SET = new Set<string>(PRIMARY_MODEL_IDS);
 
@@ -238,15 +238,15 @@ const MODEL_TAIL_ORDER = [
   "fable-sol",
   "sol",
   "claude-fable-5-1",
-  "claude-opus-5",
+  "claude-opus-5-5",
   "claude-opus-4-8",
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-haiku-4-5",
   "gpt-6-astra",
-  "gpt-5.6-sol",
+  "gpt-6-sol",
   "gpt-5.6-terra",
-  "gpt-5.6-luna",
+  "gpt-6-luna",
   "kimi-k3",
   "gpt-oss-120b",
   "gemma-4-31b",

@@ -35,6 +35,7 @@ import {
   startScheduler,
 } from "./src/server/automations";
 import { startUsagePoller } from "./src/server/claude-accounts";
+import { startClaudeCodeUpgrade } from "./src/server/claude-code-version";
 import { startCodexUsagePoller } from "./src/server/codex-accounts";
 import { startXaiUsagePoller } from "./src/server/xai-accounts";
 import {
@@ -880,6 +881,10 @@ if (!g.__opensessionBooted) {
 
     // Archive triage sessions when their Plain ticket is done.
     startPlainArchiveSweep();
+
+    // Claude turns run through the installed `claude` CLI; bring it up to the
+    // version this release needs (claude-code-version.ts). Background, async.
+    void startClaudeCodeUpgrade();
 
     // Unattended installs stage a Claude token in the env or a file; import it
     // into the pool before anything can ask for an account.

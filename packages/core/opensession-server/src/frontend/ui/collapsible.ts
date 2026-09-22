@@ -21,9 +21,12 @@ export { Collapsible } from "@base-ui/react/collapsible";
 /**
  * What a `Collapsible.Panel` wears to animate rather than snap.
  *
- * Base UI publishes the measured height as a custom property; transitioning
- * to it (rather than to `auto`) is what interpolates at all. Reduced motion is
- * handled globally in base.css, which flattens the duration to ~0ms.
+ * Use Base UI's measured height only inside the open/close keyframes. The
+ * resting height must be auto: a cancelled transition can leave the measured
+ * custom property behind, clipping nested disclosures or streamed content.
+ * Opening deliberately has no forwards fill, so natural sizing resumes even
+ * if animation-completion cleanup is interrupted. Reduced motion is handled
+ * globally in base.css, which flattens the duration to ~0ms.
  *
  * The `[hidden]` line is not redundant: Preflight is deliberately not imported
  * (see AGENTS.md), so the UA's `[hidden] { display: none }` is the only thing
@@ -31,4 +34,4 @@ export { Collapsible } from "@base-ui/react/collapsible";
  * outrank it.
  */
 export const collapsiblePanelClasses =
-  "h-[var(--collapsible-panel-height)] overflow-hidden transition-[height] duration-[var(--dur)] ease-[var(--ease)] data-[starting-style]:h-0 data-[ending-style]:h-0 [&[hidden]]:hidden";
+  "h-auto overflow-hidden data-[open]:animate-[collapsible-open_var(--dur)_var(--ease)] data-[closed]:animate-[collapsible-close_var(--dur)_var(--ease)_forwards] [&[hidden]]:hidden";

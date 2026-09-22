@@ -30,6 +30,9 @@ import {
   type BrowserDictation,
 } from "../lib/browser-dictation";
 import { errorMessage } from "../lib/error-message";
+import { DictationAudio } from "../lib/dictation-audio";
+import { os1Shell } from "../lib/os1-shell";
+import { VoiceAudioSplitButton } from "./composer/VoiceAudioSettings";
 
 type Phase =
   | "idle"
@@ -207,7 +210,7 @@ export function VoiceInput({
     activeChangeRef.current = onActiveChange;
   }, [onText, onTextSend, onActiveChange]);
   const chunksRef = useRef<BlobPart[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
+  const captureRef = useRef<DictationAudio | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const acceptRef = useRef(false);
   /** Which button ended the clip: ↑ sends the result, ✓ just keeps it. */
@@ -219,12 +222,18 @@ export function VoiceInput({
   function cleanup() {
     timersRef.current.forEach((t) => clearInterval(t));
     timersRef.current = [];
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    const recorder = recRef.current;
+    recRef.current = null;
+    if (recorder) {
+      recorder.onstop = recorder.ondataavailable = recorder.onerror = null;
+      if (recorder.state !== "inactive") recorder.stop();
+    }
+    captureRef.current?.stop();
+    captureRef.current = null;
     void audioCtxRef.current?.close().catch(() => {});
     audioCtxRef.current = null;
-    recRef.current = null;
   }
+
   function restoreEditorFocus() {
     // The first frame lets React remove `inert`; the second restores the caret
     // after that commit instead of trying to focus an inert textarea.
@@ -233,6 +242,19 @@ export function VoiceInput({
         returnFocusRef.current?.focus({ preventScroll: true }),
       ),
     );
+  }
+
+  function failRecording(message: string, request: number) {
+    if (request !== requestRef.current) return;
+    requestRef.current++;
+    speechRef.current?.cancel();
+    speechRef.current = null;
+    speechResultRef.current = null;
+    cleanup();
+    setLiveTranscript("");
+    setError(message);
+    setPhase("idle");
+    restoreEditorFocus();
   }
 
   function finishCancellation() {
@@ -249,6 +271,7 @@ export function VoiceInput({
   function stop(accept: boolean, send = false) {
     if (phase === "requesting") {
       requestRef.current++;
+      cleanup();
       finishCancellation();
       return;
     }
@@ -312,7 +335,7 @@ export function VoiceInput({
     // getUserMedia only exists in secure contexts. Over plain http (the
     // :3850 hostname) the mic simply isn't there.
     if (
-      !navigator.mediaDevices?.getUserMedia ||
+      (!os1Shell()?.voiceAudio && !navigator.mediaDevices?.getUserMedia) ||
       typeof MediaRecorder === "undefined"
     ) {
       setError(`Mic needs HTTPS. Open ${PRODUCT_NAME} at its ts.net URL.`);
@@ -336,97 +359,106 @@ export function VoiceInput({
     returnFocusRef.current = editTargetRef?.current ?? focused;
     focused?.blur?.();
 
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-    } catch {
-      if (request === requestRef.current) {
-        setError("Microphone permission denied");
-        setPhase("idle");
-        restoreEditorFocus();
-      }
-      return;
-    }
-    if (request !== requestRef.current) {
-      stream.getTracks().forEach((track) => track.stop());
-      return;
-    }
-    streamRef.current = stream;
-    // Chrome/Firefox record webm/opus; iOS Safari only does mp4/AAC. The
-    // server transcodes whatever container we send.
-    const mime =
-      ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) =>
-        MediaRecorder.isTypeSupported?.(m),
-      ) || "";
-    const rec = new MediaRecorder(
-      stream,
-      mime ? { mimeType: mime } : undefined,
+    const capture = new DictationAudio((message) =>
+      failRecording(message, request),
     );
-    recRef.current = rec;
-    chunksRef.current = [];
-    acceptRef.current = false;
-    sendRef.current = false;
-    rec.ondataavailable = (e) => {
-      if (e.data.size) chunksRef.current.push(e.data);
-    };
-    rec.onstop = () => {
-      const accepted = acceptRef.current;
-      const browserResult = speechResultRef.current;
-      speechResultRef.current = null;
-      const blob = new Blob(chunksRef.current, {
-        type: rec.mimeType || mime || "audio/webm",
-      });
-      cleanup();
-      if (accepted) void finish(blob, request, browserResult);
-      else finishCancellation();
-    };
+    captureRef.current = capture;
+    try {
+      const stream = await capture.start();
+      if (request !== requestRef.current) {
+        capture.stop();
+        return;
+      }
+      // Chrome/Firefox record webm/opus; iOS Safari only does mp4/AAC. The
+      // server transcodes whatever container we send.
+      const mime =
+        ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) =>
+          MediaRecorder.isTypeSupported?.(m),
+        ) || "";
+      const rec = new MediaRecorder(
+        stream,
+        mime ? { mimeType: mime } : undefined,
+      );
+      recRef.current = rec;
+      chunksRef.current = [];
+      acceptRef.current = false;
+      sendRef.current = false;
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunksRef.current.push(e.data);
+      };
+      rec.onerror = () =>
+        failRecording("Recording failed. Try again.", request);
+      rec.onstop = () => {
+        if (request !== requestRef.current) return;
+        const accepted = acceptRef.current;
+        const browserResult = speechResultRef.current;
+        speechResultRef.current = null;
+        const blob = new Blob(chunksRef.current, {
+          type: rec.mimeType || mime || "audio/webm",
+        });
+        cleanup();
+        if (accepted) void finish(blob, request, browserResult);
+        else finishCancellation();
+      };
 
-    // Live level meter for the waveform is progressive enhancement. Recording
-    // works fine without it.
-    await (async () => {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      const ctx: AudioContext = new Ctx();
-      audioCtxRef.current = ctx;
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      ctx.createMediaStreamSource(stream).connect(analyser);
-      const buf = new Uint8Array(analyser.fftSize);
+      // Live level meter for the waveform is progressive enhancement. Recording
+      // works fine without it.
+      await (async () => {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        const options: AudioContextOptions & { sinkId: { type: "none" } } = {
+          sinkId: { type: "none" },
+        };
+        const ctx: AudioContext = new Ctx(options);
+        audioCtxRef.current = ctx;
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        const buf = new Uint8Array(analyser.fftSize);
+        timersRef.current.push(
+          window.setInterval(() => {
+            analyser.getByteTimeDomainData(buf);
+            let sum = 0;
+            for (let i = 0; i < buf.length; i++) {
+              const v = (buf[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / buf.length);
+            setLevels((prev) => [
+              ...prev.slice(-(MAX_BAR_COUNT - 1)),
+              Math.min(1, rms * 4),
+            ]);
+          }, 90),
+        );
+      })().catch(() => {
+        // No waveform, no problem.
+      });
+
+      // Cancellation or unmount can happen while the optional meter starts.
+      if (request !== requestRef.current) return;
+      const startedAt = Date.now();
+      setLevels([]);
       timersRef.current.push(
         window.setInterval(() => {
-          analyser.getByteTimeDomainData(buf);
-          let sum = 0;
-          for (let i = 0; i < buf.length; i++) {
-            const v = (buf[i] - 128) / 128;
-            sum += v * v;
-          }
-          const rms = Math.sqrt(sum / buf.length);
-          setLevels((prev) => [
-            ...prev.slice(-(MAX_BAR_COUNT - 1)),
-            Math.min(1, rms * 4),
-          ]);
-        }, 90),
+          if (Date.now() - startedAt >= MAX_SECONDS * 1000) stop(true);
+        }, 1000),
       );
-    })().catch(() => {
-      // No waveform, no problem.
-    });
-
-    const startedAt = Date.now();
-    setLevels([]);
-    timersRef.current.push(
-      window.setInterval(() => {
-        if (Date.now() - startedAt >= MAX_SECONDS * 1000) stop(true);
-      }, 1000),
-    );
-    rec.start(250);
-    // Browser speech recognition streams partial text while the clip is still
-    // being recorded. The audio blob remains the accuracy-preserving fallback
-    // when the browser service is absent or fails.
-    speechRef.current = startBrowserDictation((text) => {
-      if (request === requestRef.current) setLiveTranscript(text);
-    }, stream);
-    setPhase("recording");
+      rec.start(250);
+      // Browser speech recognition streams partial text while the clip is still
+      // being recorded. The audio blob remains the accuracy-preserving fallback
+      // when the browser service is absent or fails.
+      speechRef.current = startBrowserDictation((text) => {
+        if (request === requestRef.current) setLiveTranscript(text);
+      }, stream);
+      setPhase("recording");
+    } catch (error) {
+      capture.stop();
+      failRecording(
+        error instanceof Error && error.name === "NotAllowedError"
+          ? "Microphone permission denied"
+          : errorMessage(error, "Could not start dictation. Try again."),
+        request,
+      );
+    }
   };
 
   useEffect(
@@ -438,6 +470,28 @@ export function VoiceInput({
     },
     [],
   );
+
+  const cancelHiddenCapture = useEffectEvent(() => {
+    if (!captureRef.current) return;
+    requestRef.current++;
+    speechRef.current?.cancel();
+    speechRef.current = null;
+    speechResultRef.current = null;
+    cleanup();
+    setLiveTranscript("");
+    setPhase("idle");
+  });
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.hidden) cancelHiddenCapture();
+    };
+    window.addEventListener("pagehide", cancelHiddenCapture);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.removeEventListener("pagehide", cancelHiddenCapture);
+      document.removeEventListener("visibilitychange", onHidden);
+    };
+  }, []);
 
   // The overlay is visually modal, so make it modal to keyboards and assistive
   // technology too. The portal target remains interactive; its siblings are
@@ -692,18 +746,23 @@ export function VoiceInput({
   );
   return (
     <>
-      <Tooltip label="Dictate" shortcut={dictateKeys ?? undefined}>
-        <button
-          ref={idleButtonRef}
-          type="button"
-          className={className}
-          onClick={start}
-          disabled={disabled || phase !== "idle"}
-          aria-label="Dictate"
-        >
-          <IconMic size={22} />
-        </button>
-      </Tooltip>
+      <VoiceAudioSplitButton
+        mode="dictation"
+        disabled={disabled || phase !== "idle"}
+      >
+        <Tooltip label="Dictate" shortcut={dictateKeys ?? undefined}>
+          <button
+            ref={idleButtonRef}
+            type="button"
+            className={className}
+            onClick={start}
+            disabled={disabled || phase !== "idle"}
+            aria-label="Dictate"
+          >
+            <IconMic size={22} />
+          </button>
+        </Tooltip>
+      </VoiceAudioSplitButton>
       {error && phase === "idle" && (
         <div
           role="alert"

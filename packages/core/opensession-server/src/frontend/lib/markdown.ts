@@ -15,6 +15,7 @@ import { repoLabel } from "./repo-label";
 import { cleanSessionTitle } from "./session-title";
 import { INTERNAL_ORIGINS, UUIDV7, internalUrlTarget } from "./session-url";
 import { sessionAssetRawUrl } from "./api/sessions";
+import { type TellaVideoEmbed, tellaVideoEmbed } from "./tella-embed";
 import { expandIconMarkup } from "../components/icons";
 
 // Dedicated marked instance for session messages so this config doesn't leak
@@ -69,6 +70,63 @@ function sessionMediaFigure(token: Tokens.Paragraph): string | null {
     ? `<figcaption class="md-figcaption">${attr(caption)}</figcaption>`
     : "";
   return `<figure class="md-figure">${media}${figcaption}</figure>\n`;
+}
+
+function isLinkToken(token: Token): token is Tokens.Link {
+  return token.type === "link";
+}
+
+/** Videos already given a player in the document being rendered: a link
+ *  repeated further down stays a link. Reset per renderMarkdown call. */
+let renderedTellaVideos = new Set<string>();
+
+/**
+ * The Tella videos linked from a block's prose that have not played yet in
+ * this document, in the order written, one per video however many times it
+ * is linked. A link is a link wherever it sits, so this looks inside
+ * emphasis and the like too. Collecting claims the video: the caller renders
+ * every one it gets back.
+ */
+function tellaEmbedsIn(
+  tokens: readonly Token[] | undefined,
+  out = new Map<string, TellaVideoEmbed>(),
+): Map<string, TellaVideoEmbed> {
+  for (const token of tokens ?? []) {
+    if (isLinkToken(token)) {
+      const embed = tellaVideoEmbed(token.href);
+      if (embed && !renderedTellaVideos.has(embed.id)) {
+        renderedTellaVideos.add(embed.id);
+        out.set(embed.id, embed);
+      }
+      continue;
+    }
+    if ("tokens" in token && Array.isArray(token.tokens))
+      tellaEmbedsIn(token.tokens, out);
+  }
+  return out;
+}
+
+/**
+ * A pasted Tella link plays where it was pasted (tella-embed.ts). The
+ * player takes the figure treatment session media gets; the caption, when
+ * the link stood alone, is the link itself, so the page on Tella is still
+ * one click away. A link inside a sentence keeps its place in the sentence
+ * and the player follows the block.
+ */
+function tellaFigure(embed: TellaVideoEmbed, caption = ""): string {
+  const frame =
+    `<iframe class="md-embed-frame" src="${attr(embed.src)}" title="Tella video"` +
+    ` allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+  const figcaption = caption
+    ? `<figcaption class="md-figcaption">${caption}</figcaption>`
+    : "";
+  return `<figure class="md-figure">${frame}${figcaption}</figure>\n`;
+}
+
+function tellaFigures(embeds: Map<string, TellaVideoEmbed>): string {
+  let out = "";
+  for (const embed of embeds.values()) out += tellaFigure(embed);
+  return out;
 }
 
 type AssetReferenceRegistry = {
@@ -1545,10 +1603,34 @@ md.use({
       return `<code>${attr(t)}</code>`;
     },
     paragraph(token: Tokens.Paragraph) {
+      const figure = sessionMediaFigure(token);
+      if (figure) return figure;
+      const embeds = tellaEmbedsIn(token.tokens);
+      if (embeds.size === 0)
+        return `<p>${this.parser.parseInline(token.tokens)}</p>\n`;
+      // The link on its own is the video: the player, captioned by the link
+      // (its label, or the address minus the scheme when it was pasted bare).
+      const [only] = token.tokens;
+      if (token.tokens.length === 1 && isLinkToken(only)) {
+        const [embed] = embeds.values();
+        const caption = isBareUrlLink(only)
+          ? `<a href="${attr(only.href)}" target="_blank" rel="noopener noreferrer">${attr(embed.label)}</a>`
+          : this.parser.parseInline(token.tokens);
+        return tellaFigure(embed, caption);
+      }
       return (
-        sessionMediaFigure(token) ??
-        `<p>${this.parser.parseInline(token.tokens)}</p>\n`
+        `<p>${this.parser.parseInline(token.tokens)}</p>\n` +
+        tellaFigures(embeds)
       );
+    },
+    // Block-level text is a tight list item's body (a paragraph in every way
+    // but the <p>), which is where an agent most often hands back a link.
+    // Inline text tokens carry no child tokens and fall through untouched.
+    text(token: Tokens.Text | Tokens.Escape) {
+      if (!("tokens" in token) || !token.tokens) return false;
+      const embeds = tellaEmbedsIn(token.tokens);
+      if (embeds.size === 0) return false;
+      return this.parser.parseInline(token.tokens) + tellaFigures(embeds);
     },
     image(token: Tokens.Image) {
       const title = token.title ? ` title="${attr(token.title)}"` : "";
@@ -1834,10 +1916,12 @@ export function renderMarkdown(src: string, ctx?: MarkdownContext): string {
   const previousAssets = renderAssetReferences;
   const previousAssetSessionId = renderAssetSessionId;
   const previousRawHtml = renderRawHtml;
+  const previousTellaVideos = renderedTellaVideos;
   renderRepo = ctx?.repo;
   renderAssetReferences = assets;
   renderAssetSessionId = ctx?.sessionId;
   renderRawHtml = ctx?.rawHtml ?? "escape";
+  renderedTellaVideos = new Set();
   try {
     const parsed = md.parse(collapseDuplicatePrReferences(src));
     if (parsed instanceof Promise) throw new Error("Unexpected async markdown");
@@ -1849,6 +1933,7 @@ export function renderMarkdown(src: string, ctx?: MarkdownContext): string {
     renderAssetReferences = previousAssets;
     renderAssetSessionId = previousAssetSessionId;
     renderRawHtml = previousRawHtml;
+    renderedTellaVideos = previousTellaVideos;
   }
   if (cacheable) {
     dropStreamedPrefix(contextKey, src);

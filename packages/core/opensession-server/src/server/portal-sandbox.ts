@@ -43,7 +43,26 @@ import {
   teardownSandbox,
   workspaceSandboxClaimed,
 } from "./session-sandbox";
-import type { UnifiedSession } from "./types";
+import type { PortalSandboxRecord, UnifiedSession } from "./types";
+
+type PortalSandboxGlobals = {
+  __osPortalSandboxWakes?: Map<string, InFlightWake>;
+};
+const globals = globalThis as PortalSandboxGlobals;
+
+type InFlightWake = { task: Promise<Sandbox | null>; provision: boolean };
+
+/**
+ * The wake or provision under way for each session, one at a time. A
+ * machine takes a minute or more to come up, longer than a Portal tool call
+ * may wait, so the start that asked for it answers before it is there and
+ * the agent asks again. That second start joins the work in flight. Before
+ * this, it checkpointed again and asked the provider for a second machine,
+ * serialized behind the first by the provider lock: three tries were six
+ * creates, and none of them answered in time.
+ */
+const wakes: Map<string, InFlightWake> = (globals.__osPortalSandboxWakes ??=
+  new Map());
 
 /** Providers key their resources by the spec's session id; the Portal
  * Sandbox is a second resource of the same session, so it gets its own. */
@@ -101,6 +120,64 @@ export function portalsInSandbox(session: PortalSession): boolean {
 }
 
 /**
+ * Where a session's Portals run and how that machine is doing, for an agent
+ * that found no live Sandbox: the same record the Portals panel reads, so
+ * the tool and the panel tell the same story. `busy` while a wake or a
+ * provision is under way in this process, whatever the record says yet.
+ */
+export type PortalSandboxReport =
+  | {
+      where: "workspace";
+      provider: string;
+      lifecycle?: NonNullable<UnifiedSession["sandbox"]>["lifecycle"];
+      error?: string;
+      busy: boolean;
+    }
+  | {
+      where: "portal";
+      provider: string;
+      /** `none` until the first start provisions the machine. */
+      lifecycle: NonNullable<PortalSandboxRecord["lifecycle"]> | "none";
+      /** Whether a machine is recorded: a busy record is then waking, not
+       * being created. */
+      materialized: boolean;
+      error?: string;
+      busy: boolean;
+    };
+
+export function describePortalSandbox(
+  session: PortalSession,
+): PortalSandboxReport | null {
+  const busy = wakes.has(session.id);
+  if (session.sandbox?.sandboxId)
+    return {
+      where: "workspace",
+      provider: session.sandbox.provider,
+      ...(session.sandbox.lifecycle
+        ? { lifecycle: session.sandbox.lifecycle }
+        : {}),
+      ...(session.sandbox.lastLifecycleError
+        ? { error: session.sandbox.lastLifecycleError }
+        : {}),
+      busy,
+    };
+  const record = session.portalSandbox;
+  const provider = record?.provider ?? portalSandboxProvider(session);
+  if (!provider) return null;
+  const lifecycle = record
+    ? (record.lifecycle ?? (record.sandboxId ? "sleeping" : "preparing"))
+    : "none";
+  return {
+    where: "portal",
+    provider,
+    lifecycle,
+    materialized: Boolean(record?.sandboxId),
+    ...(record?.lastLifecycleError ? { error: record.lastLifecycleError } : {}),
+    busy,
+  };
+}
+
+/**
  * The Sandbox that runs this session's Portals: its workspace Sandbox, its
  * Portal Sandbox, or, with `provision`, a Portal Sandbox created now for a
  * project that runs Portals remotely. `wake` is an explicit compute action
@@ -117,9 +194,35 @@ export function portalsInSandbox(session: PortalSession): boolean {
  * that turn (`ownTurn`: the agent's own Portal tool call, the post-turn
  * refresh), whose worktree is at rest while the call runs.
  */
-export async function sandboxForPortals(
+export function sandboxForPortals(
   session: UnifiedSession,
   options: { wake?: boolean; provision?: boolean; ownTurn?: boolean } = {},
+): Promise<Sandbox | null> {
+  if (!options.wake && !options.provision)
+    return resolveSandboxForPortals(session, options);
+  const current = wakes.get(session.id);
+  if (current) {
+    // A wake that found the machine gone provisions nothing; a caller that
+    // may provision then does its own, after it.
+    return options.provision && !current.provision
+      ? current.task.then((sandbox) =>
+          sandbox ? sandbox : sandboxForPortals(session, options),
+        )
+      : current.task;
+  }
+  const entry: InFlightWake = {
+    task: resolveSandboxForPortals(session, options).finally(() => {
+      if (wakes.get(session.id) === entry) wakes.delete(session.id);
+    }),
+    provision: Boolean(options.provision),
+  };
+  wakes.set(session.id, entry);
+  return entry.task;
+}
+
+async function resolveSandboxForPortals(
+  session: UnifiedSession,
+  options: { wake?: boolean; provision?: boolean; ownTurn?: boolean },
 ): Promise<Sandbox | null> {
   if (session.sandbox?.sandboxId)
     return activeSandboxFor(session, { wake: options.wake });
@@ -329,6 +432,9 @@ async function provisionPortalSandbox(
   } catch (error) {
     if (phase === "recorded") throw error;
     const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[sandbox] ${session.id}: Portal Sandbox not prepared (${provider}): ${message}`,
+    );
     if (phase === "preparing")
       touchNativeSession(session.id, {
         portalSandbox: {
@@ -392,6 +498,9 @@ export function syncPortalSandbox(
       return "landed";
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[sandbox] ${current.id}: Portal Sandbox ${sandbox.id} not refreshed: ${message}`,
+      );
       touchNativeSession(current.id, {
         portalSandbox: { ...record, lastLifecycleError: message.slice(0, 240) },
       });

@@ -452,10 +452,7 @@ describe("rpc-ws upgrade auth (WS-transport opt-in only)", () => {
     sock.onmessage = (ev) => inbox.push(JSON.parse(String(ev.data)));
     await until(() => open);
 
-    // Valid frame token → dispatch runs. tools/list for a server this run
-    // doesn't carry answers 200 with an empty tool list (shared pi
-    // servers list the union of in-process servers in their config; the
-    // proxy must stay healthy) — tools/CALL on it still 404s.
+    // Valid frame token reaches the authoritative per-run binding check.
     sock.send(
       JSON.stringify({
         id: "f1",
@@ -465,8 +462,8 @@ describe("rpc-ws upgrade auth (WS-transport opt-in only)", () => {
       }),
     );
     const ok = await until(() => inbox.find((m) => m.id === "f1"));
-    expect(ok.status).toBe(200);
-    expect(ok.body?.tools ?? []).toEqual([]);
+    expect(ok.status).toBe(404);
+    expect(ok.body?.error).toContain('MCP server "nope" is not available');
     sock.send(
       JSON.stringify({
         id: "f1c",

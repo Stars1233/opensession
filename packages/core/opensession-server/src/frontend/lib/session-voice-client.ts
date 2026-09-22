@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { BASE_PATH } from "./base";
+import { os1Shell } from "./os1-shell";
+import { NativeVoiceAudio } from "./native-voice-audio";
 import {
   SessionVoiceAudioMeter,
   type SessionVoiceLevels,
@@ -94,6 +96,7 @@ export class SessionVoiceClient {
   private channel: RTCDataChannel | null = null;
   private mic: MediaStream | null = null;
   private audio: HTMLAudioElement | null = null;
+  private nativeAudio: NativeVoiceAudio | null = null;
   private abort = new AbortController();
   private state: SessionVoiceState = "idle";
   private closed = false;
@@ -152,6 +155,7 @@ export class SessionVoiceClient {
     this.paused = paused;
     for (const track of this.mic?.getTracks() ?? []) track.enabled = !paused;
     if (this.audio) this.audio.muted = paused;
+    this.nativeAudio?.setPaused(paused);
     if (paused) {
       this.responseRequested = null;
       if (this.responding) this.send({ type: "response.cancel" });
@@ -222,17 +226,26 @@ export class SessionVoiceClient {
       START_TIMEOUT_MS,
     );
     try {
-      if (!navigator.mediaDevices?.getUserMedia)
-        throw new Error(
-          "Voice calls need a secure browser with microphone access.",
+      const native = os1Shell()?.voiceAudio;
+      let mic: MediaStream;
+      if (native) {
+        this.nativeAudio = new NativeVoiceAudio(native, (message) =>
+          this.fail(message),
         );
-      const mic = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+        mic = await this.nativeAudio.start();
+      } else {
+        if (!navigator.mediaDevices?.getUserMedia)
+          throw new Error(
+            "Voice calls need a secure browser with microphone access.",
+          );
+        mic = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      }
       if (this.closed) {
         for (const track of mic.getTracks()) track.stop();
         return;
@@ -243,19 +256,24 @@ export class SessionVoiceClient {
         track.onended = () => this.fail("The microphone disconnected.");
       const pc = new RTCPeerConnection();
       this.pc = pc;
-      this.audio = document.createElement("audio");
-      this.audio.autoplay = true;
+      if (!this.nativeAudio) {
+        this.audio = document.createElement("audio");
+        this.audio.autoplay = true;
+      }
       pc.ontrack = (event) => {
-        if (!this.audio || this.closed) return;
+        if (this.closed) return;
         const stream = event.streams[0] ?? new MediaStream([event.track]);
-        this.audio.srcObject = stream;
-        this.audio.muted = this.paused;
         this.meter.attach(stream, "output");
-        void this.audio
-          .play()
-          .catch(() =>
-            this.fail("Audio playback was blocked. Start the call again."),
-          );
+        if (this.nativeAudio) this.nativeAudio.attachOutput(stream);
+        else if (this.audio) {
+          this.audio.srcObject = stream;
+          this.audio.muted = this.paused;
+          void this.audio
+            .play()
+            .catch(() =>
+              this.fail("Audio playback was blocked. Start the call again."),
+            );
+        }
       };
       pc.onconnectionstatechange = () => {
         if (
@@ -467,6 +485,7 @@ export class SessionVoiceClient {
       case "input_audio_buffer.speech_started":
         if (this.paused) break;
         this.inputActive = true;
+        this.nativeAudio?.clearPlayback();
         this.touch();
         if (this.responding) this.send({ type: "response.cancel" });
         if (this.playing) this.send({ type: "output_audio_buffer.clear" });
@@ -578,6 +597,8 @@ export class SessionVoiceClient {
         break;
       case "output_audio_buffer.stopped":
       case "output_audio_buffer.cleared":
+        if (event.type === "output_audio_buffer.cleared")
+          this.nativeAudio?.clearPlayback();
         this.playing = false;
         this.speaking = false;
         this.resting();
@@ -617,6 +638,8 @@ export class SessionVoiceClient {
 
   private teardown() {
     this.closed = true;
+    this.nativeAudio?.stop();
+    this.nativeAudio = null;
     this.meter.stop();
     this.abort.abort();
     clearTimeout(this.startTimer);

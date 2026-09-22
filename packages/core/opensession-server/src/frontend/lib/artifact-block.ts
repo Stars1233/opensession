@@ -6,6 +6,7 @@
  * and the policy.
  */
 
+import { noteFenceLoadFailure } from "./fence-load-failure";
 import type { FenceUpgrader } from "./fence-upgraders";
 
 let framePromise: Promise<typeof import("./artifact-frame")> | null = null;
@@ -23,9 +24,13 @@ export const artifactUpgrader: FenceUpgrader = {
   langs: ["artifact", "svg"],
   keepsCodeControls: true,
   async upgrade({ pre, source, lang, root, alive }) {
-    const m = await loadFrame().catch(() => null);
-    if (!m || !alive() || !root.contains(pre)) return false;
     if (!source.trim()) return false;
+    const m = await loadFrame().catch(() => null);
+    if (!m) {
+      noteFenceLoadFailure({ pre, root, alive }, "The artifact viewer");
+      return false;
+    }
+    if (!alive() || !root.contains(pre)) return false;
     m.mountArtifactBlock(pre, source, lang);
     return true;
   },

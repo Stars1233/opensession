@@ -19,6 +19,17 @@ bun run website:build  # production build
 3. Leave the detected framework and build settings as Next.js defaults.
 4. Deploy.
 
+`vercel.json` runs `ignore-build.sh` before installing dependencies. It skips
+builds when nothing affecting the website changed since the previous deployment.
+Website files, the embedded product frontend and shared contracts, imported app
+icons, dependency manifests, lockfiles, patches, and build configuration still
+trigger builds. Backend-only, unrelated native-client, and repository docs
+changes do not. Missing comparison history falls back to building.
+
+Keep the input paths in `ignore-build.sh` up to date when adding imports from
+outside this package. Vercel may still list skipped deployments as canceled;
+they do not run the website build.
+
 The app serves `/`, `/announcement`, and `/product-demo`. A compatibility
 rewrite keeps `/product-demo.html` working for existing links and capture
 tooling.

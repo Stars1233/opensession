@@ -16,6 +16,10 @@ import { tailnetIp } from "./config-edit";
 import { CONFIG_PATH, ENV_PATH, REPO_ROOT } from "./paths";
 import { isCompiledBinary } from "../../packages/core/opensession-server/src/runner-host/exe";
 import { INTEGRATIONS } from "../../packages/core/opensession-server/src/server/integrations/registry";
+import {
+  MIN_CLAUDE_CODE_VERSION,
+  claudeCodeVersionSatisfies,
+} from "../../packages/core/opensession-server/src/server/claude-code-version";
 import * as service from "./service";
 import { dim, fail, heading, info, ok, run, warn } from "./ui";
 
@@ -76,7 +80,19 @@ async function checkTools(t: Tally): Promise<void> {
       (tool.bin === "bun" ? process.execPath : undefined);
     if (path) {
       const { stdout } = await run([tool.bin, "--version"]);
-      ok(tool.label, stdout.split("\n")[0] || path);
+      const version = stdout.split("\n")[0] || path;
+      if (
+        tool.bin === "claude" &&
+        claudeCodeVersionSatisfies(version) === false
+      ) {
+        warn(
+          `${tool.label} ${version} is older than ${MIN_CLAUDE_CODE_VERSION}`,
+          "newer Claude models fail until it is updated; the server runs `claude update` on start, or run it yourself",
+        );
+        t.warnings++;
+        continue;
+      }
+      ok(tool.label, version);
       continue;
     }
     if (tool.required) {

@@ -103,7 +103,7 @@ export const DEFAULT_USE_COMPUTER_API_URL = "https://api.use.computer";
 export const USE_COMPUTER_GUEST_USER = "lume";
 const SANDBOX_PREFIX = "uc-";
 /** Guest preparation revision; bump when GUEST_PREPARATION changes. */
-const GUEST_PREPARATION_REVISION = "guest-v1";
+const GUEST_PREPARATION_REVISION = "guest-v2";
 const DEFAULT_IDLE_STOP_MINUTES = 30;
 /** The service caps one exec call at 300 s; longer work is polled. */
 const EXEC_DIRECT_MAX_MS = 280_000;
@@ -479,7 +479,7 @@ export function useComputerDriver(c: UcClient, remoteId: string): RemoteDriver {
     while (Date.now() < deadline) {
       await Bun.sleep(EXEC_POLL_MS);
       const status = await direct(
-        `if [ -f ${dir}/code ]; then cat ${dir}/code; echo; base64 -i ${dir}/out | tr -d '\\n'; echo; base64 -i ${dir}/err | tr -d '\\n'; rm -rf ${dir}; fi`,
+        `if [ -f ${dir}/code ]; then cat ${dir}/code; base64 -i ${dir}/out | tr -d '\\n'; echo; base64 -i ${dir}/err | tr -d '\\n'; rm -rf ${dir}; fi`,
         60_000,
       );
       if (status.exitCode !== 0) return status;
@@ -545,14 +545,19 @@ export function useComputerDriver(c: UcClient, remoteId: string): RemoteDriver {
 }
 
 /** Give the guest the session's canonical workspace path: macOS reserves
- *  /home for the automounter, so switch that map off and alias /home/ubuntu
- *  to the guest user's home. Takes effect at once, no reboot. Idempotent. */
+ *  /home for the automounter, so switch that map off and persist a synthetic
+ *  link to the writable data volume. Without synthetic.conf, /home disappears
+ *  when snapshot capture or restore reboots the guest. Idempotent. */
 export const GUEST_PREPARATION = [
   "set -e",
   "sudo -n true",
   "sudo -n sed -i '' 's#^/home[[:space:]]#\\#&#' /etc/auto_master",
   "sudo -n automount -vc >/dev/null 2>&1 || true",
   "sudo -n mkdir -p /System/Volumes/Data/home",
+  "if ! grep -Eq '^home([[:space:]]|$)' /etc/synthetic.conf 2>/dev/null; then printf 'home\\tSystem/Volumes/Data/home\\n' | sudo -n tee -a /etc/synthetic.conf >/dev/null; fi",
+  // apfs.util may return a nonzero status even with the link present; the
+  // final path check below determines whether preparation succeeded.
+  "sudo -n /System/Library/Filesystems/apfs.fs/Contents/Resources/apfs.util -t || true",
   `[ -e /System/Volumes/Data/home/ubuntu ] || sudo -n ln -s ${USE_COMPUTER_GUEST_HOME} /System/Volumes/Data/home/ubuntu`,
   "test -d /home/ubuntu/Library",
 ].join("\n");
@@ -560,10 +565,15 @@ export const GUEST_PREPARATION = [
 const GUEST_MARKER = `${USE_COMPUTER_GUEST_HOME}/.opensession-guest`;
 
 export async function prepareGuest(driver: RemoteDriver): Promise<void> {
-  const marker = await driver.exec(`cat ${GUEST_MARKER} 2>/dev/null`, {
-    timeoutMs: 30_000,
-  });
-  if (marker.stdout.trim() === GUEST_PREPARATION_REVISION) return;
+  const marker = await driver.exec(
+    `test -d /home/ubuntu/Library && cat ${GUEST_MARKER} 2>/dev/null`,
+    { timeoutMs: 30_000 },
+  );
+  if (
+    marker.exitCode === 0 &&
+    marker.stdout.trim() === GUEST_PREPARATION_REVISION
+  )
+    return;
   const prep = await driver.exec(
     `${GUEST_PREPARATION}\nprintf %s ${q(GUEST_PREPARATION_REVISION)} > ${GUEST_MARKER}`,
     { timeoutMs: 120_000 },

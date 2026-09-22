@@ -86,7 +86,7 @@
       "journalKind": "prompt",
       "mcpScope": "all",
       "mode": "scratch",
-      "model": "pi/openai/gpt-5.6-sol",
+      "model": "pi/openai/gpt-6-sol",
       "prompt": {
         "injectedContext": [
           {
@@ -293,7 +293,7 @@
     },
     {
       "content": "Continuing.",
-      "model": "pi/openai/gpt-5.6-sol",
+      "model": "pi/openai/gpt-6-sol",
       "seq": 8,
       "type": "assistant"
     }

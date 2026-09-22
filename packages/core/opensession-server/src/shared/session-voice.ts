@@ -5,7 +5,7 @@ export const SESSION_VOICE_END_TOOL = "end_voice_call";
 
 /** Direct low-effort Responses helpers. Fixed ids; never the session's model. */
 export const SESSION_VOICE_HELPER_MODELS = {
-  luna: "gpt-5.6-luna",
+  luna: "gpt-6-luna",
   terra: "gpt-5.6-terra",
 } as const;
 export type SessionVoiceHelper = keyof typeof SESSION_VOICE_HELPER_MODELS;

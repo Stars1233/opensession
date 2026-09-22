@@ -1,3 +1,4 @@
+import { buildPiAnthropicModels } from "./pi-anthropic-models";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { CodexAccount } from "./codex-accounts";
 import type { SeededOpenaiAuth } from "./openai-auth";
@@ -143,16 +144,40 @@ class MemoryCredentialStore {
   }
 }
 
-const OPENAI_FALLBACK_MODEL = (modelID: string) => ({
-  id: modelID,
-  name: modelID,
-  reasoning: true,
-  thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
-  input: ["text", "image"] as Array<"text" | "image">,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 272_000,
-  maxTokens: 128_000,
-});
+function openaiFallbackModel(modelID: string) {
+  // Release metadata for models not yet in the bundled Pi catalog.
+  // https://developers.openai.com/api/docs/models/gpt-6-sol
+  // https://developers.openai.com/api/docs/models/gpt-6-luna
+  const rates =
+    modelID === "gpt-6-sol"
+      ? { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }
+      : modelID === "gpt-6-luna"
+        ? { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 }
+        : undefined;
+  return {
+    id: modelID,
+    name: modelID,
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
+    input: ["text", "image"] as Array<"text" | "image">,
+    cost: rates
+      ? {
+          ...rates,
+          tiers: [
+            {
+              inputTokensAbove: 272_000,
+              input: rates.input * 2,
+              output: rates.output * 1.5,
+              cacheRead: rates.cacheRead * 2,
+              cacheWrite: rates.cacheWrite * 2,
+            },
+          ],
+        }
+      : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: rates ? 1_050_000 : 272_000,
+    maxTokens: 128_000,
+  };
+}
 
 /** Construct one isolated ModelRuntime and bind its selected provider/model. */
 export async function createPiRuntimeBinding(
@@ -279,7 +304,7 @@ export async function createPiRuntimeBinding(
     model = runtime.getModel("openai", input.modelID);
     if (!model) {
       runtime.registerProvider("openai", {
-        models: [OPENAI_FALLBACK_MODEL(input.modelID)],
+        models: [openaiFallbackModel(input.modelID)],
       });
       model = runtime.getModel("openai", input.modelID);
     }
@@ -292,7 +317,7 @@ export async function createPiRuntimeBinding(
     model = runtime.getModel("openai-codex", input.modelID);
     if (!model) {
       runtime.registerProvider("openai-codex", {
-        models: [OPENAI_FALLBACK_MODEL(input.modelID)],
+        models: [openaiFallbackModel(input.modelID)],
       });
       model = runtime.getModel("openai-codex", input.modelID);
     }
@@ -331,17 +356,10 @@ export async function createPiRuntimeBinding(
       runtime.registerProvider("anthropic", {
         baseUrl: bridge.url,
         headers,
-        models: [
-          {
-            id: input.modelID,
-            name: input.modelID,
-            reasoning: true,
-            input: ["text", "image"],
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 200_000,
-            maxTokens: 32_000,
-          },
-        ],
+        models: buildPiAnthropicModels([], input.modelID).map((model) => ({
+          ...model,
+          baseUrl: bridge.url,
+        })),
       });
       model = runtime.getModel("anthropic", input.modelID);
     }

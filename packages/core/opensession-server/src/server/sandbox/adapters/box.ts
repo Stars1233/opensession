@@ -200,15 +200,27 @@ async function boxApi<T>(
   body?: unknown,
   timeoutMs = 30_000,
 ): Promise<T> {
-  const res = await fetch(`${cfg.apiUrl}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${cfg.apiKey}`,
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.apiUrl}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${cfg.apiKey}`,
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    // The bare "The operation timed out." of AbortSignal.timeout named
+    // neither the call nor the budget when it reached the session record
+    // and the journal; a create that stalled read like anything else.
+    if ((error as { name?: unknown })?.name === "TimeoutError")
+      throw new Error(
+        `box API ${method} ${path} timed out after ${Math.round(timeoutMs / 1000)}s`,
+      );
+    throw error;
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     let detail = text.slice(0, 300);

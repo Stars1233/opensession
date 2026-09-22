@@ -7,11 +7,11 @@ import { cn } from "./cn";
  *
  * The session transcript folds whole turns and grouped tool runs: regions
  * whose height is anything from one row to many screens. A fixed-distance
- * animation cannot fit both, so the height here is always MEASURED — Base UI
- * publishes the panel's real height as a custom property and the panel
- * transitions to it, so a 40px run and a 4000px turn take the same motion,
- * each landing exactly where its content says. Content stays mounted through
- * the close transition and unmounts after it, keeping the fold's own perf win.
+ * animation cannot fit both, so Base UI measures the panel for its open/close
+ * keyframes. At rest it uses natural height, letting nested folds and live
+ * content grow it. A 40px run and a 4000px turn take the same motion. Content
+ * stays mounted through the close animation and unmounts after it, keeping
+ * the fold's own perf win.
  *
  * Bring your own trigger: this is the panel half only, for surfaces whose
  * disclosure row is already richer than a title (the turn header carries
@@ -19,7 +19,7 @@ import { cn } from "./cn";
  * `Disclosure` is the opinionated form.
  *
  * Reduced motion is handled globally in base.css, which flattens the
- * transition to ~0ms.
+ * animation to ~0ms.
  */
 export function Fold({
   open,

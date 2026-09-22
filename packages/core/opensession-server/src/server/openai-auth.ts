@@ -148,6 +148,8 @@ export function buildSeededOpenaiAuth(
 
 const OPENAI_FAST_MODE_MODELS = new Set([
   "gpt-6-astra",
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",

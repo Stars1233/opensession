@@ -10,13 +10,13 @@ describe("model picker groups", () => {
   test("keeps current Fable and Sol slugs out of legacy", () => {
     const { primary, legacy } = splitModelOptions([
       model("claude-fable-5-1", "claude"),
-      model("gpt-5.6-sol", "codex"),
+      model("gpt-6-sol", "codex"),
       model("gpt-5.5", "codex"),
     ]);
 
     expect(primary.map((entry) => entry.id)).toEqual([
       "claude-fable-5-1",
-      "gpt-5.6-sol",
+      "gpt-6-sol",
     ]);
     expect(legacy.map((entry) => entry.id)).toEqual(["gpt-5.5"]);
   });
@@ -24,25 +24,40 @@ describe("model picker groups", () => {
   test("keeps Pi-routed models first class", () => {
     const { primary, legacy } = splitModelOptions([
       model("pi/anthropic/claude-fable-5-1", "pi"),
-      model("pi/openai/gpt-5.6-sol", "pi"),
+      model("pi/openai/gpt-6-sol", "pi"),
     ]);
     expect(primary).toHaveLength(2);
     expect(legacy).toHaveLength(0);
   });
 
+  test("shows Opus 5.5 as the current Opus and orders it before Sonnet", () => {
+    const { primary, legacy } = splitModelOptions([
+      model("claude-opus-5", "claude"),
+      model("claude-opus-5-5", "claude"),
+    ]);
+    expect(primary.map((entry) => entry.id)).toEqual(["claude-opus-5-5"]);
+    expect(legacy.map((entry) => entry.id)).toEqual(["claude-opus-5"]);
+    expect(
+      splitModelOptions([
+        model("pi/anthropic/claude-sonnet-5", "pi"),
+        model("pi/anthropic/claude-opus-5-5", "pi"),
+      ]).primary.map((entry) => entry.id),
+    ).toEqual(["pi/anthropic/claude-opus-5-5", "pi/anthropic/claude-sonnet-5"]);
+  });
+
   test("puts Astra first among OpenAI models", () => {
     const { primary } = splitModelOptions([
-      model("pi/openai/gpt-5.6-luna", "pi"),
-      model("pi/openai/gpt-5.6-sol", "pi"),
+      model("pi/openai/gpt-6-luna", "pi"),
+      model("pi/openai/gpt-6-sol", "pi"),
       model("pi/openai/gpt-6-astra", "pi"),
       model("pi/openai/gpt-5.6-terra", "pi"),
     ]);
 
     expect(primary.map((entry) => entry.id)).toEqual([
       "pi/openai/gpt-6-astra",
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-sol",
       "pi/openai/gpt-5.6-terra",
-      "pi/openai/gpt-5.6-luna",
+      "pi/openai/gpt-6-luna",
     ]);
   });
 });

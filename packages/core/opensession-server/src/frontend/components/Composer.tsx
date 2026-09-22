@@ -128,6 +128,7 @@ import {
   type ComposerMenu,
 } from "./composer/ComposerControls";
 import { ModelRow } from "./composer/ModelRow";
+import { VoiceAudioSplitButton } from "./composer/VoiceAudioSettings";
 import { VoiceControl } from "./composer/VoiceControl";
 
 interface Props {
@@ -1807,33 +1808,43 @@ export function Composer({
                 minimized && "order-3",
               )}
             >
-              <Tooltip
-                label={
-                  call?.active
-                    ? `End call${call.status ? ` (${call.status})` : ""}`
-                    : "Start a voice call"
-                }
+              {/* The Mac shell attaches an audio options chevron to the
+                  handset (microphone, output, ducking for the next call);
+                  elsewhere the wrapper hands the handset back unchanged. */}
+              <VoiceAudioSplitButton
+                mode="conversation"
+                disabled={dictating || (disabled && !call?.active)}
               >
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    composerIconButtonClass,
-                    // The composer owns the inset ::before wash; suppress
-                    // Button's full-size ghost wash, including the open
-                    // tooltip state, so hover paints once like dictation.
-                    "hover:bg-transparent data-[popup-open]:bg-transparent phone:min-h-11 phone:min-w-11",
-                    // A live call reads as the universal red handset.
-                    call?.active && "text-red hover:text-red",
-                  )}
-                  onClick={onToggleCall}
-                  disabled={dictating || (disabled && !call?.active)}
-                  aria-pressed={!!call?.active}
-                  aria-label={call?.active ? "End call" : "Start a voice call"}
+                <Tooltip
+                  label={
+                    call?.active
+                      ? `End call${call.status ? ` (${call.status})` : ""}`
+                      : "Start a voice call"
+                  }
                 >
-                  <IconCall size={22} />
-                </Button>
-              </Tooltip>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      composerIconButtonClass,
+                      // The composer owns the inset ::before wash; suppress
+                      // Button's full-size ghost wash, including the open
+                      // tooltip state, so hover paints once like dictation.
+                      "hover:bg-transparent data-[popup-open]:bg-transparent phone:min-h-11 phone:min-w-11",
+                      // A live call reads as the universal red handset.
+                      call?.active && "text-red hover:text-red",
+                    )}
+                    onClick={onToggleCall}
+                    disabled={dictating || (disabled && !call?.active)}
+                    aria-pressed={!!call?.active}
+                    aria-label={
+                      call?.active ? "End call" : "Start a voice call"
+                    }
+                  >
+                    <IconCall size={22} />
+                  </Button>
+                </Tooltip>
+              </VoiceAudioSplitButton>
             </motion.div>
           )}
 
