@@ -51,6 +51,7 @@ export async function createPiMcpBridge(
     label: "Search MCP tools",
     description:
       "Search the available MCP tool catalog before calling mcp_call. " +
+      "Prefix a required term with + to narrow results (e.g. +opensession-sessions list_sessions). " +
       "Use the returned tool name and argument schema exactly.",
     parameters: {
       type: "object",
@@ -73,8 +74,16 @@ export async function createPiMcpBridge(
       const limit = Number.isFinite(requested)
         ? Math.max(1, Math.min(12, Math.floor(requested)))
         : 6;
-      const terms = query.split(/\s+/).filter(Boolean);
-      const compact = query.replace(/[\s_-]+/g, "");
+      const terms = query.split(/\s+/).map((term) => ({
+        text: term.startsWith("+") ? term.slice(1) : term,
+        required: term.startsWith("+"),
+      }));
+      if (terms.some((term) => !term.text))
+        throw new Error("mcp_search requires a term after +");
+      const compact = terms
+        .map((term) => term.text)
+        .join("")
+        .replace(/[_-]/g, "");
       const matches = tools
         .map((definition) => ({
           definition,
@@ -86,9 +95,10 @@ export async function createPiMcpBridge(
           const weight = describedWeight(entry.description.length);
           let score = 0;
           for (const term of terms) {
-            if (entry.name.includes(term)) score += 10;
-            else if (entry.label.includes(term)) score += 5;
-            else if (entry.description.includes(term)) score += 3 * weight;
+            if (entry.name.includes(term.text)) score += 10;
+            else if (entry.label.includes(term.text)) score += 5;
+            else if (entry.description.includes(term.text)) score += 3 * weight;
+            else if (term.required) return { entry, score: 0 };
           }
           if (compact && entry.name.replace(/[_-]/g, "").includes(compact))
             score += 15;
