@@ -339,27 +339,30 @@ export function guestRunDir(L: RemoteLayout, hostDir: string): string {
   return `${L.runsBase}${hostDir.slice(RUNS_BASE.length)}`;
 }
 
+/** The self-contained workload identity client every Sandbox carries. It is
+ *  uploaded as one file, so the base runtime never depends on the runner
+ *  payload (and a deploy never invalidates it). */
+const WORKLOAD_IDENTITY_CLIENT_SOURCE = `${REPO_ROOT}/scripts/workload-identity-client.ts`;
+
+function workloadIdentityClientPath(L: RemoteLayout): string {
+  return `${L.home}/.local/share/opensession/workload-identity-client.ts`;
+}
+
 /** Shell that installs the sandbox-only `opensession` command surface
- *  (workload identity minting) under ~/.local/bin. Linux symlinks the
- *  committed wrapper, whose bun/repo paths are the Linux layout; other guests
- *  get a generated wrapper naming their own layout. */
-function workloadIdentityClientInstallCommand(L: RemoteLayout): string {
+ *  (workload identity minting) under ~/.local/bin, as a wrapper around the
+ *  uploaded client. Idempotent. */
+export function workloadIdentityClientInstallCommand(L: RemoteLayout): string {
   const target = `${L.home}/.local/bin/opensession`;
-  if (L.os === "linux") {
-    return (
-      `mkdir -p ${L.home}/.local/bin && ` +
-      `chmod 755 ${L.repo}/deploy/sandbox/opensession && ` +
-      `ln -sf ${L.repo}/deploy/sandbox/opensession ${target} && ` +
-      `test -x ${target}`
-    );
-  }
   const wrapper =
     "#!/bin/sh\n" +
-    `exec ${L.bun} ${L.repo}/scripts/workload-identity-client.ts "$@"\n`;
+    "# Sandbox-only Open Session command surface: workload identity minting.\n" +
+    `exec ${L.bun} ${workloadIdentityClientPath(L)} "$@"\n`;
   return (
     `mkdir -p ${L.home}/.local/bin && ` +
+    `rm -f ${shellQuoteWord(target)} && ` +
     `printf %s ${shellQuoteWord(wrapper)} > ${shellQuoteWord(target)} && ` +
-    `chmod 755 ${shellQuoteWord(target)} && test -x ${target}`
+    `chmod 755 ${shellQuoteWord(target)} && test -x ${shellQuoteWord(target)} && ` +
+    `test -s ${shellQuoteWord(workloadIdentityClientPath(L))}`
   );
 }
 
@@ -1626,36 +1629,102 @@ async function ensureRemoteBunxShim(
   log("ready");
 }
 
+/** What the base runtime marker records: the toolchain every Sandbox gets
+ *  (workspace tools, Node, just, gh, bun, the workload identity client). It
+ *  names no runner commit, so a deploy leaves prepared Sandboxes alone. */
+export function baseRuntimeSignature(): string {
+  return (
+    `base+node@${REMOTE_NODE_VERSION}+just@${REMOTE_JUST_VERSION}` +
+    `+gh@${REMOTE_GH_VERSION}+${REMOTE_RUNTIME_REVISION}+${BASE_RUNTIME_REVISION}`
+  );
+}
+
+/** Bump when the base runtime contract (not a pinned version) changes. */
+const BASE_RUNTIME_REVISION = "base-runtime-v1";
+
+function baseRuntimeMarker(L: RemoteLayout): string {
+  return `${L.home}/.opensession-base-runtime`;
+}
+
+async function installWorkloadIdentityClient(
+  driver: RemoteDriver,
+  L: RemoteLayout,
+): Promise<void> {
+  const source = await readFile(WORKLOAD_IDENTITY_CLIENT_SOURCE, "utf8");
+  need(
+    await driver.exec(
+      `mkdir -p ${shellQuoteWord(dirname(workloadIdentityClientPath(L)))}`,
+    ),
+    "workload identity client directory",
+  );
+  await driver.writeFile(workloadIdentityClientPath(L), source);
+  need(
+    await driver.exec(workloadIdentityClientInstallCommand(L)),
+    "workload identity client install",
+  );
+}
+
 /**
- * Install the runner payload in a fresh remote sandbox (idempotent — a marker
- * file short-circuits every later call). See the module header for what/why
- * and the cold-start cost.
+ * The runtime every Sandbox needs, whatever runs in it: workspace tools,
+ * pinned Node/just/gh, bun (lifecycle hooks and the Portal relay), and the
+ * `opensession` identity command. Idempotent: a matching marker costs one
+ * command, which also repairs the identity command (Box archive/resume can
+ * drop an executable bit even though the marker survives).
  */
-export async function bootstrapRemoteSandbox(
+export async function ensureRemoteBaseRuntime(
   driver: RemoteDriver,
   label: string,
 ): Promise<void> {
   const L = layoutFor(driver);
+  const signature = baseRuntimeSignature();
+  const marker = await driver.exec(
+    `cat ${shellQuoteWord(baseRuntimeMarker(L))} 2>/dev/null`,
+  );
+  if (marker.exitCode === 0 && marker.stdout.trim() === signature) {
+    const repaired = await driver.exec(workloadIdentityClientInstallCommand(L));
+    if (repaired.exitCode === 0) return;
+    await installWorkloadIdentityClient(driver, L);
+    return;
+  }
+  await bootstrapRemoteBaseRuntime(driver, label);
+  await installWorkloadIdentityClient(driver, L);
+  need(
+    await driver.exec(
+      `printf '%s' ${shellQuoteWord(signature)} > ${shellQuoteWord(baseRuntimeMarker(L))}`,
+    ),
+    "base runtime marker",
+  );
+}
+
+/** What a Sandbox is prepared for. `workspace` is the base runtime only: a
+ *  Portal Sandbox, whose agent runs on this server. `agent` also installs the
+ *  in-VM runner payload. */
+export type RemoteRuntime = "agent" | "workspace";
+
+/**
+ * Prepare a remote sandbox (idempotent — markers short-circuit every later
+ * call). The base runtime always; the runner payload only for `agent`. See
+ * the module header for the payload's cold-start cost.
+ */
+export async function bootstrapRemoteSandbox(
+  driver: RemoteDriver,
+  label: string,
+  opts: { runtime?: RemoteRuntime } = {},
+): Promise<void> {
+  const L = layoutFor(driver);
+  await ensureRemoteBaseRuntime(driver, label);
+  if (opts.runtime === "workspace") return;
   const signature = bootstrapSignature();
   const marker = await driver.exec(`cat ${L.bootstrapMarker} 2>/dev/null`);
   if (marker.exitCode === 0 && marker.stdout.trim() === signature) {
-    // Box archive/resume reconstructs parts of the filesystem from Git and can
-    // drop an operator-applied executable bit even though the durable bootstrap
-    // marker survives. Repair the tiny workload-identity entrypoint on every
-    // adoption instead of rerunning the full runtime install.
     need(
-      await driver.exec(
-        `${workloadIdentityClientInstallCommand(L)} && ` +
-          `(${remoteRunnerInstallCommand(false, L)})`,
-      ),
-      "workload identity client repair",
+      await driver.exec(`(${remoteRunnerInstallCommand(false, L)})`),
+      "runner host repair",
     );
     return;
   }
   const log = (msg: string) =>
     console.log(`[sandbox:${label}] bootstrap: ${msg}`);
-
-  await bootstrapRemoteBaseRuntime(driver, label);
 
   // Runner bundle: tarball if configured, else git clone at the pinned sha
   // (see resolveRunnerPayload for the fallback order). Resolve the
@@ -1765,10 +1834,6 @@ export async function bootstrapRemoteSandbox(
       },
     ),
     "bun install of the runner bundle",
-  );
-  need(
-    await driver.exec(workloadIdentityClientInstallCommand(L)),
-    "workload identity client install",
   );
   log("compiling the single-file runner host…");
   need(

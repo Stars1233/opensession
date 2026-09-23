@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
+  baseRuntimeSignature,
   bootstrapRemoteSandbox,
   bootstrapSignature,
   remoteRunnerHostCommand,
@@ -22,6 +23,34 @@ afterEach(() => {
     rmSync(path, { recursive: true, force: true });
 });
 
+/** A driver whose Sandbox is already fully prepared: both markers match. */
+function preparedDriver(
+  commands: string[],
+  other: { exitCode: number } = { exitCode: 0 },
+): RemoteDriver {
+  return {
+    async exec(command) {
+      commands.push(command);
+      if (
+        command.startsWith("cat ") &&
+        command.includes(".opensession-base-runtime")
+      )
+        return { exitCode: 0, stdout: baseRuntimeSignature(), stderr: "" };
+      if (command.startsWith("cat "))
+        return { exitCode: 0, stdout: `${bootstrapSignature()}\n`, stderr: "" };
+      if (
+        command.includes(".local/bin/opensession ") ||
+        command.includes("workload-identity-client")
+      )
+        return { exitCode: 0, stdout: "", stderr: "" };
+      return { exitCode: other.exitCode, stdout: "", stderr: "" };
+    },
+    async execBackground() {},
+    async writeFile() {},
+    async ensureStarted() {},
+  };
+}
+
 describe("remote runner bootstrap", () => {
   test("keeps the guest checkout independent from the host release path", () => {
     expect(REMOTE_REPO).toBe("/home/ubuntu/projects/opensession");
@@ -29,49 +58,44 @@ describe("remote runner bootstrap", () => {
 
   test("repairs the workload identity client after a provider resume", async () => {
     const commands: string[] = [];
-    const driver: RemoteDriver = {
-      async exec(command) {
-        commands.push(command);
-        if (command.startsWith("cat ")) {
-          return {
-            exitCode: 0,
-            stdout: `${bootstrapSignature()}\n`,
-            stderr: "",
-          };
-        }
-        return { exitCode: 0, stdout: "", stderr: "" };
-      },
-      async execBackground() {},
-      async writeFile() {},
-      async ensureStarted() {},
-    };
+    const driver = preparedDriver(commands);
 
     await bootstrapRemoteSandbox(driver, "test");
 
-    expect(commands).toHaveLength(2);
-    expect(commands[1]).toContain("/deploy/sandbox/opensession");
+    expect(commands).toHaveLength(4);
+    expect(commands[0]).toContain(".opensession-base-runtime");
+    expect(commands[1]).toContain(
+      "/home/ubuntu/.local/share/opensession/workload-identity-client.ts",
+    );
     expect(commands[1]).toContain(
       "test -x /home/ubuntu/.local/bin/opensession",
     );
-    expect(commands[1]).toContain("bun build --compile");
-    expect(commands[1]).toContain("--external '*.html'");
-    expect(commands[1]).toContain("--external oxc-transform-react");
-    expect(commands[1]).toContain(REMOTE_RUNNER_BINARY);
+    expect(commands[2]).toContain(".bks-bootstrapped");
+    expect(commands[3]).toContain("bun build --compile");
+    expect(commands[3]).toContain("--external '*.html'");
+    expect(commands[3]).toContain("--external oxc-transform-react");
+    expect(commands[3]).toContain(REMOTE_RUNNER_BINARY);
+  });
+
+  test("a workspace Sandbox gets the base runtime and no runner payload", async () => {
+    const commands: string[] = [];
+    await bootstrapRemoteSandbox(preparedDriver(commands), "test", {
+      runtime: "workspace",
+    });
+    expect(commands).toHaveLength(2);
+    expect(commands.join("\n")).not.toContain(".bks-bootstrapped");
+    expect(commands.join("\n")).not.toContain(REMOTE_REPO);
+  });
+
+  test("the base runtime signature names no runner commit", () => {
+    expect(baseRuntimeSignature()).not.toContain(bootstrapSignature());
+    expect(baseRuntimeSignature()).toStartWith("base+node@");
   });
 
   test("reports a killed compiler even when it produced no output", async () => {
-    const driver: RemoteDriver = {
-      async exec(command) {
-        if (command.startsWith("cat "))
-          return { exitCode: 0, stdout: bootstrapSignature(), stderr: "" };
-        return { exitCode: 137, stdout: "", stderr: "" };
-      },
-      async execBackground() {},
-      async writeFile() {},
-      async ensureStarted() {},
-    };
+    const driver = preparedDriver([], { exitCode: 137 });
     await expect(bootstrapRemoteSandbox(driver, "test")).rejects.toThrow(
-      "exit 137): no command output",
+      "runner host repair, exit 137): no command output",
     );
   });
 
