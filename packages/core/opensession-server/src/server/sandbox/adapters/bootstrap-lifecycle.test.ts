@@ -174,6 +174,45 @@ describe("remote repo lifecycle", () => {
     ).toBe(false);
   });
 
+  test("a warm clone about to restore a checkpoint skips the branch fetches", async () => {
+    const d = driver([
+      { exitCode: 0, stdout: "warm\n" },
+      { exitCode: 0 },
+      { exitCode: 0 },
+      { exitCode: 0 },
+      { exitCode: 0, stdout: "absent\n" },
+    ]);
+    await setupRemoteWorkspace(
+      d.value,
+      "/work/feature",
+      "https://token@example.test/repo.git",
+      "feature/new-ui",
+      "main",
+      "opensession",
+      { sandboxId: "sbx-test", provider: "daytona", repoId: "opensession" },
+      {
+        restoreCheckpoint: {
+          ref: "refs/opensession/checkpoints/s1",
+          commit: "c0ffee",
+          branch: "feature/new-ui",
+        },
+      },
+    );
+    const adoption = d.commands[1]!;
+    expect(adoption.command).toContain("ln -s");
+    expect(adoption.command).not.toContain(
+      "fetch --no-tags origin +refs/heads",
+    );
+    expect(adoption.command).toContain(
+      "update-ref refs/heads/feature/new-ui HEAD",
+    );
+    expect(adoption.command).toContain(
+      "symbolic-ref HEAD refs/heads/feature/new-ui",
+    );
+    // The restore itself fetches the checkpoint and lands the branch on it.
+    expect(d.commands[2]!.command).toContain("refs/opensession/checkpoints/s1");
+  });
+
   test("cold-clones instead of taking over another workspace's warm clone", async () => {
     const d = driver([
       { exitCode: 0, stdout: "warm\n" },

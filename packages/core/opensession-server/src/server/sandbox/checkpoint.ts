@@ -141,8 +141,15 @@ export function checkpointScript(excluded: string[]): string {
     'if [ "$branch" = "${OS_DEFAULT_BRANCH:-}" ]; then echo "default $branch"; exit 0; fi',
     "head=$(git rev-parse --verify HEAD^{commit})",
     "idx=$(mktemp)",
+    // Start from a copy of the checkout's own index: its stat data lets
+    // `git add -A` rehash only what changed (seconds to milliseconds on a
+    // large checkout; a fresh index hashes every file). Entries marked
+    // assume-unchanged or skip-worktree would hide changes, so a checkout
+    // with any falls back to building the index from HEAD.
+    "real_idx=$(git rev-parse --git-path index)",
+    'if [ -s "$real_idx" ] && ! git ls-files -v | grep -q "^[a-zS]"; then cp "$real_idx" "$idx"; else rm -f "$idx"; fi',
     'export GIT_INDEX_FILE="$idx"',
-    'git read-tree "$head"',
+    'if [ ! -s "$idx" ]; then git read-tree "$head"; fi',
     "git add -A -- .",
     rm.trimEnd(),
     "tree=$(git write-tree)",

@@ -1389,16 +1389,28 @@ export async function setupRemoteWorkspace(
     // provider round trip. If anything after attach fails, remove the mount or
     // symlink before the cold-clone fallback. Otherwise a transient warm fetch
     // failure poisons the fallback with an already-existing destination.
+    // A checkpoint restore right after needs only the branch name: it
+    // fetches the checkpoint (which carries its own history) and moves the
+    // branch onto it. Fetching the branch and the default branch first costs
+    // two negotiations over a freshly restored, lazily loaded disk (about 40s
+    // on a large repository) for refs the restore then replaces.
+    const restoresCheckpoint =
+      options.restoreCheckpoint?.branch === branch &&
+      !!options.restoreCheckpoint;
+    const branchStep = restoresCheckpoint
+      ? `git -C ${shellQuoteWord(cwd)} update-ref ${shellQuoteWord(`refs/heads/${branch}`)} HEAD && ` +
+        `git -C ${shellQuoteWord(cwd)} symbolic-ref HEAD ${shellQuoteWord(`refs/heads/${branch}`)}`
+      : `(if ${fetchRef(branch)}; then __start=${shellQuoteWord(`origin/${branch}`)}; else ` +
+        `${fetchRef(defaultBranch)} && __start=${shellQuoteWord(`origin/${defaultBranch}`)}; fi; ` +
+        `if [ "$(git -C ${shellQuoteWord(cwd)} rev-parse HEAD)" = "$(git -C ${shellQuoteWord(cwd)} rev-parse "$__start")" ]; then ` +
+        `git -C ${shellQuoteWord(cwd)} update-ref ${shellQuoteWord(`refs/heads/${branch}`)} "$__start" && ` +
+        `git -C ${shellQuoteWord(cwd)} symbolic-ref HEAD ${shellQuoteWord(`refs/heads/${branch}`)}; else ` +
+        `git -C ${shellQuoteWord(cwd)} checkout -B ${shellQuoteWord(branch)} "$__start"; fi)`;
     const prepare =
       `{ if [ -f ${shellQuoteWord(owner)} ] && [ "$(cat ${shellQuoteWord(owner)})" != ${shellQuoteWord(cwd)} ]; then exit 73; fi; } && ` +
       `__rc=0; { (${attach}) && ` +
       `git -C ${shellQuoteWord(cwd)} remote set-url origin ${shellQuoteWord(cloneUrl)} && ` +
-      `(if ${fetchRef(branch)}; then __start=${shellQuoteWord(`origin/${branch}`)}; else ` +
-      `${fetchRef(defaultBranch)} && __start=${shellQuoteWord(`origin/${defaultBranch}`)}; fi; ` +
-      `if [ "$(git -C ${shellQuoteWord(cwd)} rev-parse HEAD)" = "$(git -C ${shellQuoteWord(cwd)} rev-parse "$__start")" ]; then ` +
-      `git -C ${shellQuoteWord(cwd)} update-ref ${shellQuoteWord(`refs/heads/${branch}`)} "$__start" && ` +
-      `git -C ${shellQuoteWord(cwd)} symbolic-ref HEAD ${shellQuoteWord(`refs/heads/${branch}`)}; else ` +
-      `git -C ${shellQuoteWord(cwd)} checkout -B ${shellQuoteWord(branch)} "$__start"; fi) && ` +
+      `${branchStep} && ` +
       `printf '%s\\n' ${shellQuoteWord(cwd)} > ${shellQuoteWord(owner)}; } || __rc=$?; ` +
       `if [ "$__rc" -ne 0 ]; then ${cleanup}; fi; exit "$__rc"`;
     const adopted = await driver.exec(prepare, { timeoutMs: 180_000 });

@@ -309,6 +309,41 @@ describe("checkpoint script", () => {
     expect(files).toEqual([".gitignore", "README.md", "new.txt"]);
   });
 
+  test("captures the working tree, not what happens to be staged", async () => {
+    const before = readFileSync(join(work, "README.md"), "utf-8");
+    // Starting from the checkout's own index must not freeze a stale stage.
+    writeFileSync(join(work, "README.md"), "staged version\n");
+    await git(work)`git add README.md`;
+    writeFileSync(join(work, "README.md"), "working version\n");
+    const result = await runCheckpoint({});
+    expect(result.exitCode).toBe(0);
+    expect((await git(origin)`git show ${ref}:README.md`.text()).trim()).toBe(
+      "working version",
+    );
+    // The checkout's real index is untouched.
+    expect((await git(work)`git show :README.md`.text()).trim()).toBe(
+      "staged version",
+    );
+    await git(work)`git reset -q README.md`;
+    writeFileSync(join(work, "README.md"), before);
+  });
+
+  test("an assume-unchanged file is still captured", async () => {
+    const before = readFileSync(join(work, "README.md"), "utf-8");
+    await git(work)`git update-index --assume-unchanged README.md`;
+    try {
+      writeFileSync(join(work, "README.md"), "hidden from git status\n");
+      const result = await runCheckpoint({});
+      expect(result.exitCode).toBe(0);
+      expect((await git(origin)`git show ${ref}:README.md`.text()).trim()).toBe(
+        "hidden from git status",
+      );
+    } finally {
+      await git(work)`git update-index --no-assume-unchanged README.md`;
+      writeFileSync(join(work, "README.md"), before);
+    }
+  });
+
   test("reports unchanged when the last checkpoint already holds this state", async () => {
     const first = await runCheckpoint({});
     const [, , head, tree] = first.stdout.toString().trim().split(/\s+/);
