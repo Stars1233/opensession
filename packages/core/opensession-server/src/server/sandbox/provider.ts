@@ -82,6 +82,10 @@ export interface SandboxSessionSpec {
    * checkpoint's head with its uncommitted changes in place. A workspace
    * that already exists on the sandbox disk keeps that disk instead. */
   restoreCheckpoint?: { ref: string; commit: string; branch: string };
+  /** What the Sandbox is prepared for: `agent` (default) also installs the
+   *  in-VM runner payload; `workspace` gets only the base runtime, for a
+   *  Sandbox whose agent runs on this server (a Portal Sandbox). */
+  runtime?: "agent" | "workspace";
 }
 
 export interface ExecOpts {

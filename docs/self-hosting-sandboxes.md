@@ -206,6 +206,11 @@ started, by the person from the Portals panel or by the agent through
 - starts the Portal there and relays it as usual. The Portals panel says so,
   with the machine's state while it prepares, sleeps, or needs attention.
 
+A Portal Sandbox carries only the base runtime: the workspace tools, the
+pinned Node, just, gh and bun, and the `opensession` identity command. The
+agent runs on this machine, so none of the runner payload is installed there,
+and deploying Open Session does not make the machine reinstall anything.
+
 After every clean turn the worktree is checkpointed again and the Portal
 Sandbox's checkout is landed on it (whatever branch it was on), so the app
 shows what the agent just did at turn granularity; the dev server's own file

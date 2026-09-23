@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
@@ -133,6 +134,22 @@ describe("checkpointLandScript", () => {
       .quiet()
       .nothrow();
     expect(wrong.exitCode).not.toBe(0);
+
+    // A git that crashed during an earlier landing left its lock behind.
+    // (Aged, since other gits may be running on the machine this test runs
+    // on; inside a Portal Sandbox no running git also clears it.)
+    const lock = join(mirror, ".git", "index.lock");
+    writeFileSync(lock, "");
+    const old = new Date(Date.now() - 10 * 60_000);
+    utimesSync(lock, old, old);
+    const relanded = await git(
+      mirror,
+    )`bash -c ${checkpointLandScript(ref, commit!, "feature", [".ports.conf"])}`
+      .quiet()
+      .nothrow();
+    expect(relanded.stderr.toString()).toBe("");
+    expect(relanded.exitCode).toBe(0);
+    expect(existsSync(lock)).toBe(false);
   });
 });
 

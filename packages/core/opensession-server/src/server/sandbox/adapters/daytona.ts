@@ -827,7 +827,9 @@ export class DaytonaProvider implements SandboxProvider {
         // A sandbox that cannot reach our callback URL can never run anything.
         await assertDialbackReachable(driver, "daytona");
         mark("dial-back verified");
-        await bootstrapRemoteSandbox(driver, "daytona");
+        await bootstrapRemoteSandbox(driver, "daytona", {
+          runtime: spec.runtime,
+        });
         mark("runner ready");
       };
       const prepareWorkspace = async () => {
