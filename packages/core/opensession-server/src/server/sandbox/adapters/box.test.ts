@@ -164,6 +164,13 @@ describe("Box command readiness", () => {
     expect(boxResumePrimeCommand("/home/ubuntu/worktrees/app")).toContain(
       "test -d /home/ubuntu/worktrees/app/.git",
     );
+    // The binaries the Portal relay and dev servers start on come first.
+    expect(boxResumePrimeCommand("/home/ubuntu/worktrees/app")).toStartWith(
+      '{ cat /home/ubuntu/.bun/bin/bun "$(command -v node)"',
+    );
+    expect(boxResumePrimeCommand("/home/ubuntu/worktrees/app")).toContain(
+      "/objects/pack/*.idx",
+    );
   });
 
   test("keeps command temporary files inside the bind-mounted home", () => {

@@ -68,6 +68,7 @@ import {
   readRemoteState,
   runResumeHook,
   remoteCloneUrl,
+  remoteWarmWorkspaceDir,
   removeRemoteState,
   resolveTrustPolicy,
   setupRemoteWorkspace,
@@ -459,11 +460,20 @@ export function boxNativeFilePath(path: string): string {
   return path;
 }
 
+/**
+ * Box restores an archived home lazily: every file is fetched on first
+ * read. Warm what a woken or adopted workspace touches first, in the
+ * background: the bun and node binaries (the Portal relay and the app's
+ * dev server start on them; bun alone is ~80 MB), git's pack indexes, and
+ * every tracked file's metadata.
+ */
 export function boxResumePrimeCommand(cwd: string): string {
   return (
+    `{ cat /home/ubuntu/.bun/bin/bun "$(command -v node)" >/dev/null 2>&1 & } ; ` +
     `if test -d ${shellQuoteWord(cwd)}/.git; then cd ${shellQuoteWord(cwd)} && ` +
-    `{ git ls-files -z | xargs -0 -r -n 64 -P 16 stat -c '%n' -- >/dev/null 2>&1; ` +
-    `GIT_OPTIONAL_LOCKS=0 git status --porcelain >/dev/null 2>&1; }; fi`
+    `{ cat "$(git rev-parse --git-common-dir)"/objects/pack/*.idx >/dev/null 2>&1; ` +
+    `git ls-files -z | xargs -0 -r -n 64 -P 16 stat -c '%n' -- >/dev/null 2>&1; ` +
+    `GIT_OPTIONAL_LOCKS=0 git status --porcelain >/dev/null 2>&1; }; fi; wait`
   );
 }
 
@@ -1240,9 +1250,15 @@ export class BoxProvider implements SandboxProvider {
     const resumingExistingWorkspace = Boolean(
       prevState && prevState.sandboxId === box.id && stateOf(box) !== "running",
     );
+    // A parked standby (a prewarm or a kept-ready Box) comes back with the
+    // same lazily restored disk; its warm clone is what the workspace step
+    // and the app are about to read.
+    const adoptingParked = lifecycleRefreshed && stateOf(box) !== "running";
     await driver.ensureStarted();
     mark("box started");
     if (resumingExistingWorkspace) primeBoxWorkspaceAfterResume(driver, cwd);
+    else if (adoptingParked)
+      primeBoxWorkspaceAfterResume(driver, remoteWarmWorkspaceDir(repo.id));
     // Cheap dial-back probe BEFORE the expensive bootstrap — same rationale
     // as daytona: a box that can't reach our callback URL can never run.
     await assertDialbackReachable(driver, "box");
