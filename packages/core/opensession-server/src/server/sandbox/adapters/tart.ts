@@ -1218,7 +1218,7 @@ export class TartProvider implements SandboxProvider {
     mark("VM running");
     await assertDialbackReachable(driver, "tart");
     mark("dial-back verified");
-    await bootstrapRemoteSandbox(driver, "tart", { runtime: spec.runtime });
+    await bootstrapRemoteSandbox(driver, "tart");
     mark("runner ready");
     await setupRemoteWorkspace(
       driver,

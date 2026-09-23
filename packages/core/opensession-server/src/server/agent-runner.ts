@@ -1980,103 +1980,28 @@ export async function resumeInterruptedRuns(
       );
       continue;
     }
-    // Sandboxed runs (docs/self-hosting-sandboxes.md): the sandbox — and
-    // often the in-sandbox run host itself — outlives a opensession restart.
-    // Reattach/relaunch through the provider instead of running in-process;
-    // the sandbox modules are imported lazily so these paths stay completely
-    // out of processes that never touch them.
-    if (
-      run.sandboxId &&
-      (run.sandboxProvider === "daytona" ||
-        run.sandboxProvider === "box" ||
-        run.sandboxProvider === "tart" ||
-        run.sandboxProvider === "usecomputer")
-    ) {
+    // A run from the retired in-Sandbox runner (its record names the
+    // Sandbox, not a local host). Its loop ran inside the machine, and this
+    // release has no launcher for it: say so instead of guessing, and the
+    // next prompt runs with its loop here and the Sandbox as its workspace.
+    if (run.sandboxId) {
       rememberHandledSession(run);
       trackRecovery(run);
       recoveryTasks.push(
-        recoveryTask(run, async (releaseQueueSlot) => {
-          const recoveryStartedAt = Date.now();
-          let recoveryRecorded = false;
-          let terminalSeen = false;
-          const recordRecovery = (
-            outcome: "ok" | "failed",
-            reason?: string,
-          ) => {
-            if (recoveryRecorded) return;
-            recoveryRecorded = true;
-            audit({
-              kind: "sandbox_restart_survival_metric",
-              session_id: run.osSessionId,
-              provider: run.sandboxProvider,
-              sandbox_id: run.sandboxId,
-              recovery_ms: Date.now() - recoveryStartedAt,
-              outcome,
-              ...(reason ? { reason } : {}),
-            });
-          };
-          try {
-            if (await checkpointStoppedRecovery(run)) return;
-            Object.assign(run, journalStartRecovery(run));
-            const resume = (await import("./sandbox/adapters/bootstrap"))
-              .resumeRemoteSandboxRun;
-            if (await checkpointStoppedRecovery(run)) return;
-            const events = await resume(run, {
-              onAskUser: run.osSessionId
-                ? askHandlerFor?.(run.osSessionId)
-                : undefined,
-            });
-            if (await checkpointStoppedRecovery(run)) {
-              cancelRecoveredEngine(run);
-              return;
-            }
-            if (!events) {
-              console.warn(
-                `[runner] Sandbox ${run.sandboxId} for interrupted run ${run.runKey} is gone — the session's next prompt recreates it`,
-              );
-              await reportRecoveryFailure(
-                run,
-                "Restart recovery could not reconnect to the interrupted sandbox. Send the prompt again to continue.",
-              );
-              recordRecovery("failed", "sandbox_unavailable");
-              return;
-            }
-            // The sandbox host is attached. Its model turn can continue while
-            // the boot queue starts the next interrupted session.
-            releaseQueueSlot();
-            for await (const event of events) {
-              if (await checkpointStoppedRecovery(run)) return;
-              markRecoveryProgress(run, event);
-              if (event.type === "done" || event.type === "error") {
-                terminalSeen =
-                  (await settleRecovery(run, event)) || terminalSeen;
-                recordRecovery(
-                  event.type === "done" ? "ok" : "failed",
-                  event.type,
-                );
-              } else await emitRecoveryEvent(run, event);
-            }
-            if (await checkpointStoppedRecovery(run)) return;
-            if (!terminalSeen) {
-              await reportRecoveryFailure(
-                run,
-                "Restart recovery ended before the interrupted sandbox returned a final result. Send the prompt again to continue.",
-              );
-              recordRecovery("failed", "stream_ended_without_terminal_event");
-            }
-          } catch (e) {
-            recordRecovery("failed", "recovery_error");
-            console.error(
-              `[runner] Sandbox resume failed for ${run.runKey}:`,
-              e,
-            );
-            if (await checkpointStoppedRecovery(run)) return;
-            if (!terminalSeen)
-              await reportRecoveryFailure(
-                run,
-                "Restart recovery failed while reconnecting to the interrupted sandbox. Send the prompt again to continue.",
-              );
-          }
+        recoveryTask(run, async () => {
+          if (await checkpointStoppedRecovery(run)) return;
+          audit({
+            kind: "sandbox_restart_survival_metric",
+            session_id: run.osSessionId,
+            provider: run.sandboxProvider,
+            sandbox_id: run.sandboxId,
+            outcome: "failed",
+            reason: "retired_in_sandbox_runner",
+          });
+          await reportRecoveryFailure(
+            run,
+            "This turn ran on the previous Sandbox runner, which an update retired while it was running. Send the prompt again to continue; your files in the Sandbox are unchanged.",
+          );
         }),
       );
       continue;

@@ -909,7 +909,7 @@ export class UseComputerProvider implements SandboxProvider {
     await assertDialbackReachable(driver, this.id);
     mark("dial-back verified");
     const prepareRunner = async () => {
-      await bootstrapRemoteSandbox(driver, this.id, { runtime: spec.runtime });
+      await bootstrapRemoteSandbox(driver, this.id);
       mark("runner ready");
     };
     const prepareWorkspace = async () => {

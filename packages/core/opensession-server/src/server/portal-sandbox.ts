@@ -361,9 +361,6 @@ async function provisionPortalSandbox(
         repo: current.repo,
         branch: checkpoint.branch,
         mode: "code",
-        // The agent stays on this machine: the Portal Sandbox needs only the
-        // base runtime, which no deploy invalidates.
-        runtime: "workspace",
         restoreCheckpoint: {
           ref: checkpoint.ref,
           commit: checkpoint.commit,

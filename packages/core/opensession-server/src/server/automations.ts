@@ -1936,7 +1936,6 @@ export async function runAutomation(
         // The agent loop, its model traffic and its MCP connections stay on
         // this server; the Sandbox only runs the workspace commands, so it
         // needs neither model nor MCP endpoints in its egress allowlist.
-        runtime: "workspace",
         egressAllowlist: [...(automationSandbox.egressAllowlist || [])],
       });
       disposableSandbox = { provider, id: sandbox.id };

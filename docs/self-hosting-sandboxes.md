@@ -6,7 +6,7 @@ a Runner, with the repository checked out, its `.agents/setup` already run,
 and a durable disk. It sleeps between turns,
 wakes when the next message arrives, and comes back with files, running
 Portals, and the conversation intact. Companion to
-[`deploy/sandbox/README.md`](../deploy/sandbox/README.md) (runner payload) and
+[`deploy/sandbox/README.md`](../deploy/sandbox/README.md) (the base runtime) and
 [repo-lifecycle.md](repo-lifecycle.md) (what a repository commits).
 
 **Default = This machine.** The new-session menu offers one choice, **Run in:
@@ -59,7 +59,7 @@ or another provider.
 Every Sandbox session gets its own machine. Open Session:
 
 - creates the VM (from the project's snapshot when one exists, else from the
-  provider's base image), installs the runner payload, and clones the
+  provider's base image), installs the base runtime, and clones the
   repository inside it. The workspace lives in the Sandbox; after every clean
   turn its state is checkpointed to origin (see below), so a lost or replaced
   machine continues from the last checkpoint;
@@ -348,23 +348,25 @@ never adopt a prewarm or project snapshot. See
 Workspace → Sandboxes writes this file; hand-edit only for the operator
 settings below. Read fresh per call, no restart needed except where noted.
 
-| Key                                             | Meaning                                                                                                                                                                                                                         |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connections`                                   | Provider connections and their qualification state. Managed by Workspace → Sandboxes.                                                                                                                                           |
-| `sessionDefault`                                | `"daytona"`, `"box"`, `"tart"`, or `"none"`: where new sessions run when nobody chose.                                                                                                                                          |
-| `provider`, `perRepo.<id>.provider`             | Legacy default and per-repo override for API creates that pass `sandbox: true`.                                                                                                                                                 |
-| `perRepo.<id>.sessionDefault`                   | `"daytona"`, `"box"`, or `"none"`: where new sessions on that repo run, ahead of the workspace and personal defaults. Managed by Workspace → Sandboxes → Projects.                                                              |
-| `idleStopMinutes`                               | Sleep after this much idle time (default 30).                                                                                                                                                                                   |
-| `callbackBaseUrl`                               | Dial-back URL when the public ingress origin should not be used (tailnet setups).                                                                                                                                               |
-| `publicIngress`                                 | Advanced bind override for the `:3860` listener. Needs a restart.                                                                                                                                                               |
-| `daytona.snapshot`                              | Org snapshot new Daytona sandboxes start from when no project snapshot exists (sizing lives in it).                                                                                                                             |
-| `cloneCredential`                               | `{type: "none"}` or `{type: "https-token", token}` for repository clones inside Sandboxes. The live GitHub App wins.                                                                                                            |
-| `prewarm`                                       | `enabled`, `ttlMinutes`, `maxLive` for the warm-on-typing pool; `keepReady` lists `{provider, repoId}` targets kept prepared (Keep one ready in Workspace → Sandboxes).                                                         |
-| `runnerBundleUrl`, `runnerRepoUrl`, `runnerSha` | Where Sandboxes fetch the Open Session runner payload. Unset, a source install runs the runner at its own deployed commit, so every deploy carries it along; set `runnerSha` only to hold or roll back the runner deliberately. |
-| `automation.egressAllowlist`                    | Extra hosts unattended runs may reach.                                                                                                                                                                                          |
+| Key                                 | Meaning                                                                                                                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connections`                       | Provider connections and their qualification state. Managed by Workspace → Sandboxes.                                                                                   |
+| `sessionDefault`                    | `"daytona"`, `"box"`, `"tart"`, or `"none"`: where new sessions run when nobody chose.                                                                                  |
+| `provider`, `perRepo.<id>.provider` | Legacy default and per-repo override for API creates that pass `sandbox: true`.                                                                                         |
+| `perRepo.<id>.sessionDefault`       | `"daytona"`, `"box"`, or `"none"`: where new sessions on that repo run, ahead of the workspace and personal defaults. Managed by Workspace → Sandboxes → Projects.      |
+| `idleStopMinutes`                   | Sleep after this much idle time (default 30).                                                                                                                           |
+| `callbackBaseUrl`                   | Dial-back URL when the public ingress origin should not be used (tailnet setups).                                                                                       |
+| `publicIngress`                     | Advanced bind override for the `:3860` listener. Needs a restart.                                                                                                       |
+| `daytona.snapshot`                  | Org snapshot new Daytona sandboxes start from when no project snapshot exists (sizing lives in it).                                                                     |
+| `cloneCredential`                   | `{type: "none"}` or `{type: "https-token", token}` for repository clones inside Sandboxes. The live GitHub App wins.                                                    |
+| `prewarm`                           | `enabled`, `ttlMinutes`, `maxLive` for the warm-on-typing pool; `keepReady` lists `{provider, repoId}` targets kept prepared (Keep one ready in Workspace → Sandboxes). |
+| `automation.egressAllowlist`        | Extra hosts unattended runs may reach.                                                                                                                                  |
 
 Retired keys (`image`, `workspace`, `transport`, `previewPorts`, `snapshots`,
-`e2b`, `modal`, `awsLambdaMicrovm`) are ignored. Sessions that recorded a
+`e2b`, `modal`, `awsLambdaMicrovm`, and the runner payload's
+`runnerBundleUrl`, `runnerRepoUrl`, `runnerSha`) are ignored. A turn that was
+running on the retired in-Sandbox runner when this release was deployed ends
+with a note to send the prompt again; the Sandbox and its files are kept. Sessions that recorded a
 retired provider (`docker`, `modal`, `e2b`, `lambda-microvm`) keep their
 transcript but their Sandbox can no longer be woken; start a new session.
 
@@ -382,7 +384,7 @@ fails clearly rather than silently running on the host.
 
 All providers passed the live conformance matrix (Daytona 2026-08-11, Boat
 2026-08-13, then called Box; Mac VM 2026-09-20 on the office Mac mini;
-use.computer 2026-09-21 on a reserved Mac): engine round trip, exec
+use.computer 2026-09-21 on a reserved Mac): workspace tool round trip, exec
 semantics, in-sandbox workspace git, Portal relay, sleep/wake, snapshot
 restore with credential scrub, and cleanup.
 Re-run it with `bun run deploy/sandbox/conformance.ts [daytona] [box]`; it
@@ -474,9 +476,9 @@ sealed them; a session placed on another Mac clones the base instead, and
 the snapshot stays valid where it is.
 
 Session VMs are APFS clone-on-write clones of the base (`sbx-<session>`), so
-creating one costs no space up front and takes seconds; the runner payload
-bootstrap on first use takes a few minutes as on other providers, and
-project snapshots (`tpl-<repo>-<hash>`, local clones) remove that. The
+creating one costs no space up front and takes seconds; the base runtime
+install on first use takes a few minutes, and project snapshots
+(`tpl-<repo>-<hash>`, local clones) remove that. The
 guest user is `admin` with home `/Users/admin`; the workspace lives under
 `/Users/admin/worktrees`. Sleep is `tart stop` (disk kept, processes gone);
 wake boots the VM again and runs `.agents/resume`. Idle VMs are stopped
@@ -521,9 +523,9 @@ everything. It takes about six minutes; the snapshot dominates.
 
 The guest user is `lume` with home `/Users/lume`; the workspace lives under
 `/Users/lume/worktrees`, and guest preparation aliases `/home/ubuntu` to that
-home so the session's canonical path resolves. The runner payload bootstrap on
-first use takes a few minutes as on other providers; project snapshots (service
-snapshots, restored on any reserved Mac) remove that, and prewarms adopt as on
+home so the session's canonical path resolves. The base runtime install on
+first use takes a few minutes; project snapshots (service snapshots, restored
+on any reserved Mac) remove that, and prewarms adopt as on
 Daytona. Prewarms are never parked, since a stopped VM would still hold one of
 the reservation's slots: they are adopted or destroyed.
 

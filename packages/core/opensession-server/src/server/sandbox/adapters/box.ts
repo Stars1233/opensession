@@ -1247,7 +1247,7 @@ export class BoxProvider implements SandboxProvider {
     // as daytona: a box that can't reach our callback URL can never run.
     await assertDialbackReachable(driver, "box");
     mark("dial-back verified");
-    await bootstrapRemoteSandbox(driver, "box", { runtime: spec.runtime });
+    await bootstrapRemoteSandbox(driver, "box");
     mark("runtime ready");
     await setupRemoteWorkspace(
       driver,

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import {
-  bootstrapSignature,
+  baseRuntimeSignature,
   loadRemoteWorkspaceSeedFiles,
   runRemoteLifecycleHook,
   setupRemoteWorkspace,
@@ -48,10 +48,10 @@ function driver(
 
 describe("remote repo lifecycle", () => {
   test("bootstrap identity includes the preview runtime contract", () => {
-    expect(bootstrapSignature()).toContain("node@24.18.1");
-    expect(bootstrapSignature()).toContain("just@1.43.1");
-    expect(bootstrapSignature()).toContain("gh@2.83.1");
-    expect(bootstrapSignature()).toContain("workspace-runtime-v8");
+    expect(baseRuntimeSignature()).toContain("node@24.18.1");
+    expect(baseRuntimeSignature()).toContain("just@1.43.1");
+    expect(baseRuntimeSignature()).toContain("gh@2.83.1");
+    expect(baseRuntimeSignature()).toContain("workspace-runtime-v8");
   });
 
   test("setup is skipped after its durable stamp", async () => {

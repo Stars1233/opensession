@@ -16,7 +16,6 @@ import {
 
 import { deskTextNavigation } from "./desk-text-navigation";
 import type { McpScope } from "./runner-shared";
-import { randomUUIDv7 } from "bun";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import {
   runAgent,
@@ -87,11 +86,9 @@ import {
   setJournalSetListener,
   type ActiveRunRecord,
 } from "./run-journal";
-import { registerRunToken, unregisterRunToken } from "./run-rpc";
 import { createSlackPostScanner, linkThreadInIndex } from "./slack-links";
 import {
   STRIPE_CONFIRM_TOOLS,
-  filterMcpServers,
   looksLikeFabricatedToolTranscript,
 } from "./runner-shared";
 import {
@@ -118,20 +115,8 @@ import {
   sandboxProviderConfigured,
 } from "./sandbox/config";
 import { disposeAutomationSandbox } from "./sandbox/automation-disposal";
-import {
-  automationModelEgressDestinations,
-  mcpEgressDestinations,
-} from "./sandbox/automation-egress";
 import { ensureSandboxWithTransientRetry } from "./sandbox/reliability";
-import {
-  automationModel,
-  getAutomation,
-  validateSandboxAutomation,
-} from "./automations";
-import {
-  portableWorkspacePresetRun,
-  resolveWorkspaceModelPreset,
-} from "./workspace-model-presets";
+import { getAutomation, validateSandboxAutomation } from "./automations";
 import { getTitleOverride } from "./title-overrides";
 import {
   applyPendingWorkspaceTitle,
@@ -2037,9 +2022,8 @@ export async function maybeLaunchSandboxedRun(
     });
     if (validation) throw new Error(validation.error);
   }
-  // Hoisted so the catch below can unregister credentials and dispose a
-  // sandbox when launch fails after ensure but before the event stream exists.
-  let rpcToken: string | undefined;
+  // Hoisted so the catch below can dispose a sandbox when launch fails after
+  // ensure but before the event stream exists.
   let disposableResumeSandbox:
     | { provider: ReturnType<typeof getSandboxProvider>; id: string }
     | undefined;
@@ -2070,9 +2054,6 @@ export async function maybeLaunchSandboxedRun(
     const automationSandbox = disposableAutomationResume
       ? sandboxAutomationConfig()
       : undefined;
-    const resumeModel = disposableAutomationResume
-      ? automationModel(session.model || owningAutomation?.model)
-      : undefined;
     const sandbox = await ensureSandboxWithTransientRetry(
       provider,
       {
@@ -2082,23 +2063,12 @@ export async function maybeLaunchSandboxedRun(
           : session.repo,
         branch: session.branch || undefined,
         mode: session.mode,
-        // The agent loop runs on this machine: the Sandbox needs only the
-        // base runtime (bootstrap.ts), never the runner payload.
-        runtime: "workspace",
         ...(disposableAutomationResume
           ? {
               trustProfile: "automation" as const,
-              egressAllowlist: [
-                ...(automationSandbox?.egressAllowlist || []),
-                ...automationModelEgressDestinations(resumeModel || ""),
-                ...mcpEgressDestinations(
-                  filterMcpServers(
-                    owningAutomation?.mcpServers || [],
-                    undefined,
-                    [],
-                  ),
-                ),
-              ],
+              // Model and MCP traffic leave from this server; the Executor
+              // runs workspace commands only.
+              egressAllowlist: [...(automationSandbox?.egressAllowlist || [])],
             }
           : {
               cwd: opts.cwd,
@@ -2297,7 +2267,6 @@ export async function maybeLaunchSandboxedRun(
       sandboxReadyMs: Date.now() - sandboxStartedAt,
     });
   } catch (e: any) {
-    unregisterRunToken(rpcToken);
     const reason = String(e?.message || e).slice(0, 200);
     const hadDisposableResumeSandbox = !!disposableResumeSandbox;
     if (hadDisposableResumeSandbox) {

@@ -279,7 +279,7 @@ GitHub Actions or placing contributor code in a host worktree:
 2. A fresh disposable Daytona Executor anonymously fetches
    `refs/pull/<number>/head` plus the immutable base SHA, verifies both commits
    and checks out the head with Git hooks disabled. The source-verification
-   profile refuses prewarmed and project-template resources and skips runner
+   profile refuses prewarmed and project-template resources and skips runtime
    bootstrap, dial-back, private workspace seed files, and repository
    setup/resume hooks. Any mismatch fails closed. Provider deletion must be
    confirmed before model inference.

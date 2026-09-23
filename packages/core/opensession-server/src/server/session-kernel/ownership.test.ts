@@ -817,42 +817,11 @@ describe("single session ownership", () => {
     expect(runtime).toContain('"creation_branch_prepare"');
     expect(runtime).toContain('"creation_attachment_stage"');
     expect(runtime).toContain("activeCreationPreparationOutbox");
-    for (const relative of ["sandbox/adapters/bootstrap.ts"]) {
-      const source = read(relative);
-      const eager = source.indexOf("launchRunEager");
-      const record = source.indexOf("journalSet(record);", eager);
-      const specWrite = source.indexOf("launcher.writeSpec!(dir, spec)", eager);
-      const launch = source.indexOf("launcher.launch", record);
-      const launching = source.indexOf(
-        'record.launchPhase = "launching"',
-        launch,
-      );
-      const connect = source.indexOf("new HostHandle", launching);
-      const dispatchCallback = source.indexOf("onDispatching?.()");
-      const processDispatch = source.indexOf(
-        "driver.execBackground(",
-        dispatchCallback,
-      );
-      expect(specWrite).toBeGreaterThan(0);
-      expect(specWrite).toBeLessThan(record);
-      expect(record).toBeGreaterThan(0);
-      expect(record).toBeLessThan(launch);
-      expect(launch).toBeLessThan(launching);
-      expect(launching).toBeLessThan(connect);
-      expect(dispatchCallback).toBeGreaterThan(0);
-      expect(dispatchCallback).toBeLessThan(processDispatch);
-      expect(source).toContain("decideSandboxHostRecovery");
-      expect(source).toContain("uncertainLaunch");
-      expect(source).toContain("reconcileUncertainHostEvents");
-      expect(source).not.toContain("pgrep -f");
-      expect(source).toContain("evidence(dir)");
-      if (relative.includes("bootstrap"))
-        expect(source).toContain(
-          "if (!dispatchAttempted) unregisterRunWsHost(hostId)",
-        );
-      expect(source).toContain('recovery.kind === "replay"');
-      expect(source).toContain("...(oldSpec as RunHostSpec)");
-    }
+    // Sandbox sessions launch no host in the machine any more: their loop is
+    // an ordinary hosted run here, so the hosted launch fences above apply.
+    expect(read("sandbox/adapters/bootstrap.ts")).not.toContain(
+      "launchRunEager",
+    );
   });
 
   test("opening runs settle actor receipts before owner retirement and follow-ups", () => {
@@ -896,7 +865,6 @@ describe("single session ownership", () => {
     expect(read("host-client.ts")).toContain(
       "const hostId = opts.startToken || `rh-${Bun.randomUUIDv7()}`;",
     );
-    expect(read("sandbox/local.ts")).toContain("startToken: spec.hostId");
     const runSession = read("run-session.ts");
     const cancelPrepared = runSession.indexOf('op: "prepare_cancel"');
     const settleGuarded = runSession.indexOf(
@@ -935,10 +903,7 @@ describe("single session ownership", () => {
     expect(admissionLoss).toBeGreaterThan(0);
     expect(unmarkBeforeThrow).toBeGreaterThan(0);
     expect(unmarkBeforeThrow).toBeLessThan(admissionLoss);
-    for (const backend of [
-      "runner-session.ts",
-      "sandbox/adapters/bootstrap.ts",
-    ]) {
+    for (const backend of ["runner-session.ts"]) {
       const source = read(backend);
       expect(source).toContain("journalRecordAbnormalCompletion(");
       expect(source).toContain("sourceCompleted && sawTerminal");

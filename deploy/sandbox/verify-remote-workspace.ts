@@ -140,7 +140,6 @@ try {
     repo: "sbxrw",
     branch: "main",
     mode: "code",
-    runtime: "workspace",
   });
 } catch (error) {
   console.error("prepare failed:", error);
