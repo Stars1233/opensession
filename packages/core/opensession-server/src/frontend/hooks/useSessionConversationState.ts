@@ -159,11 +159,12 @@ export function useShippedChangePresentation({
       ts: sentTs,
     };
   }, [shippedSentKey, sentChannelName, sentPermalink, sentAt, sentTs]);
-  // The card's draft. The title heuristic shows at once; the server writes a
-  // better one from the whole session (PR description, walkthrough, the
-  // agent's closing message) and replaces it when it lands, unless the person
-  // already started typing. Fetched only while the card is actually up: not
-  // once it is dismissed or the update has been sent.
+  // The card's draft. The server writes it from the whole session (PR
+  // description, walkthrough, the agent's closing message). The box stays
+  // empty while it is written: the title heuristic reads well only for simple
+  // PRs, so it is the fallback when drafting fails, not a placeholder. A
+  // person who starts typing first keeps their words. Fetched only while the
+  // card is actually up: not once it is dismissed or the update has been sent.
   const mergedPrNumber = mergedPr?.number;
   const mergedPrRepo = mergedPr?.repo;
   const mergedPrBranch = mergedPr?.branch;
@@ -209,10 +210,12 @@ export function useShippedChangePresentation({
       sessionId: session.id,
       defaultMessage:
         suggestedMessage ||
-        suggestedShippedChangeMessage(
-          mergedPr.title || "an update",
-          session.walkthrough?.summary,
-        ),
+        (drafting
+          ? ""
+          : suggestedShippedChangeMessage(
+              mergedPr.title || "an update",
+              session.walkthrough?.summary,
+            )),
       drafting: drafting && !suggestedMessage,
       screenshot: shippedScreenshot,
       reconnectRequired,
