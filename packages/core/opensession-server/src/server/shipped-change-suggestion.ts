@@ -162,6 +162,9 @@ export function shippedChangeSuggestionPrompt(
     (body ? `\n${body}\n` : "") +
     "</session_data>\n\n" +
     channelRequest(input) +
+    // Restated last: without a reasoning pass the model follows what it read
+    // most recently, and drifts long and detailed otherwise.
+    "Reminder: at most three short sentences and 300 characters. Say what the pull request adds or fixes as it ended up, not how it got there. No exact values, defaults, option lists, or retry counts.\n" +
     "Write the Slack update now (plain text only)."
   );
 }
@@ -203,7 +206,7 @@ function channelRequest(input: ShippedChangeSuggestionInput): string {
       ? `Recent updates this team sent, newest first, with where each went:\n${examples.join("\n")}\n`
       : "") +
     (recent.length || examples.length
-      ? "Follow the team's pattern: send this update where they sent similar ones (same repository, same kind of change).\n"
+      ? "Follow the team's pattern: send this update where they sent the most similar one. The kind of change (a new feature people will see, a fix, internal tooling) matters as much as the repository.\n"
       : "Pick the channel whose name best matches the repository or the area the change touches. Avoid channels that look like one person's.\n") +
     "Put the pick alone on the first line as `Channel: #name`, then a blank line, then the message.\n\n"
   );

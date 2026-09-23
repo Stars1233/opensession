@@ -83,7 +83,8 @@ describe("shippedChangeSuggestionPrompt", () => {
       },
       { closing: "", formatted: "" },
     );
-    const body = prompt.split("#1: Big\n")[1] ?? "";
+    const body =
+      (prompt.split("#1: Big\n")[1] ?? "").split("</session_data>")[0] ?? "";
     expect(body.length).toBeLessThan(4_100);
     expect(body).toContain("word…");
   });
