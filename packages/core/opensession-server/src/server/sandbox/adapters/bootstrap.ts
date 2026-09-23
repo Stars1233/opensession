@@ -982,25 +982,6 @@ function baseRuntimeMarker(L: RemoteLayout): string {
   return `${L.home}/.opensession-base-runtime`;
 }
 
-/**
- * bun hardlinks packages from its cache (under $HOME) into node_modules. On
- * Box the workspaces live on a different filesystem from $HOME (a lazily
- * restored FUSE mount), so every link fails with EXDEV and bun falls back
- * file by file; that path has left packages as empty directories and broken
- * the app's build. Where the two differ, make copying the user-level default,
- * unless the user already has a global bunfig. Same-filesystem hosts keep
- * hardlinks. (BSD stat has no -c: both sides are empty there, a no-op.)
- */
-export function bunCopyfileAcrossDevicesCommand(workspaceRoot: string): string {
-  const root = shellQuoteWord(workspaceRoot);
-  return (
-    `__h=$(stat -c %d "$HOME" 2>/dev/null); __w=$(stat -c %d ${root} 2>/dev/null); ` +
-    `if [ -n "$__h" ] && [ -n "$__w" ] && [ "$__h" != "$__w" ] && ` +
-    `[ ! -e "$HOME/.bunfig.toml" ]; then ` +
-    `printf '[install]\\nbackend = "copyfile"\\n' > "$HOME/.bunfig.toml"; fi`
-  );
-}
-
 async function installWorkloadIdentityClient(
   driver: RemoteDriver,
   L: RemoteLayout,
@@ -1036,15 +1017,12 @@ export async function ensureRemoteBaseRuntime(
     `cat ${shellQuoteWord(baseRuntimeMarker(L))} 2>/dev/null`,
   );
   if (marker.exitCode === 0 && marker.stdout.trim() === signature) {
-    const repaired = await driver.exec(
-      `{ ${bunCopyfileAcrossDevicesCommand(L.home)}; } || true; ${workloadIdentityClientInstallCommand(L)}`,
-    );
+    const repaired = await driver.exec(workloadIdentityClientInstallCommand(L));
     if (repaired.exitCode === 0) return;
     await installWorkloadIdentityClient(driver, L);
     return;
   }
   await bootstrapRemoteBaseRuntime(driver, label);
-  await driver.exec(bunCopyfileAcrossDevicesCommand(L.home));
   await installWorkloadIdentityClient(driver, L);
   need(
     await driver.exec(

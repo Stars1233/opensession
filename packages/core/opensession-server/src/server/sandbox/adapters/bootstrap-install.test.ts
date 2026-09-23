@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
 import {
   baseRuntimeSignature,
   bootstrapRemoteSandbox,
-  bunCopyfileAcrossDevicesCommand,
   type RemoteDriver,
 } from "./bootstrap";
 
@@ -48,24 +44,6 @@ describe("remote base runtime", () => {
     expect(commands[1]).toContain(
       "test -x /home/ubuntu/.local/bin/opensession",
     );
-  });
-
-  test("bun copies instead of hardlinking where the cache and workspaces are on different disks", async () => {
-    const commands: string[] = [];
-    await bootstrapRemoteSandbox(fakeDriver(commands), "test");
-    expect(commands.some((c) => c.includes('backend = "copyfile"'))).toBe(true);
-    // Same filesystem: nothing is written, hardlinks stay the default.
-    const home = mkdtempSync(join(tmpdir(), "bunfig-home-"));
-    try {
-      const run = Bun.spawnSync(
-        ["bash", "-c", bunCopyfileAcrossDevicesCommand(join(home, ".."))],
-        { env: { ...process.env, HOME: home } },
-      );
-      expect(run.exitCode).toBe(0);
-      expect(existsSync(join(home, ".bunfig.toml"))).toBe(false);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
   });
 
   test("a damaged identity command is uploaded again", async () => {
