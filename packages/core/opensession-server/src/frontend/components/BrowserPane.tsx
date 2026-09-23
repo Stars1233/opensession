@@ -85,30 +85,30 @@ export function BrowserPane({
           title="Reload"
         />
         <Input
-            size="md"
-            type="text"
-            inputMode="url"
-            enterKeyHint="go"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            aria-label={`${name} address`}
-            className="min-w-0 flex-1 text-supporting text-dim focus:text-fg"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onFocus={(event) => event.target.select()}
-            onBlur={() => setDraft(address)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                const next = browserAddress(draft);
-                if (next) load(next);
-                else setDraft(address);
-              } else if (event.key === "Escape") {
-                setDraft(address);
-                event.currentTarget.blur();
-              }
-            }}
+          size="md"
+          type="text"
+          inputMode="url"
+          enterKeyHint="go"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          aria-label={`${name} address`}
+          className="min-w-0 flex-1 text-supporting text-dim focus:text-fg"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onFocus={(event) => event.target.select()}
+          onBlur={() => setDraft(address)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              const next = browserAddress(draft);
+              if (next) load(next);
+              else setDraft(address);
+            } else if (event.key === "Escape") {
+              setDraft(address);
+              event.currentTarget.blur();
+            }
+          }}
         />
         <Button
           variant="ghost"
