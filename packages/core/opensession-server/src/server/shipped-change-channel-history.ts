@@ -13,7 +13,13 @@ export interface ChannelUse {
   channelId: string;
   channelName: string;
   at: string;
+  /** The start of the message that was sent, so later picks can match the
+   *  kind of change to where the team posted it. */
+  summary?: string;
 }
+
+/** Longest message excerpt kept per share. */
+const SUMMARY_CHARS = 160;
 
 type History = Record<string, ChannelUse[]>;
 
@@ -45,6 +51,19 @@ function load(): Promise<History> {
     .catch(() => ({})));
 }
 
+/** The most recent shares from any repository, newest first: how this team
+ *  routes different kinds of change. */
+export async function recentChannelUses(
+  limit = 8,
+): Promise<Array<ChannelUse & { repo: string }>> {
+  const history = await load();
+  return Object.entries(history)
+    .flatMap(([repo, uses]) => uses.map((use) => ({ ...use, repo })))
+    .filter((use) => use.summary)
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, limit);
+}
+
 /** Channels this repository's updates went to, most used first. */
 export async function channelsUsedForRepo(
   repo: string,
@@ -69,7 +88,14 @@ export async function recordChannelUse(
   use: ChannelUse,
 ): Promise<void> {
   const history = await load();
-  history[repo] = [...(history[repo] || []), use].slice(-PER_REPO);
+  const summary = use.summary
+    ?.replace(/\s+/g, " ")
+    .trim()
+    .slice(0, SUMMARY_CHARS);
+  history[repo] = [
+    ...(history[repo] || []),
+    { ...use, ...(summary ? { summary } : {}) },
+  ].slice(-PER_REPO);
   state.writes = state.writes
     .then(() => writeJsonAtomicAsync(historyPath(), history))
     .catch((error) =>

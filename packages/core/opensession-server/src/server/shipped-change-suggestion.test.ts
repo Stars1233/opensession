@@ -224,6 +224,34 @@ describe("suggestShippedChangeMessage", () => {
     expect(prompts[0]).toContain("#engineering (3 updates)");
   });
 
+  it("shows the team's recent routing and stays neutral without it", () => {
+    const channels = [
+      { id: "C1", name: "general" },
+      { id: "C2", name: "engineering" },
+    ];
+    const withHistory = shippedChangeSuggestionPrompt(
+      {
+        ...input,
+        channels,
+        examples: [
+          {
+            repo: "acme/app",
+            channelName: "general",
+            summary: "Exports can now include captions.",
+          },
+        ],
+      },
+      tail,
+    );
+    expect(withHistory).toContain(
+      '- #general (acme/app): "Exports can now include captions."',
+    );
+    expect(withHistory).toContain("Follow the team's pattern");
+    const fresh = shippedChangeSuggestionPrompt({ ...input, channels }, tail);
+    expect(fresh).not.toContain("Follow the team's pattern");
+    expect(fresh).toContain("best matches the repository");
+  });
+
   it("asks for no channel when none are offered", () => {
     expect(shippedChangeSuggestionPrompt(input, tail)).not.toContain(
       "Channel:",

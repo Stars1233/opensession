@@ -16,6 +16,7 @@
  */
 
 import { oneShot } from "./one-shot";
+import type { SessionEffort } from "./models";
 import { formatExcerpt, transcriptExcerpt } from "./transcript-excerpt";
 
 export interface ShippedChangeSuggestionInput {
@@ -32,6 +33,8 @@ export interface ShippedChangeSuggestionInput {
   channels?: SuggestionChannel[];
   /** Where this repository's earlier updates went, most used first. */
   recentChannels?: Array<SuggestionChannel & { count: number }>;
+  /** Recent updates from any repository and where each went, newest first. */
+  examples?: Array<{ repo: string; channelName: string; summary?: string }>;
   /** Account-affinity user for the model call. */
   user?: string;
 }
@@ -50,7 +53,12 @@ export interface ShippedChangeSuggestion {
 export interface ShippedChangeSuggestionDeps {
   oneShot: (
     prompt: string,
-    opts: { system: string; label: string; user?: string },
+    opts: {
+      system: string;
+      label: string;
+      user?: string;
+      effort?: SessionEffort;
+    },
   ) => Promise<string | null>;
   /** The session's transcript tail, already formatted as prompt material. */
   transcriptTail: (sessionId: string) => Promise<TranscriptTail>;
@@ -172,6 +180,15 @@ function channelRequest(input: ShippedChangeSuggestionInput): string {
       (channel) =>
         `#${channel.name} (${channel.count} update${channel.count === 1 ? "" : "s"})`,
     );
+  const examples = (input.examples || [])
+    .filter((example) => example.summary)
+    .slice(0, 8)
+    .map(
+      (example) =>
+        `- #${example.channelName} (${example.repo}): "${example.summary}"`,
+    );
+  // No house rules here: teams route updates differently, so the pick
+  // follows what this team has actually done and is neutral until it has.
   return (
     "Also pick the Slack channel this update belongs in, from this list only: " +
     channels.map((channel) => `#${channel.name}`).join(", ") +
@@ -180,8 +197,14 @@ function channelRequest(input: ShippedChangeSuggestionInput): string {
       ? `The pull request is in the ${input.repo} repository.\n`
       : "") +
     (recent.length
-      ? `Earlier updates from this repository went to: ${recent.join(", ")}. Prefer that channel unless this change clearly belongs elsewhere.\n`
-      : "Pick the channel whose name matches the repository or the area the change touches. Avoid personal channels and general chat.\n") +
+      ? `Earlier updates from this repository went to: ${recent.join(", ")}.\n`
+      : "") +
+    (examples.length
+      ? `Recent updates this team sent, newest first, with where each went:\n${examples.join("\n")}\n`
+      : "") +
+    (recent.length || examples.length
+      ? "Follow the team's pattern: send this update where they sent similar ones (same repository, same kind of change).\n"
+      : "Pick the channel whose name best matches the repository or the area the change touches. Avoid channels that look like one person's.\n") +
     "Put the pick alone on the first line as `Channel: #name`, then a blank line, then the message.\n\n"
   );
 }
@@ -286,6 +309,9 @@ export async function suggestShippedChangeMessage(
           system: SHIPPED_CHANGE_SUGGESTION_SYSTEM,
           label: "shipped-change-suggestion",
           user: input.user,
+          // A short note from material in hand needs no reasoning pass, and
+          // the card sits on "Drafting…" until this returns.
+          effort: "none",
         },
       );
       const pick = splitChannelPick(raw, input.channels || []);

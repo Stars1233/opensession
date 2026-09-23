@@ -2902,10 +2902,14 @@ async function* runPiAttempt(
     // Preset effort override (workspace preset's pin first, then the built-in
     // preset's) falls back to the session's own effort.
     const selectedEffort = resolved?.effort ?? opts.effort;
+    // "none" means no reasoning at all. Left unset, Pi falls back to its
+    // default thinking level, which costs a small one-shot tens of seconds.
     const thinkingLevel =
-      selectedEffort && THINKING_LEVELS.has(selectedEffort)
-        ? (selectedEffort as "low" | "medium" | "high" | "xhigh" | "max")
-        : undefined;
+      selectedEffort === "none"
+        ? ("off" as const)
+        : selectedEffort && THINKING_LEVELS.has(selectedEffort)
+          ? (selectedEffort as "low" | "medium" | "high" | "xhigh" | "max")
+          : undefined;
 
     const created = await sdk.createAgentSession({
       cwd,

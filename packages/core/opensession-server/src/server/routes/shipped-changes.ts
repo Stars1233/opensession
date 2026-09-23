@@ -9,6 +9,7 @@ import { shippedChangesChannel } from "../../agents/github/constants";
 import { suggestShippedChangeMessage } from "../shipped-change-suggestion";
 import {
   channelsUsedForRepo,
+  recentChannelUses,
   recordChannelUse,
 } from "../shipped-change-channel-history";
 import { findSessionAsync, updateSessionFile } from "../session-cache";
@@ -59,9 +60,15 @@ export async function handleShippedChangeRoutes(
     // Candidates: the configured channels, plus any this repository's
     // updates went to before. The person's full channel directory runs to
     // hundreds and is theirs to search; the pick only has to start well.
-    const recentChannels = await channelsUsedForRepo(target.ghRepo);
+    const [recentChannels, examples] = await Promise.all([
+      channelsUsedForRepo(target.ghRepo),
+      recentChannelUses(),
+    ]);
     const channels = [...shippedChangeChannels()];
-    for (const channel of recentChannels)
+    for (const channel of [
+      ...recentChannels,
+      ...examples.map((use) => ({ id: use.channelId, name: use.channelName })),
+    ])
       if (!channels.some((known) => known.id === channel.id))
         channels.push({ id: channel.id, name: channel.name });
     const suggestion = await suggestShippedChangeMessage({
@@ -70,6 +77,7 @@ export async function handleShippedChangeRoutes(
       repo: target.ghRepo,
       channels,
       recentChannels,
+      examples,
       user: ctx.authUser?.login || ctx.authUser?.name || requestUser(ctx),
     });
     return Response.json({
@@ -174,6 +182,7 @@ export async function handleShippedChangeRoutes(
         channelId: share.channelId,
         channelName: share.channelName,
         at: share.at,
+        summary: typeof body?.message === "string" ? body.message : undefined,
       });
       await updateSessionFile(session.id, (data) => ({
         ...data,
