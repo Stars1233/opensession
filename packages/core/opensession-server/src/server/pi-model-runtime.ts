@@ -46,7 +46,6 @@ import {
   SDK_BUILTIN_TOOLS,
   PASSTHROUGH_MCP,
   PASSTHROUGH_PREFIX,
-  admitBridgeRequest,
   bridgeDesignationError,
   ensureAnthropicBridgeCwd,
   flattenMessageText,
@@ -1333,9 +1332,7 @@ async function* runSdkStream(
     },
   });
 
-  // Accounts this turn has already burned. The sideline alone cannot drive
-  // the walk: the rolling-cap refusal deliberately does not sideline, so
-  // without an explicit exclusion the re-pick hands back the same account.
+  // Never retry the same account twice during this turn's fallback walk.
   const excluded = new Set<string>();
   for (;;) {
     const rotate = { retry: false };
@@ -1443,29 +1440,6 @@ async function* runSdkAttempt(
         ? planLiveSdkTurn(usableStored, wireMessages)
         : null) ?? planSdkTurn(usableStored, wireMessages);
     plannedContinuation = plan.continuation;
-
-    // Rolling per-account hourly cap — the SAME per-boot counter the bridge
-    // admits against, so pi traffic and any residual bridge traffic share one
-    // ceiling per designated account. "429" keeps the refusal
-    // usage-limit-shaped for isPiUsageLimitShape (fallback walk engages), but
-    // the tag keeps the catch from markExhausted-ing the account: the cap is
-    // OUR local admission control, it frees within the hour, and the
-    // exhaustion sideline is shared with the pi bridge — a synthetic
-    // refusal must never bench the account cross-engine until the 5h reset.
-    // ~1.6k tokens is a typical screenshot. The estimate only feeds our local
-    // rolling cap, so rough is the right amount of precision here.
-    const estTokens =
-      Math.ceil((plan.prompt.length + system.length) / 4) +
-      plan.images.length * 1600;
-    const rate = admitBridgeRequest(account.id, estTokens);
-    if (!rate.allowed) {
-      const rateErr = new Error(
-        `pi-anthropic 429: account "${account.name}" exceeded ${rate.limit} requests/hour ` +
-          "(bridgeMaxRequestsPerHour)",
-      );
-      (rateErr as any).piLocalRateCap = true;
-      throw rateErr;
-    }
 
     audit({
       ...auditBase,
@@ -1944,14 +1918,11 @@ async function* runSdkAttempt(
     // A failed continuation may mean the resumed SDK session is dead (config
     // dir swept/wiped): evict the mapping so the next turn replays fresh.
     if (plannedContinuation) piSdkSessionStore().delete(storeKey);
-    const localCap = e?.piLocalRateCap === true;
     const accountUnavailable = isClaudeAccountUnavailable(message, true);
     // Account-level death: sideline the picked designated account before
     // surfacing (claude-direct's markExhausted discipline); the preserved
-    // message is what isPiUsageLimitShape classifies upstream. The local
-    // rolling-cap refusal is exempt (tagged at the throw): it is 429-worded
-    // for the classifier but is not account exhaustion.
-    if (account && !localCap && accountUnavailable) {
+    // message is what isPiUsageLimitShape classifies upstream.
+    if (account && accountUnavailable) {
       // Bench it until the reset the account itself named, when it named one:
       // a weekly limit otherwise came back into the pool in an hour and failed
       // again, every hour, until it genuinely reset.
@@ -1970,11 +1941,7 @@ async function* runSdkAttempt(
     // never ran: multiple accounts were consulted and the reader was shown the
     // last one's sentence, so working rotation read as no rotation at all.
     let poolRefusal: string | undefined;
-    if (
-      account &&
-      (accountUnavailable || localCap) &&
-      partial.content.length === 0
-    ) {
+    if (account && accountUnavailable && partial.content.length === 0) {
       excluded.add(account.id);
       const next = pickBridgeAccount(model.id, {
         accountId: opts.accountId,

@@ -19,6 +19,7 @@ import {
   describe,
   expect,
   test,
+  spyOn,
 } from "bun:test";
 import {
   existsSync,
@@ -66,7 +67,6 @@ import {
   captureVisibleSdkAssistantToolUses,
 } from "./pi-model-runtime";
 import {
-  admitBridgeRequest,
   ensureAnthropicBridgeCwd,
   flattenMessageText,
   pickBridgeAccount,
@@ -75,6 +75,7 @@ import {
 } from "./anthropic-bridge";
 import { isPiUsageLimitShape } from "./pi-runner";
 import * as accounts from "./claude-accounts";
+import * as sdk from "@anthropic-ai/claude-agent-sdk";
 
 // Seam everything at a throwaway dir. The config/store modules read their env
 // seams per call, so setting them here (after hoisted imports) is safe — and
@@ -1018,70 +1019,72 @@ describe("buildPiAnthropicProvider", () => {
     expect(piSdkSessionStore().size).toBe(0);
   });
 
-  test("rolling-cap refusal is classifier-flagged but never sidelines the account", async () => {
-    designate(["pi-cap-acc"]);
-    seedAccounts(["pi-cap-acc"]);
-    accounts.__setUsageCacheForTest("pi-cap-acc", freshUsage);
-    // Trip the shared per-boot hourly counter (same map the bridge admits
-    // against) so the stream's own admission refuses pre-SDK.
-    const limit = 300; // bridgeMaxRequestsPerHour default (no pi config in this seam)
-    for (let i = 0; i < limit; i++) admitBridgeRequest("pi-cap-acc", 1);
-    const provider = buildPiAnthropicProvider({
-      unifiedSessionId: "os-cap",
-      builtinModels: [model],
-    }) as any;
-    const events: any[] = [];
-    for await (const ev of provider.streamSimple(model, {
-      messages: [{ role: "user", content: "hi" }],
-    })) {
-      events.push(ev);
+  test("more than 300 requests on one account still reach the SDK", async () => {
+    designate(["busy-account"]);
+    seedAccounts(["busy-account"]);
+    accounts.__setUsageCacheForTest("busy-account", freshUsage);
+    const query = spyOn(sdk, "query").mockImplementation(() => {
+      throw new Error("test SDK reached");
+    });
+    try {
+      const provider = buildPiAnthropicProvider({
+        unifiedSessionId: "os-busy",
+        builtinModels: [model],
+      }) as any;
+      for (let i = 0; i < 301; i++) {
+        const events: any[] = [];
+        for await (const ev of provider.streamSimple(model, {
+          messages: [{ role: "user", content: "hi" }],
+        })) {
+          events.push(ev);
+        }
+        expect(events.map((e) => e.type)).toEqual(["start", "error"]);
+        expect(events[1].error.errorMessage).toBe("test SDK reached");
+      }
+      expect(query).toHaveBeenCalledTimes(301);
+      expect((pickBridgeAccount(model.id) as any).id).toBe("busy-account");
+    } finally {
+      query.mockRestore();
     }
-    expect(events.map((e) => e.type)).toEqual(["start", "error"]);
-    const message = events[1].error.errorMessage as string;
-    expect(message).toMatch(/pi-anthropic 429/);
-    // 429-worded so the runner's fallback walk engages…
-    expect(isPiUsageLimitShape(message, "anthropic")).toBe(true);
-    // …but the account is NOT markExhausted'd: the cap is local admission
-    // control (frees within the hour) and the exhaustion sideline is shared
-    // with the pi bridge — the account must stay pickable.
-    const stillUsable = pickBridgeAccount("claude-sonnet-5");
-    expect((stillUsable as any).id).toBe("pi-cap-acc");
   });
 
   test("a usage-limited account rotates to the next one inside the same turn", async () => {
-    // More than the old four-account ceiling, all with their rolling hourly
-    // cap tripped. The cap refuses before any SDK spawn, so this proves the
-    // walk follows the picker until the real pool is dry.
+    // More than the old four-account ceiling. SDK usage-limit responses
+    // must walk the picker until the real pool is dry.
     const ids = ["cap-a", "cap-b", "cap-c", "cap-d", "cap-e", "cap-f"];
     designate(ids);
     seedAccounts(ids);
-    const limit = 300; // bridgeMaxRequestsPerHour default (no pi config in this seam)
     for (const id of ids) {
       accounts.__setUsageCacheForTest(id, freshUsage);
-      for (let i = 0; i < limit; i++) admitBridgeRequest(id, 1);
     }
-    const provider = buildPiAnthropicProvider({
-      unifiedSessionId: "os-rotate",
-      builtinModels: [model],
-    }) as any;
-    const events: any[] = [];
-    for await (const ev of provider.streamSimple(model, {
-      messages: [{ role: "user", content: "hi" }],
-    })) {
-      events.push(ev);
+    const query = spyOn(sdk, "query").mockImplementation((input) => {
+      const accountId = input.options?.env?.CLAUDE_CODE_OAUTH_TOKEN;
+      throw new Error(`429 usage limit reached for ${accountId}`);
+    });
+    try {
+      const provider = buildPiAnthropicProvider({
+        unifiedSessionId: "os-rotate",
+        builtinModels: [model],
+      }) as any;
+      const events: any[] = [];
+      for await (const ev of provider.streamSimple(model, {
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        events.push(ev);
+      }
+      // ONE `start` for the whole walk: a rotation replays the attempt, never
+      // the pi-visible stream, so the reader still sees one assistant message.
+      expect(events.map((e) => e.type)).toEqual(["start", "error"]);
+      // The surfaced error names account six. The old hard cap stopped after
+      // account four even though two eligible accounts remained.
+      const message = events[1].error.errorMessage as string;
+      expect(message).toContain("cap-f");
+      expect(isPiUsageLimitShape(message, "anthropic")).toBe(true);
+      expect(query).toHaveBeenCalledTimes(ids.length);
+      expect("error" in pickBridgeAccount("claude-sonnet-5")).toBe(true);
+    } finally {
+      query.mockRestore();
     }
-    // ONE `start` for the whole walk: a rotation replays the attempt, never
-    // the pi-visible stream, so the reader still sees one assistant message.
-    expect(events.map((e) => e.type)).toEqual(["start", "error"]);
-    // The surfaced error names account six. The old hard cap stopped after
-    // account four even though two eligible accounts remained.
-    const message = events[1].error.errorMessage as string;
-    expect(message).toContain("cap-f");
-    expect(isPiUsageLimitShape(message, "anthropic")).toBe(true);
-    // Neither account was sidelined on the way through: the rolling cap is
-    // local admission control, and the sideline map is shared with pi.
-    const stillPickable = pickBridgeAccount("claude-sonnet-5");
-    expect((stillPickable as any).id).toBe("cap-a");
   });
 
   test("a dry pool says so, instead of echoing the last account's limit", async () => {
@@ -1093,27 +1096,31 @@ describe("buildPiAnthropicProvider", () => {
     seedAccounts(["dry-a", "dry-b"]);
     accounts.__setUsageCacheForTest("dry-a", freshUsage);
     accounts.__setUsageCacheForTest("dry-b", freshUsage);
-    for (let i = 0; i < 300; i++) {
-      admitBridgeRequest("dry-a", 1);
-      admitBridgeRequest("dry-b", 1);
+    const query = spyOn(sdk, "query").mockImplementation((input) => {
+      const accountId = input.options?.env?.CLAUDE_CODE_OAUTH_TOKEN;
+      throw new Error(`429 usage limit reached for ${accountId}`);
+    });
+    try {
+      const provider = buildPiAnthropicProvider({
+        unifiedSessionId: "os-dry",
+        builtinModels: [model],
+      }) as any;
+      const events: any[] = [];
+      for await (const ev of provider.streamSimple(model, {
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        events.push(ev);
+      }
+      const message = events[events.length - 1].error.errorMessage as string;
+      expect(message).toContain("every Claude account is usage-limited");
+      // Still names what was tried last, so the detail is not lost…
+      expect(message).toContain("dry-b");
+      // …and still classifies as exhaustion, so the model fallback upstream
+      // (agent-runner) engages exactly as it did before.
+      expect(isPiUsageLimitShape(message, "anthropic")).toBe(true);
+    } finally {
+      query.mockRestore();
     }
-    const provider = buildPiAnthropicProvider({
-      unifiedSessionId: "os-dry",
-      builtinModels: [model],
-    }) as any;
-    const events: any[] = [];
-    for await (const ev of provider.streamSimple(model, {
-      messages: [{ role: "user", content: "hi" }],
-    })) {
-      events.push(ev);
-    }
-    const message = events[events.length - 1].error.errorMessage as string;
-    expect(message).toContain("every Claude account is usage-limited");
-    // Still names what was tried last, so the detail is not lost…
-    expect(message).toContain("dry-b");
-    // …and still classifies as exhaustion, so the model fallback upstream
-    // (agent-runner) engages exactly as it did before.
-    expect(isPiUsageLimitShape(message, "anthropic")).toBe(true);
   });
 
   test("a strict pin refuses instead of rotating off the pinned account", async () => {
@@ -1121,26 +1128,32 @@ describe("buildPiAnthropicProvider", () => {
     seedAccounts(["pin-strict", "pin-other"]);
     accounts.__setUsageCacheForTest("pin-strict", freshUsage);
     accounts.__setUsageCacheForTest("pin-other", freshUsage);
-    const limit = 300;
-    for (let i = 0; i < limit; i++) admitBridgeRequest("pin-strict", 1);
-    const provider = buildPiAnthropicProvider({
-      unifiedSessionId: "os-pin",
-      accountId: "pin-strict",
-      accountStrict: true,
-      builtinModels: [model],
-    }) as any;
-    const events: any[] = [];
-    for await (const ev of provider.streamSimple(model, {
-      messages: [{ role: "user", content: "hi" }],
-    })) {
-      events.push(ev);
+    const query = spyOn(sdk, "query").mockImplementation((input) => {
+      const accountId = input.options?.env?.CLAUDE_CODE_OAUTH_TOKEN;
+      throw new Error(`429 usage limit reached for ${accountId}`);
+    });
+    try {
+      const provider = buildPiAnthropicProvider({
+        unifiedSessionId: "os-pin",
+        accountId: "pin-strict",
+        accountStrict: true,
+        builtinModels: [model],
+      }) as any;
+      const events: any[] = [];
+      for await (const ev of provider.streamSimple(model, {
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        events.push(ev);
+      }
+      expect(events.map((e) => e.type)).toEqual(["start", "error"]);
+      // The pinned account's own refusal — a hard pin must never silently
+      // rotate onto an account the person deliberately did not choose.
+      const message = events[1].error.errorMessage as string;
+      expect(message).toContain("pin-strict");
+      expect(message).not.toContain("pin-other");
+    } finally {
+      query.mockRestore();
     }
-    expect(events.map((e) => e.type)).toEqual(["start", "error"]);
-    // The pinned account's own refusal — a hard pin must never silently
-    // rotate onto an account the person deliberately did not choose.
-    const message = events[1].error.errorMessage as string;
-    expect(message).toContain("pin-strict");
-    expect(message).not.toContain("pin-other");
   });
 
   test("a pre-aborted signal ends with reason aborted before any SDK work", async () => {

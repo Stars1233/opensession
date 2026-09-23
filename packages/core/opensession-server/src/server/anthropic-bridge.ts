@@ -39,13 +39,10 @@
  *    local process can't quietly burn subscription capacity through it.
  *  - Every request lands in the audit log (audit.ts): accepted ones with
  *    session attribution (`anthropic_bridge_request` in/out), rejected ones
- *    (bad key, malformed body, size cap, rate limit, no usable account) as
+ *    (bad key, malformed body, size cap, no usable account) as
  *    `anthropic_bridge_rejected` with status + reason — never the presented
  *    key — so local probing/hammering always leaves a trail.
- *  - Request hygiene: bodies over 10MB are refused (413), and a per-boot
- *    rolling per-account counter caps requests/hour (`bridgeMaxRequestsPerHour`
- *    in ~/.opensession-model-providers.json, default 300 → 429 past it; estimated
- *    tokens are tracked alongside for the audit trail). Account selection stops
+ *  - Request hygiene: bodies over 10MB are refused (413). Account selection stops
  *    at plan limits by default. A run may continue on paid credits only when it
  *    explicitly enables `usageCredits` and the account has credit headroom.
  *
@@ -65,7 +62,7 @@
  * The pi engine's in-process sibling (pi-anthropic-provider.ts) reimplements
  * this same SDK mapping without the HTTP hop; it imports the exported helpers
  * here (flatten/replay, schema conversion, account pick, designation check,
- * DISALLOWED_BUILTINS, the rolling admit counter) so the two stay one
+ * DISALLOWED_BUILTINS) so the two stay one
  * implementation of the trick. HTTP concerns (bridge key, SSE synthesis,
  * body caps) remain bridge-only.
  */
@@ -85,11 +82,7 @@ import {
   type ClaudeAccount,
 } from "./claude-accounts";
 import { CLAUDE_CODE_BIN } from "./runner-shared";
-import {
-  bridgePort,
-  bridgeMaxRequestsPerHour,
-  readModelProviderConfig,
-} from "./model-providers";
+import { bridgePort, readModelProviderConfig } from "./model-providers";
 import { readPiEngineConfig } from "./pi-config";
 import { mkdirSync } from "fs";
 
@@ -446,44 +439,7 @@ function auditReject(
   });
 }
 
-// ── Per-boot rolling rate limit (per designated account) ─────────────────────
-
 const BRIDGE_MAX_BODY_BYTES = 10 * 1024 * 1024;
-const RATE_WINDOW_MS = 60 * 60 * 1000;
-
-interface BridgeUsageEvent {
-  at: number;
-  estTokens: number;
-}
-
-// account id → request events in the trailing hour. Per-boot (parked on
-// globalThis for hot reloads); the extra-usage credit ceiling (module doc) is
-// the durable backstop.
-const bridgeUsage: Map<string, BridgeUsageEvent[]> =
-  (g.__anthropicBridgeUsage ??= new Map());
-
-/** Admit-or-reject under the rolling per-account ceiling; admits record their
- *  estimated input tokens so the audit trail can track spend pressure. */
-export function admitBridgeRequest(
-  accountId: string,
-  estTokens: number,
-  now = Date.now(),
-): { allowed: boolean; requests: number; tokens: number; limit: number } {
-  const cutoff = now - RATE_WINDOW_MS;
-  const events = (bridgeUsage.get(accountId) || []).filter(
-    (e) => e.at > cutoff,
-  );
-  const limit = bridgeMaxRequestsPerHour();
-  const allowed = events.length < limit;
-  if (allowed) events.push({ at: now, estTokens });
-  bridgeUsage.set(accountId, events);
-  return {
-    allowed,
-    requests: events.length,
-    tokens: events.reduce((sum, e) => sum + e.estTokens, 0),
-    limit,
-  };
-}
 
 /** Session key: the reference plugin sends x-opensession-session; otherwise
  *  fingerprint the first message so retries of the same conversation reuse
@@ -607,26 +563,6 @@ async function handleBridgeRequest(req: Request): Promise<Response> {
   const prompt = isContinuation
     ? replayConversation(messages.slice(stored.messageCount))
     : replayConversation(messages);
-
-  // Rolling per-account ceiling (see module doc). Counted at admission — a
-  // request that later fails still spent an SDK attempt.
-  const estTokens = Math.ceil(rawBody.length / 4);
-  const rate = admitBridgeRequest(account.id, estTokens);
-  if (!rate.allowed) {
-    auditReject(requestId, 429, "rate_limited", {
-      engine_session: engineSessionHeader,
-      model,
-      account: account.name,
-      requests_last_hour: rate.requests,
-      est_tokens_last_hour: rate.tokens,
-      limit_per_hour: rate.limit,
-    });
-    return anthropicError(
-      429,
-      "rate_limit_error",
-      `bridge: account "${account.name}" exceeded ${rate.limit} requests/hour (bridgeMaxRequestsPerHour)`,
-    );
-  }
 
   const captured: CapturedToolUse[] = [];
   const passthroughTools = requestTools.map((t) =>
