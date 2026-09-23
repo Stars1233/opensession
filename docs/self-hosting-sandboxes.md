@@ -19,9 +19,8 @@ repository's app always runs in a Sandbox Portal rather than on this server.
 Precedence is project, then personal, then workspace; a per-session choice
 always wins.
 
-Claude and Pi-family models run in a Sandbox. Native Codex cannot: its
-writable, rotating `CODEX_HOME` stays host-only. Choose a `pi/openai/*` model
-for GPT in a Sandbox.
+Every model works with a Sandbox: the agent loop runs on this server, and
+only the workspace is in the Sandbox (see [Where the agent runs](#where-the-agent-runs)).
 
 ## Setup
 
@@ -66,8 +65,9 @@ Every Sandbox session gets its own machine. Open Session:
   machine continues from the last checkpoint;
 - runs the repository's `.agents/setup` once per disk, and `.agents/resume`
   on every wake;
-- runs the agent inside the VM. The engine dials back to this server over the
-  public ingress for run streaming and MCP;
+- runs the agent loop on this server, like any other session, with the
+  Sandbox as its workspace: every file read, edit, search and shell command
+  the agent makes runs in the VM (see [Where the agent runs](#where-the-agent-runs));
 - exposes services as **Portals**: authenticated HTTPS routes on this host
   that relay to the Sandbox. The browser never sees a provider URL;
 - lets the Sandbox sleep after the provider's idle interval (30 minutes by
@@ -78,6 +78,37 @@ Every Sandbox session gets its own machine. Open Session:
 The session's **Sandbox** badge shows Preparing, Awake, Sleeping, Waking, or
 Needs attention, with manual sleep, wake, checkpoint, and rebuild, plus the
 `setup` and `resume` logs and the age of the last checkpoint.
+
+## Where the agent runs
+
+The agent loop, its model credentials, the conversation, MCP connections and
+permission checks stay on this server. Each Sandbox turn runs in an ordinary
+detached run host here, exactly like a session on this machine; only its
+workspace tools are remote. `read`, `write`, `edit`, `ls`, `find`, `grep` and
+`bash` each become one command in the Sandbox, sent over the server's run-rpc
+socket (`/workspace/exec`) with the run's own token. The server resolves the
+token to the session's recorded Sandbox, so a run can reach its own machine
+and nothing else, and a session without a Sandbox is refused rather than run
+here.
+
+So a Sandbox needs only the base runtime: the workspace tools, the pinned
+Node, just, gh and bun, and the `opensession` identity command. No model
+credential, runner payload or conversation history is placed in it, and a
+deploy of Open Session changes nothing inside it. A Sandbox that crashes or
+fills its disk fails the tool call; the turn, its history and the session
+survive, and the next turn continues on a rebuilt machine.
+
+Shell commands run in their own process group with output going to a file,
+so a Stop or a timeout reaches everything a command started, and a server it
+left in the background does not hold the call open. The command receives the
+run's GitHub and git identity; this server's paths and file-based
+credentials (AWS, Claude or Codex CLI pools) are never passed. The skills
+this server ships are read from here; the checkout's own AGENTS.md and
+skills are read from the Sandbox at the start of each turn.
+
+A tool call costs one provider round trip: about 25 to 110 ms on Boat over
+its SSH lane and 120 to 300 ms on Daytona. `deploy/sandbox/verify-remote-workspace.ts`
+measures it against a live provider.
 
 ## Checkpoints
 
@@ -140,8 +171,8 @@ when the Sandbox cannot be reached at all.
 A code session can move between this machine and any ready Sandbox provider,
 in every direction, from its ⋯ menu (_Move to Sandbox_ on this machine,
 _Move session_ in a Sandbox). The agent must be idle. From the next message
-on it runs on the destination; a fresh engine is seeded from the stored
-transcript, so the conversation carries over.
+on its tools act on the destination. The agent loop and its conversation
+stay on this server, so nothing about the conversation moves.
 
 - **This machine → Sandbox** (`POST /api/sessions/<id>/sandbox/attach`): the
   worktree is checkpointed first, so uncommitted work travels along. Portals
@@ -303,8 +334,7 @@ A Sandbox never receives long-lived cloud credentials. Lifecycle hooks and
 Portals receive a short-lived workload identity lease that they exchange for
 scoped cloud roles (`OPENSESSION_WORKLOAD_IDENTITY_*`); see
 [repo-lifecycle.md](repo-lifecycle.md#workload-identity-from-a-sandbox).
-Model credentials are uploaded per launch, scoped to the run's account, and
-never land in a snapshot.
+Model credentials never enter a Sandbox: the agent loop runs on this server.
 
 ## Automations
 
@@ -520,8 +550,8 @@ policy-enforced.
 
 A Sandbox isolates the agent's filesystem, processes, and network from this
 host and from other sessions. It is third-party compute: the repository clone
-credential, a scoped model credential, and short-lived workload identity
-leases enter it; the instance config, other users' credentials, and the
-session store do not. Portal routes forward-authenticate every request
+credential, the run's GitHub token inside each shell command's environment,
+and short-lived workload identity leases enter it; model credentials, the
+instance config, other users' credentials, and the session store do not. Portal routes forward-authenticate every request
 against Open Session before proxying. Portals inherit the instance's team
 boundary; there is no narrower per-session ACL yet.

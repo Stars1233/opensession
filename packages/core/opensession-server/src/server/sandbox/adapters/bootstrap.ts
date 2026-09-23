@@ -3200,6 +3200,10 @@ const remoteParts = new WeakMap<
   { driver: RemoteDriver; launcher: HostLauncher }
 >();
 
+/** stderr of a provider exec whose machine or command plane is not there. */
+const TRANSPORT_FAILURE =
+  /not running|not started|stopped|archived|timed out|ECONN|socket|HTTP 5\d\d|did not accept commands|machine_not_running/i;
+
 export function makeRemoteSandbox(parts: RemoteSandboxParts): Sandbox {
   const launcher = makeRemoteLauncher(
     parts.driver,
@@ -3208,11 +3212,17 @@ export function makeRemoteSandbox(parts: RemoteSandboxParts): Sandbox {
     parts.providerId,
     parts.callbackBaseUrl,
   );
+  let touchedAt = 0;
+  let startedAt = 0;
   const touch = () => {
+    touchedAt = Date.now();
     try {
       void parts.touchActivity();
     } catch {}
   };
+  /** A burst caller (assumeStarted) re-checks the machine and refreshes its
+   *  keepalive at most once a minute; everyone else on every call. */
+  const RECHECK_MS = 60_000;
   const sandboxHandle: Sandbox = {
     id: parts.sandboxId,
     provider: parts.providerId,
@@ -3220,17 +3230,23 @@ export function makeRemoteSandbox(parts: RemoteSandboxParts): Sandbox {
     workspace: "volume",
 
     async exec(cmd: string[], opts?: ExecOpts): Promise<ExecResult> {
-      await parts.driver.ensureStarted();
-      touch();
+      const burst = opts?.assumeStarted === true;
+      if (!burst || Date.now() - startedAt > RECHECK_MS) {
+        await parts.driver.ensureStarted();
+        startedAt = Date.now();
+      }
+      if (!burst || Date.now() - touchedAt > RECHECK_MS) touch();
       const remoteOptions = {
         cwd: parts.cwd,
         env: {
-          ...createWorkloadIdentityEnv({
-            sandboxId: parts.sandboxId,
-            provider: parts.providerId,
-            lifecycle: "run" as const,
-            sessionId: parts.sessionId,
-          }),
+          ...(opts?.workloadIdentity === false
+            ? {}
+            : createWorkloadIdentityEnv({
+                sandboxId: parts.sandboxId,
+                provider: parts.providerId,
+                lifecycle: "run" as const,
+                sessionId: parts.sessionId,
+              })),
           ...opts?.env,
         },
         timeoutMs: opts?.timeoutMs,
@@ -3249,7 +3265,11 @@ export function makeRemoteSandbox(parts: RemoteSandboxParts): Sandbox {
         }
       }
       const result = await parts.driver.exec(shellQuote(cmd), remoteOptions);
-      touch();
+      if (!burst) touch();
+      // A burst skips the wake check; after an answer that looks like the
+      // machine or its command plane went away, the next call makes it.
+      else if (result.exitCode !== 0 && TRANSPORT_FAILURE.test(result.stderr))
+        startedAt = 0;
       return result;
     },
 

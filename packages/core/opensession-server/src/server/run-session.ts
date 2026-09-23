@@ -157,7 +157,14 @@ import {
   sessionRepoId,
 } from "./worktree";
 import { createGoalSelfMcpServer } from "../agents/slack/goal-tools";
-import { runHostsDir, type RunHostSpec } from "../runner-host/protocol";
+import {
+  runHostsDir,
+  type RemoteWorkspaceSpec,
+  type RunHostSpec,
+} from "../runner-host/protocol";
+import { sandboxSessionScratchDir } from "./session-scratch";
+import { remoteGuestOsForProvider } from "./sandbox/adapters/bootstrap";
+import { primeWorkspaceSandbox } from "./sandbox/workspace-rpc";
 import { maybeLaunchRunnerRun } from "./runner-session";
 import type { StagedAttachment } from "./prompt-attachments";
 import {
@@ -2075,6 +2082,9 @@ export async function maybeLaunchSandboxedRun(
           : session.repo,
         branch: session.branch || undefined,
         mode: session.mode,
+        // The agent loop runs on this machine: the Sandbox needs only the
+        // base runtime (bootstrap.ts), never the runner payload.
+        runtime: "workspace",
         ...(disposableAutomationResume
           ? {
               trustProfile: "automation" as const,
@@ -2141,8 +2151,8 @@ export async function maybeLaunchSandboxedRun(
           error,
         ),
       );
-    // Remote engine databases live inside the sandbox. A replacement VM cannot
-    // resume the old engine id, even when its git workspace was safely pushed.
+    // A replacement machine: the engine and its history stay on this machine
+    // (the loop runs here), only the old machine's Portals are gone.
     const previousSandboxId = session.sandbox?.sandboxId;
     const remoteSandboxReplaced =
       isRemoteSandboxProvider(sbProvider) && previousSandboxId !== sandbox.id;
@@ -2175,12 +2185,6 @@ export async function maybeLaunchSandboxedRun(
           lifecycle: "awake",
           lastLifecycleError: undefined,
         },
-        ...(remoteSandboxReplaced
-          ? {
-              claudeSessionId: undefined,
-              codexThreadId: undefined,
-            }
-          : {}),
       });
     }
     if (session.source === "opensession" && session.sandbox) {
@@ -2197,126 +2201,85 @@ export async function maybeLaunchSandboxedRun(
         },
       });
     }
-    // opensession-* tools reach the container as stdio proxies over the run-rpc
-    // socket — same path Codex and hosted runs use. The names must match
-    // what the registered InteractiveMcpBuilder can build for this session —
-    // including opensession-goal-self for goal-driven sessions (the builder adds
-    // it from the session's goalId, mirroring the in-process path below).
-    rpcToken = crypto.randomUUID();
-    registerRunToken(rpcToken, {
-      sessionId: session.id,
-      user: opts.isAutomationSession ? undefined : opts.user,
-      humanPrompter: opts.humanPrompter,
-      promptEntryId: opts.promptEntryId,
-    });
-    // Detached sandbox hosts cannot read the server's workspace store. Resolve
-    // the picker-only workspace preset before crossing that boundary. A preset
-    // matching built-in Dial/Orchestrator wiring keeps that portable id, while
-    // an ordinary custom preset carries its concrete lead model.
-    const workspacePreset = resolveWorkspaceModelPreset(session.model);
-    const portablePreset = workspacePreset
-      ? portableWorkspacePresetRun(workspacePreset)
-      : undefined;
-    // A replacement Sandbox starts a fresh engine: the old one's database
-    // lived in the VM that is gone, or on this host for a session that just
-    // moved. Pi only bridges history when it was told to RESUME and the file
-    // is missing, so bridge it here the same way, from the entries the host
-    // already read, or the model forgets everything the person said and saw.
-    const replacedHandoff =
-      remoteSandboxReplaced &&
-      !opts.promptCarriesHandoff &&
-      opts.seedTranscriptEntries?.length
-        ? buildEngineSwitchHandoffNote({
-            fromModel: session.model,
-            fromProvider: "pi",
-            toProvider: "pi",
-            sameEngineRestart: true,
-            entries: opts.seedTranscriptEntries,
-            maxEntries: 200,
-            maxChars: 60_000,
-          })
-        : null;
-    const spec: RunHostSpec = {
-      // Bind the physical sandbox host to the admitted run token, exactly like
-      // the Runner and local paths: exact-token Stop must reach the live host,
-      // and restart adoption must reattach under the same durable identity.
-      hostId: opts.startToken || `rh-${randomUUIDv7()}`,
-      osSessionId: session.id,
-      prompt: replacedHandoff
-        ? `${wrapContext(replacedHandoff, "handoff")}\n\n${opts.prompt}`
-        : opts.prompt,
-      promptEntryId: opts.promptEntryId,
-      seedTranscriptEntries: opts.seedTranscriptEntries,
-      engineSessionId: remoteSandboxReplaced
-        ? undefined
-        : opts.engineSessionId || undefined,
+    // The loop runs here, in an ordinary detached run host; the Sandbox is
+    // its workspace. Every file and shell tool becomes a command there
+    // through the run-rpc socket (remote-workspace.ts), so no model
+    // credential, runner payload or history lives in the Sandbox.
+    const remoteWorkspace: RemoteWorkspaceSpec = {
+      provider: sbProvider,
+      sandboxId: sandbox.id,
       cwd: sandbox.cwd,
-      mode: session.mode,
-      model: portablePreset?.model ?? session.model,
-      selectedModel: portablePreset?.selectedModel,
-      images: opts.images,
+      scratchDir: sandboxSessionScratchDir(session.id, sbProvider),
+      os: remoteGuestOsForProvider(sbProvider),
+      repo: owningAutomation
+        ? getRepo(owningAutomation.repo).id
+        : session.repo || undefined,
+    };
+    const security = sandboxRunSecuritySpec(session, opts);
+    // The run's tool calls reach exactly this handle, not whatever the
+    // session record says a moment later (sandbox/workspace-rpc.ts).
+    primeWorkspaceSandbox(session.id, sandbox);
+    if (isAgentSessionCancelled(session.id, opts.startToken)) {
+      await disposeResumeSandbox();
+      return cancelledRun(sandbox);
+    }
+    console.log(
+      `[sandbox] ${session.id}: running with its workspace in ${sandbox.id} (${sandbox.cwd})`,
+    );
+    const hosted = runAgentHosted({
+      osSessionId: session.id,
+      prompt: opts.prompt,
+      promptEntryId: opts.promptEntryId,
+      startToken: opts.startToken,
+      shouldCancel: () => isAgentSessionCancelled(session.id, opts.startToken),
+      seedTranscriptEntries: opts.seedTranscriptEntries,
+      sessionId: opts.engineSessionId || undefined,
+      cwd: sandbox.cwd,
+      remoteWorkspace,
       files: await readPromptFiles(opts.attachments),
-      // Interactive remote sandboxes keep Open Session's in-process tools
-      // through proxyMcpServers below, but cannot run the host's external MCP
-      // commands or reuse its dynamic OAuth state. Sending "all" made every
-      // turn wait on a ladder of ENOENT, 401 and 60s timeout failures before
-      // the model could answer. Automation keeps its explicit fail-closed
-      // allowlist because those remote connectors are part of its contract.
-      ...sandboxRunSecuritySpec(session, opts),
-      rpcToken,
+      mode: session.mode,
+      mcpGrantUser: security.mcpGrantUser,
+      model: session.model,
+      images: opts.images,
+      // The loop runs on this machine, so the session's MCP servers work as
+      // they do for any session here; an automation keeps its allowlist.
+      mcpServers: opts.mcpServers ?? "all",
+      proxyMcpServers: security.proxyMcpServers,
       reposNote: opts.isAutomationSession
         ? undefined
         : await buildSessionNote(session, opts.user),
+      deniedTools: opts.deniedTools,
+      publicationPolicy: security.publicationPolicy,
       confirmTools: STRIPE_CONFIRM_TOOLS,
+      aws: false,
       author: commitAuthorFor(
         opts.isAutomationSession ? undefined : opts.user,
         opts.isAutomationSession ? undefined : sessionPrincipal(session),
       ),
+      user: security.user,
+      accountUser: opts.accountUser,
       fallbackModel: opts.isAutomationSession
         ? undefined
         : interactiveFallbackModel(session.model, session.autoFallback),
-      effort: portablePreset?.effort ?? session.effort,
+      effort: session.effort,
       fastMode: session.fastMode,
       pstackMode: session.pstackMode,
       // A disposable automation resume carries the automation's hard pin for
       // its own turns; a person's takeover turn carries none (runAccountSpec).
       ...runAccountSpec(session, opts, owningAutomation),
-    };
-    if (isAgentSessionCancelled(session.id, opts.startToken)) {
-      unregisterRunToken(rpcToken);
-      rpcToken = undefined;
-      await disposeResumeSandbox();
-      return cancelledRun(sandbox);
-    }
-    const runCallbacks = {
+      trustProfile: security.trustProfile,
+      journalKind: security.journalKind,
       onAskUser: makeAskHandler(session.id),
-      // A steer that reached the in-container run too late must not
-      // evaporate. Hand it back to the queue, receipt and all.
+      // A steer that reached the run too late must not evaporate. Hand it
+      // back to the queue, receipt and all.
       onSteerFailed: (text: string) =>
         requeueFailedSteer(session.id, text, opts.user),
-    };
-    // Launch eagerly (docker exec + socket connect awaited here) so failure is
-    // visible before the stream begins and the prompt is never rerouted.
-    const handle = sandbox.launchRunEager
-      ? await sandbox.launchRunEager(spec, runCallbacks)
-      : sandbox.launchRun(spec, runCallbacks);
-    if (isAgentSessionCancelled(session.id, opts.startToken)) {
-      handle.cancel();
-      unregisterRunToken(rpcToken);
-      rpcToken = undefined;
-      await disposeResumeSandbox();
-      return cancelledRun(sandbox);
-    }
-    console.log(
-      `[sandbox] ${session.id}: running in ${sandbox.id} (${sandbox.cwd})`,
-    );
+    });
     const events = disposableAutomationResume
       ? (async function* (): AsyncGenerator<StreamEvent> {
           try {
-            yield* handle.events();
+            yield* hosted;
           } finally {
-            unregisterRunToken(rpcToken);
-            rpcToken = undefined;
             try {
               await disposeResumeSandbox();
             } catch (error) {
@@ -2327,9 +2290,8 @@ export async function maybeLaunchSandboxedRun(
             }
           }
         })()
-      : handle.events();
+      : hosted;
     return Object.assign(events, {
-      freshEngine: remoteSandboxReplaced || undefined,
       sandboxProvider: sbProvider,
       sandboxId: sandbox.id,
       sandboxReadyMs: Date.now() - sandboxStartedAt,

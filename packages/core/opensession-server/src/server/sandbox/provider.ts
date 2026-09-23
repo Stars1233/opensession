@@ -99,6 +99,15 @@ export interface ExecOpts {
    * sandbox.
    */
   background?: boolean;
+  /**
+   * The caller is issuing a burst of commands against a Sandbox it already
+   * woke (a run's tool calls): skip the provider's wake check and keepalive
+   * unless a minute has passed since the last one.
+   */
+  assumeStarted?: boolean;
+  /** Give the command a workload identity lease (default true). A run's
+   *  file operations skip it; its shell commands keep it. */
+  workloadIdentity?: boolean;
 }
 
 export interface ExecResult {

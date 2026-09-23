@@ -885,9 +885,16 @@ describe("single session ownership", () => {
     expect(create).toContain("hostId: startToken");
     expect(create).toContain("isAgentSessionCancelled(bksId, startToken)");
     // Sandbox launches bind the physical host to the admitted token so
-    // exact-token Stop reaches the live host (mirrors the Runner path).
-    expect(read("run-session.ts")).toContain(
-      "hostId: opts.startToken || `rh-${randomUUIDv7()}`",
+    // exact-token Stop reaches the live host (mirrors the Runner path): the
+    // Sandbox session's host is an ordinary hosted run keyed by that token.
+    const sandboxLaunch = read("run-session.ts").slice(
+      read("run-session.ts").indexOf(
+        "export async function maybeLaunchSandboxedRun",
+      ),
+    );
+    expect(sandboxLaunch).toContain("startToken: opts.startToken,");
+    expect(read("host-client.ts")).toContain(
+      "const hostId = opts.startToken || `rh-${Bun.randomUUIDv7()}`;",
     );
     expect(read("sandbox/local.ts")).toContain("startToken: spec.hostId");
     const runSession = read("run-session.ts");
