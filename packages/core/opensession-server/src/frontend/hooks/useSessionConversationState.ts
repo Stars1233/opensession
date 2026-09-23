@@ -175,6 +175,7 @@ export function useShippedChangePresentation({
   const [suggested, setSuggested] = useState<{
     key: string;
     message: string;
+    channel?: string;
   } | null>(null);
   const [drafting, setDrafting] = useState(false);
   useEffect(() => {
@@ -188,7 +189,11 @@ export function useShippedChangePresentation({
     )
       .then((result) => {
         if (controller.signal.aborted || !result.message) return;
-        setSuggested({ key: suggestionKey, message: result.message });
+        setSuggested({
+          key: suggestionKey,
+          message: result.message,
+          channel: result.channel || undefined,
+        });
       })
       .catch(() => {
         // The title fallback is already on screen; nothing to report.
@@ -203,6 +208,10 @@ export function useShippedChangePresentation({
   }, [suggestionKey, session.id, mergedPrRepo, mergedPrBranch]);
   const suggestedMessage =
     suggested && suggested.key === suggestionKey ? suggested.message : "";
+  const suggestedChannel =
+    suggested && suggested.key === suggestionKey
+      ? suggested.channel
+      : undefined;
   const shippedChangeShare = useMemo(() => {
     if (mergedPr?.number === undefined || shareDismissed) return undefined;
     const share: ShippedChangeShare = {
@@ -217,6 +226,7 @@ export function useShippedChangePresentation({
               session.walkthrough?.summary,
             )),
       drafting: drafting && !suggestedMessage,
+      defaultChannel: suggestedChannel,
       screenshot: shippedScreenshot,
       reconnectRequired,
       status,
@@ -249,6 +259,7 @@ export function useShippedChangePresentation({
     shippedSent,
     latestAssistantMessage,
     suggestedMessage,
+    suggestedChannel,
     drafting,
   ]);
   return { shippedSent, shippedChangeShare };

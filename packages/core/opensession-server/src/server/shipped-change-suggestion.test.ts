@@ -4,6 +4,7 @@ import {
   resetShippedChangeSuggestionsForTests,
   sanitizeShippedChangeSuggestion,
   shippedChangeSuggestionPrompt,
+  splitChannelPick,
   suggestShippedChangeMessage,
 } from "./shipped-change-suggestion";
 
@@ -138,9 +139,10 @@ describe("suggestShippedChangeMessage", () => {
       transcriptTail: async () => tail,
     };
     const first = await suggestShippedChangeMessage(input, deps);
-    expect(first).toBe(
-      "Text presets, subtitle presets and custom layouts are now available.",
-    );
+    expect(first).toEqual({
+      message:
+        "Text presets, subtitle presets and custom layouts are now available.",
+    });
     expect(calls[0]).toContain("For the record, what landed");
 
     // Same session, nothing new happened: no second call.
@@ -190,5 +192,63 @@ describe("suggestShippedChangeMessage", () => {
     expect(await suggestShippedChangeMessage(input, deps)).toBeNull();
     expect(await suggestShippedChangeMessage(input, deps)).toBeNull();
     expect(calls).toBe(2);
+  });
+
+  it("picks a channel from the offered list, led by the repository's history", async () => {
+    const prompts: string[] = [];
+    const deps = {
+      oneShot: async (prompt: string) => {
+        prompts.push(prompt);
+        return "Channel: #engineering\n\nText presets can now be saved over the public API.";
+      },
+      transcriptTail: async () => tail,
+    };
+    const result = await suggestShippedChangeMessage(
+      {
+        ...input,
+        repo: "acme/app",
+        channels: [
+          { id: "C1", name: "os" },
+          { id: "C2", name: "engineering" },
+        ],
+        recentChannels: [{ id: "C2", name: "engineering", count: 3 }],
+      },
+      deps,
+    );
+    expect(result).toEqual({
+      message: "Text presets can now be saved over the public API.",
+      channel: "C2",
+    });
+    expect(prompts[0]).toContain("from this list only: #os, #engineering");
+    expect(prompts[0]).toContain("acme/app repository");
+    expect(prompts[0]).toContain("#engineering (3 updates)");
+  });
+
+  it("asks for no channel when none are offered", () => {
+    expect(shippedChangeSuggestionPrompt(input, tail)).not.toContain(
+      "Channel:",
+    );
+  });
+});
+
+describe("splitChannelPick", () => {
+  const channels = [{ id: "C1", name: "Design-Polish" }];
+
+  it("maps a known pick to its id and strips the line", () => {
+    expect(
+      splitChannelPick("**Channel:** #design-polish\n\nNew border.", channels),
+    ).toEqual({ text: "New border.", channel: "C1" });
+  });
+
+  it("drops an unknown pick but still strips the line", () => {
+    expect(splitChannelPick("Channel: #random\nNew border.", channels)).toEqual(
+      { text: "New border." },
+    );
+  });
+
+  it("leaves an answer without a pick whole", () => {
+    expect(splitChannelPick("New border style.", channels)).toEqual({
+      text: "New border style.",
+    });
   });
 });

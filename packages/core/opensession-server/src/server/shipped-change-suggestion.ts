@@ -26,8 +26,25 @@ export interface ShippedChangeSuggestionInput {
     walkthrough?: { summary?: string };
   };
   pr: { number: number; title: string; body?: string };
+  /** `owner/name` of the pull request's repository. */
+  repo?: string;
+  /** Channels the draft may be posted to. With none, no channel is picked. */
+  channels?: SuggestionChannel[];
+  /** Where this repository's earlier updates went, most used first. */
+  recentChannels?: Array<SuggestionChannel & { count: number }>;
   /** Account-affinity user for the model call. */
   user?: string;
+}
+
+export interface SuggestionChannel {
+  id: string;
+  name: string;
+}
+
+export interface ShippedChangeSuggestion {
+  message: string;
+  /** Id of the channel the draft suits, when one was picked. */
+  channel?: string;
 }
 
 export interface ShippedChangeSuggestionDeps {
@@ -48,20 +65,23 @@ export interface TranscriptTail {
 
 const g = globalThis as unknown as {
   __shippedChangeSuggestions?: Map<string, StoredSuggestion>;
-  __shippedChangeSuggestionsInFlight?: Map<string, Promise<string | null>>;
+  __shippedChangeSuggestionsInFlight?: Map<
+    string,
+    Promise<ShippedChangeSuggestion | null>
+  >;
 };
 
 interface StoredSuggestion {
   /** The session's `lastActivity` the draft was written against. */
   activity: string;
-  message: string;
+  suggestion: ShippedChangeSuggestion;
 }
 
 const stored: Map<string, StoredSuggestion> = (g.__shippedChangeSuggestions ??=
   new Map());
 const inFlight: Map<
   string,
-  Promise<string | null>
+  Promise<ShippedChangeSuggestion | null>
 > = (g.__shippedChangeSuggestionsInFlight ??= new Map());
 
 /** One row per merged PR someone looked at; bounds the map against leaks. */
@@ -133,8 +153,58 @@ export function shippedChangeSuggestionPrompt(
     `\nThe pull request, which states the net change it made:\n#${input.pr.number}: ${input.pr.title.trim()}\n` +
     (body ? `\n${body}\n` : "") +
     "</session_data>\n\n" +
+    channelRequest(input) +
     "Write the Slack update now (plain text only)."
   );
+}
+
+const MAX_CHANNELS = 40;
+
+/** Ask for a channel pick on the first line, when there are channels to pick
+ *  from. The repository's own history is the strongest signal: a team posts
+ *  one repository's updates in the same place. */
+function channelRequest(input: ShippedChangeSuggestionInput): string {
+  const channels = (input.channels || []).slice(0, MAX_CHANNELS);
+  if (!channels.length) return "";
+  const recent = (input.recentChannels || [])
+    .slice(0, 5)
+    .map(
+      (channel) =>
+        `#${channel.name} (${channel.count} update${channel.count === 1 ? "" : "s"})`,
+    );
+  return (
+    "Also pick the Slack channel this update belongs in, from this list only: " +
+    channels.map((channel) => `#${channel.name}`).join(", ") +
+    ".\n" +
+    (input.repo
+      ? `The pull request is in the ${input.repo} repository.\n`
+      : "") +
+    (recent.length
+      ? `Earlier updates from this repository went to: ${recent.join(", ")}. Prefer that channel unless this change clearly belongs elsewhere.\n`
+      : "Pick the channel whose name matches the repository or the area the change touches. Avoid personal channels and general chat.\n") +
+    "Put the pick alone on the first line as `Channel: #name`, then a blank line, then the message.\n\n"
+  );
+}
+
+/** Split a `Channel: #name` first line off the model's answer and map it to
+ *  a known channel id. An unknown or missing pick leaves the text whole. */
+export function splitChannelPick(
+  raw: string | null,
+  channels: SuggestionChannel[],
+): { text: string | null; channel?: string } {
+  if (!raw) return { text: raw };
+  const match = raw
+    .trim()
+    .match(/^[^\w\n]*channel[^\w\n]*?:[^\w\n]*([\w.-]+)[^\n]*/i);
+  if (!match) return { text: raw };
+  const name = match[1].toLowerCase();
+  const picked = channels.find(
+    (channel) => channel.name.toLowerCase() === name,
+  );
+  return {
+    text: raw.trim().slice(match[0].length).trim(),
+    ...(picked ? { channel: picked.id } : {}),
+  };
 }
 
 /** Normalize the model's output into one Slack-sized message, or null when
@@ -177,8 +247,12 @@ const defaultDeps: ShippedChangeSuggestionDeps = {
   transcriptTail: defaultTranscriptTail,
 };
 
-function remember(key: string, activity: string, message: string): void {
-  stored.set(key, { activity, message });
+function remember(
+  key: string,
+  activity: string,
+  suggestion: ShippedChangeSuggestion,
+): void {
+  stored.set(key, { activity, suggestion });
   if (stored.size > MAX_STORED) {
     const oldest = stored.keys().next().value;
     if (oldest !== undefined) stored.delete(oldest);
@@ -186,18 +260,18 @@ function remember(key: string, activity: string, message: string): void {
 }
 
 /**
- * The suggested Slack message for a merged PR, or null when nothing usable
- * came back. Concurrent viewers of the same card share one call, and a card
+ * The suggested Slack message for a merged PR, and the channel it suits
+ * when the caller offered channels, or null when nothing usable came back. Concurrent viewers of the same card share one call, and a card
  * reopened without new session activity costs nothing.
  */
 export async function suggestShippedChangeMessage(
   input: ShippedChangeSuggestionInput,
   deps: ShippedChangeSuggestionDeps = defaultDeps,
-): Promise<string | null> {
+): Promise<ShippedChangeSuggestion | null> {
   const key = `${input.session.id}#${input.pr.number}`;
   const activity = input.session.lastActivity || "";
   const cached = stored.get(key);
-  if (cached && cached.activity === activity) return cached.message;
+  if (cached && cached.activity === activity) return cached.suggestion;
   const pending = inFlight.get(key);
   if (pending) return pending;
   const run = (async () => {
@@ -214,9 +288,15 @@ export async function suggestShippedChangeMessage(
           user: input.user,
         },
       );
-      const message = sanitizeShippedChangeSuggestion(raw);
-      if (message) remember(key, activity, message);
-      return message;
+      const pick = splitChannelPick(raw, input.channels || []);
+      const message = sanitizeShippedChangeSuggestion(pick.text);
+      if (!message) return null;
+      const suggestion: ShippedChangeSuggestion = {
+        message,
+        ...(pick.channel ? { channel: pick.channel } : {}),
+      };
+      remember(key, activity, suggestion);
+      return suggestion;
     } catch (e) {
       console.warn(`[shipped-change] suggestion failed for ${key}:`, e);
       return null;
