@@ -559,9 +559,9 @@ async function ensurePreviewRoute(
     previewRoutes.delete(httpsPort);
   }
   const server = previewServerConfig(httpsPort, upstream, host);
-  const put = () =>
+  const write = (method: "PUT" | "PATCH") =>
     caddyFetch(path, {
-      method: "PUT",
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(server),
     });
@@ -576,14 +576,14 @@ async function ensurePreviewRoute(
       previewRoutes.set(httpsPort, signature);
       return true;
     }
-    // PUT creates the key; if it already exists with another upstream (the
-    // host port moved) it 409s — drop it and recreate so the route always
-    // points at the current upstream.
-    let res = await put();
-    if (res.status === 409) {
-      await caddyFetch(path, { method: "DELETE" }).catch(() => {});
-      res = await put();
-    }
+    // A route with another upstream (a rebuilt relay listens on a new
+    // loopback port) is replaced in place with PATCH: one reload that keeps
+    // the listener. DELETE + PUT closed the port in between, and a browser
+    // opening the Portal then got "connection refused". PUT creates a new
+    // key; a 409 means one appeared meanwhile, so replace that instead.
+    let res = await write(existing.ok ? "PATCH" : "PUT");
+    if (res.status === 409) res = await write("PATCH");
+    else if (res.status === 404 && existing.ok) res = await write("PUT");
     if (!res.ok) return false;
     previewRoutes.set(httpsPort, signature);
     return true;
