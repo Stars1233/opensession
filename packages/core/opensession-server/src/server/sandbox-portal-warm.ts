@@ -57,9 +57,12 @@ export function portalWarmScript(input: {
   host: string;
   routes: string[];
   logPath: string;
-  /** Leave a Portal alone whose last warm-up finished (a relay rebuilt
-   *  after a server restart, not a new dev server). */
+  /** Leave a Portal alone whose last warm-up finished after its app
+   *  started (a relay rebuilt after a server restart). A dev server that
+   *  restarted since, after a wake for instance, is warmed again. */
   skipIfWarm?: boolean;
+  /** How long to wait for the app to listen before giving up. */
+  waitSeconds?: number;
 }): string {
   const base = `http://127.0.0.1:${input.port}`;
   const headers = `-H ${shellQuoteWord(`Host: ${input.host}`)} -H 'X-Forwarded-Proto: https'`;
@@ -67,10 +70,27 @@ export function portalWarmScript(input: {
   const log = shellQuoteWord(input.logPath);
   const lock = shellQuoteWord(`${input.logPath}.lock`);
   return [
-    // Nothing to warm until the app listens; leave the log untouched.
-    `(exec 3<>/dev/tcp/127.0.0.1/${input.port}) 2>/dev/null || exit 0`,
+    // Nothing to warm until the app listens: a relay rebuilt during a
+    // relaunch comes up first. Leave the log untouched meanwhile.
+    `waited=0`,
+    `until (exec 3<>/dev/tcp/127.0.0.1/${input.port}) 2>/dev/null; do`,
+    `  [ "$waited" -ge ${Math.max(0, Math.floor(input.waitSeconds ?? 600))} ] && exit 0`,
+    `  sleep 2; waited=$((waited + 2))`,
+    `done`,
     ...(input.skipIfWarm
-      ? [`[ "$(tail -n 1 ${log} 2>/dev/null)" = done ] && exit 0`]
+      ? [
+          // Finished, and by the app listening now: its process has run
+          // longer than the log has existed unchanged. Without ss or ps
+          // (macOS) the Portal is warmed again, which is only slower.
+          `if [ "$(tail -n 1 ${log} 2>/dev/null)" = done ]; then`,
+          `  pid=$(ss -Hltnp "sport = :${input.port}" 2>/dev/null | grep -o 'pid=[0-9]*' | head -n 1 | cut -d= -f2)`,
+          `  if [ -n "$pid" ]; then`,
+          `    age=$(( $(date +%s) - $(stat -c %Y ${log} 2>/dev/null || echo 0) ))`,
+          `    ran=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')`,
+          `    [ -n "$ran" ] && [ "$ran" -ge "$age" ] && exit 0`,
+          `  fi`,
+          `fi`,
+        ]
       : []),
     // One warm-up at a time; a lock older than 15 minutes is a dead run's.
     `find ${lock} -maxdepth 0 -mmin +15 -exec rmdir {} \\; 2>/dev/null`,

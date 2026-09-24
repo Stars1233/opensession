@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
@@ -90,7 +91,7 @@ describe("portal warm script", () => {
     }
   });
 
-  test("skips when the app is not listening, a finished warm-up is on record, or one is running", async () => {
+  test("waits for the app, skips a warm-up finished since it started, and runs one at a time", async () => {
     let hits = 0;
     const server = Bun.serve({
       hostname: "127.0.0.1",
@@ -113,7 +114,11 @@ describe("portal warm script", () => {
       });
       const deadPort = idle.port!;
       idle.stop(true);
-      expect(await run(portalWarmScript({ ...opts, port: deadPort }))).toBe(0);
+      expect(
+        await run(
+          portalWarmScript({ ...opts, port: deadPort, waitSeconds: 0 }),
+        ),
+      ).toBe(0);
       expect(existsSync(logPath)).toBe(false);
       // A finished warm-up is left alone on a rebuild...
       writeFileSync(logPath, "/a 200 0.1s\ndone\n");
@@ -123,18 +128,30 @@ describe("portal warm script", () => {
         ),
       ).toBe(0);
       expect(hits).toBe(0);
-      // ...and so is a Portal another warm-up is already working on.
+      // ...unless the app restarted after it finished (after a wake).
+      utimesSync(
+        logPath,
+        new Date(Date.now() - 3_600_000),
+        new Date(Date.now() - 3_600_000),
+      );
+      expect(
+        await run(
+          portalWarmScript({ ...opts, port: server.port!, skipIfWarm: true }),
+        ),
+      ).toBe(0);
+      expect(hits).toBe(1);
+      // A Portal another warm-up is already working on is left alone.
       mkdirSync(`${logPath}.lock`);
       expect(await run(portalWarmScript({ ...opts, port: server.port! }))).toBe(
         0,
       );
-      expect(hits).toBe(0);
+      expect(hits).toBe(1);
       rmSync(`${logPath}.lock`, { recursive: true });
       // A fresh start warms again and releases the lock.
       expect(await run(portalWarmScript({ ...opts, port: server.port! }))).toBe(
         0,
       );
-      expect(hits).toBe(1);
+      expect(hits).toBe(2);
       expect(existsSync(`${logPath}.lock`)).toBe(false);
     } finally {
       server.stop(true);
