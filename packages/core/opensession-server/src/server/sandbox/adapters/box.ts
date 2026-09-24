@@ -488,70 +488,57 @@ function primeBoxWorkspaceAfterResume(driver: RemoteDriver, cwd: string): void {
     });
 }
 
-/** Printed by BOX_RUNTIME_HOME_COMMAND when /home/ubuntu is served by a
- *  mount that is not our plain bind of /home/user. After an archive/resume
- *  Box restores the home lazily through a FUSE layer mounted at /home/ubuntu
- *  and leaves /home/user as the raw backing store: content written to
- *  /home/user (including through Box's native file API) is invisible at
- *  /home/ubuntu until hydrated, while writes through /home/ubuntu land in
- *  both. That mount must be kept, never unmounted from under a running
- *  workspace, and every file write must go through the shell path. */
+/** Printed by BOX_RUNTIME_HOME_COMMAND while Boat is still restoring the
+ *  home lazily. During that restore /home/user is a FUSE layer that fetches
+ *  files on first read, and content written through Box's native file API
+ *  lands in the raw backing store, invisible to the workspace until the
+ *  restore finishes. Every file write must then go through the shell path. */
 export const BOX_RUNTIME_HOME_LAZY_MARKER = "__OPENSESSION_BOX_HOME_LAZY__";
 
+/** Prints "hydrating" while Boat's lazy restore still serves /home/user
+ *  through FUSE, "ready" once it is plain disk. */
+export const BOX_HOME_HYDRATION_PROBE =
+  'case "$(stat -f -c %T /home/user 2>/dev/null)" in fuse*) echo hydrating;; *) echo ready;; esac';
+
+/**
+ * Make /home/ubuntu, the path Open Session uses on every Linux guest, a
+ * symlink to Boat's own home, /home/user.
+ *
+ * A restored Box serves /home/user through a FUSE layer (ascii-lazyfs) while
+ * it copies the disk in, then retires that layer and leaves plain ext4. A
+ * symlink resolves through /home/user on every lookup, so it follows that
+ * handover. The bind mount used before captured the FUSE mount itself and
+ * kept the workspace on it for the machine's whole life: listing 20k files
+ * took 12.5 s instead of 0.03 s, and a dev server took minutes to start.
+ *
+ * Paths keep the /home/ubuntu spelling Open Session shares with the host;
+ * resolved paths (pwd -P, realpath) read /home/user, consistently for the
+ * image build and every session started from it. A bind mount left by an
+ * older release is detached lazily: processes inside keep their view until
+ * they exit. Serialized, since concurrent commands may all arrive here.
+ */
 export const BOX_RUNTIME_HOME_COMMAND =
   "test -d /home/user && test -w /home/user && " +
-  "if mountpoint -q /home/ubuntu; then " +
-  "if ! test /home/ubuntu -ef /home/user; then " +
-  `if test -w /home/ubuntu; then echo ${BOX_RUNTIME_HOME_LAZY_MARKER}; ` +
-  "else sudo -n umount /home/ubuntu && sudo -n mount --bind /home/user /home/ubuntu; fi; fi; " +
+  "flock /tmp/.opensession-home.lock sh -c '" +
+  'if [ "$(readlink /home/ubuntu)" != /home/user ]; then ' +
+  "if [ -L /home/ubuntu ]; then sudo -n rm /home/ubuntu || exit 1; " +
   "else " +
-  "if [ -L /home/ubuntu ]; then sudo -n rm /home/ubuntu; " +
-  'elif [ -d /home/ubuntu ] && [ -z "$(ls -A /home/ubuntu)" ]; then sudo -n rmdir /home/ubuntu; ' +
-  "elif [ -e /home/ubuntu ]; then echo 'cannot replace non-empty /home/ubuntu' >&2; exit 1; fi; " +
-  "sudo -n mkdir -p /home/ubuntu && sudo -n mount --bind /home/user /home/ubuntu; " +
-  "fi && test ! -L /home/ubuntu && mountpoint -q /home/ubuntu && test -w /home/ubuntu";
-
-/** Leave Boat's lazy-restore layer once it has finished.
- *
- *  A restored Box serves /home/user through a FUSE layer (ascii-lazyfs)
- *  while it copies the disk in, about a minute for tella-fusion. When it is
- *  done Boat retires the layer from /home/user, but our bind at
- *  /home/ubuntu still holds it, so every file lookup there kept going
- *  through FUSE for the machine's whole life: listing 20k files took 12.5 s
- *  instead of 0.03 s, and a dev server start took minutes instead of 40 s.
- *  Once /home/user is plain disk again while /home/ubuntu is still FUSE,
- *  bind the real one over it. Stacking keeps the path present throughout;
- *  processes already inside keep the old view until they restart. Never
- *  fails the command it prefixes. */
-export const BOX_HOME_RETIRE_LAZY =
-  `{ case "$(stat -f -c %T /home/ubuntu 2>/dev/null)" in fuse*) ` +
-  `case "$(stat -f -c %T /home/user 2>/dev/null)" in fuse*|"") ;; ` +
-  `*) flock /tmp/.opensession-home-retire.lock sh -c ` +
-  `'case "$(stat -f -c %T /home/ubuntu)" in fuse*) sudo -n mount --bind /home/user /home/ubuntu;; esac' ` +
-  `>/dev/null 2>&1;; esac;; esac; true; }`;
-
-/** Shell that waits, up to `seconds`, for Boat's lazy restore to finish
- *  and then moves /home/ubuntu onto the real disk. A process started while
- *  the restore runs stays on the slow path for its whole life, so a dev
- *  server should start after this. Returns at once on a machine that was
- *  never lazily restored. */
-export function boxAwaitHydratedHomeCommand(seconds: number): string {
-  const tries = Math.max(0, Math.ceil(seconds / 2));
-  return (
-    `i=0; while [ "$i" -lt ${tries} ]; do ` +
-    `case "$(stat -f -c %T /home/ubuntu 2>/dev/null)" in fuse*) ;; *) break;; esac; ` +
-    `case "$(stat -f -c %T /home/user 2>/dev/null)" in fuse*) sleep 2; i=$((i + 1));; *) break;; esac; ` +
-    `done; ${BOX_HOME_RETIRE_LAZY}`
-  );
-}
+  "while mountpoint -q /home/ubuntu; do sudo -n umount -l /home/ubuntu || exit 1; done; " +
+  'if [ -d /home/ubuntu ] && [ -z "$(ls -A /home/ubuntu)" ]; then sudo -n rmdir /home/ubuntu || exit 1; ' +
+  'elif [ -e /home/ubuntu ]; then echo "cannot replace non-empty /home/ubuntu" >&2; exit 1; fi; ' +
+  "fi; " +
+  "sudo -n ln -s /home/user /home/ubuntu; " +
+  "fi' && " +
+  '[ "$(readlink /home/ubuntu)" = /home/user ] && test -w /home/ubuntu/ && ' +
+  `{ case "$(stat -f -c %T /home/user 2>/dev/null)" in fuse*) echo ${BOX_RUNTIME_HOME_LAZY_MARKER};; esac; true; }`;
 
 /** Prefix of every composed Box command. When Box restarts a VM on its own
- *  (an archive and resume, host maintenance), the bind mount at /home/ubuntu
- *  is gone while this process still holds a driver that already set it up
- *  once, and every command with a workspace cwd then fails with "No such
- *  file or directory". Re-establish it in the same command: one `mountpoint`
- *  check when it is in place. */
-export const BOX_HOME_GUARD = `{ mountpoint -q /home/ubuntu || { ${BOX_RUNTIME_HOME_COMMAND}; } >/dev/null; } && ${BOX_HOME_RETIRE_LAZY}`;
+ *  (an archive and resume, host maintenance), the VM root is rebuilt and
+ *  /home/ubuntu is gone while this process still holds a driver that set it
+ *  up once; every command with a workspace cwd would then fail with "No
+ *  such file or directory". Re-establish it in the same command: one
+ *  readlink when it is in place. */
+export const BOX_HOME_GUARD = `{ [ "$(readlink /home/ubuntu)" = /home/user ] || { ${BOX_RUNTIME_HOME_COMMAND}; } >/dev/null; }`;
 
 function boxSshTargets(): Map<string, BoxSshTarget> {
   const global = globalThis as typeof globalThis & {
@@ -726,9 +713,8 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
 
   const ensureRuntimeHome = async () => {
     // Box persists /home/user across archive/resume and named snapshots, while
-    // the VM root is rebuilt. Bind-mount it at the cross-provider path on every
-    // boot: unlike a symlink, this keeps path-sensitive tools such as direnv on
-    // the stable /home/ubuntu spelling.
+    // the VM root is rebuilt. Link the cross-provider path to it on every boot
+    // (see BOX_RUNTIME_HOME_COMMAND for why a link and not a bind mount).
     const response = result(
       await boxApi<BoxCommandResponse>(
         cfg,
@@ -948,7 +934,7 @@ export function boxDriver(cfg: BoxClientConfig, boxId: string): RemoteDriver {
         return;
       }
       // Box canonicalizes file paths and permits only /home/user or /tmp.
-      // /home/ubuntu is our bind mount of that persistent home, so translate
+      // /home/ubuntu is our link to that persistent home, so translate
       // the prefix explicitly and use the native file API instead of serializing
       // every launch-time credential write through a shell command.
       const nativePath = boxNativeFilePath(path);
@@ -1822,7 +1808,7 @@ export const boxPrewarmAdapter: PrewarmAdapter = {
 
 async function assertBoxRuntimeHome(driver: RemoteDriver): Promise<void> {
   const probe = await driver.exec(
-    "test ! -L /home/ubuntu && mountpoint -q /home/ubuntu && test -w /home/ubuntu && " +
+    '[ "$(readlink /home/ubuntu)" = /home/user ] && test -w /home/ubuntu/ && ' +
       "echo probe > /home/ubuntu/.opensession-home-probe && test -e /home/user/.opensession-home-probe && rm -f /home/ubuntu/.opensession-home-probe && " +
       "temporary=$(mktemp -d) && case $temporary in /home/ubuntu/.tmp/*) rmdir $temporary ;; *) exit 1 ;; esac",
   );

@@ -43,7 +43,6 @@ import {
   remoteLayoutForProvider,
   shellQuoteWord,
 } from "./sandbox/adapters/bootstrap";
-import { boxAwaitHydratedHomeCommand } from "./sandbox/adapters/box";
 import { sandboxHttpsPortFor } from "./sandbox/preview-ports";
 import { warmSandboxPortal } from "./sandbox-portal-warm";
 import { cacheSandboxPortalRecords } from "./sandbox-portals";
@@ -1983,12 +1982,10 @@ async function startSandboxPortalServiceInner(
   // A dev server started while Boat is still restoring the disk runs on its
   // FUSE layer for its whole life, several times slower. The restore takes
   // about a minute; waiting for it is far cheaper than the slow start.
-  if (input.sandbox.provider === "box")
-    await input.sandbox
-      .exec(["bash", "-c", boxAwaitHydratedHomeCommand(150)], {
-        timeoutMs: 170_000,
-      })
-      .catch(() => {});
+  if (input.sandbox.provider === "box") {
+    const { waitForBoxHydration } = await import("./sandbox/box-hydration");
+    await waitForBoxHydration(input.sandbox);
+  }
   const awake = await startPortal(
     sandboxPortalOps(input.sandbox, input.sessionId),
     {
