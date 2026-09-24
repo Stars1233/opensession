@@ -229,6 +229,13 @@ describe("scheduled prompt detection", () => {
     expect(parsed).toEqual({ id, body: prompt });
   });
 
+  it("still detects deliveries whose sender stacked a suffix per round", () => {
+    const sender = `Sam${" (scheduled)".repeat(10)}`;
+    expect(
+      parseScheduledPrompt(`[${sender}] ${scheduledPromptMessage(id, prompt)}`),
+    ).toEqual({ id, body: prompt });
+  });
+
   it("classifies the turn as a check-back notice with the prompt as its body", () => {
     const entry: TranscriptEntry = {
       id: "e1",

@@ -482,7 +482,10 @@ export function parseScheduledPrompt(
   content?: string,
 ): { id: string | null; body: string } | null {
   if (!content) return null;
-  const text = content.replace(ATTR_PREFIX_RE, "");
+  // Any-length sender: deliveries stored before scheduledActor stopped
+  // stacking " (scheduled)" carry prefixes past ATTR_PREFIX_RE's limit, and
+  // the sentinel right after the bracket is what makes this unambiguous.
+  const text = content.replace(/^\[[^\]\n]+\]\s*/, "");
   const sentinel = text.match(SCHEDULED_PROMPT_SENTINEL_RE);
   if (!sentinel) return null;
   return {
