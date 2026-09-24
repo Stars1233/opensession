@@ -15,6 +15,7 @@
  */
 import { stateDir } from "../../server/paths";
 import { existsSync, readFileSync } from "fs";
+import { readFile } from "node:fs/promises";
 import { writeJsonAtomic } from "../../server/shared/atomic-write";
 import {
   tryGetSessionControl,
@@ -74,6 +75,25 @@ function readPending(): PendingDeploys {
   } catch {
     return {};
   }
+}
+
+/** Sessions a merged PR is still waiting on a deploy for. The worktree reaper
+ *  keeps their checkouts even when the session is archived, so the post-deploy
+ *  verify prompt lands in a session whose checkout still exists. */
+export async function sessionsAwaitingDeploy(): Promise<Set<string>> {
+  let all: PendingDeploys;
+  try {
+    all = JSON.parse(await readFile(PENDING_PATH, "utf-8")) as PendingDeploys;
+  } catch {
+    return new Set();
+  }
+  const cutoff = Date.now() - PENDING_TTL_MS;
+  const ids = new Set<string>();
+  for (const p of Object.values(all)) {
+    if (new Date(p.recordedAt).getTime() < cutoff) continue;
+    for (const id of p.sessionIds || []) ids.add(id);
+  }
+  return ids;
 }
 
 /** Deduplicate ordinary multi-session matches and fail closed on an
@@ -280,8 +300,28 @@ export async function handleDeployWorkflowRun(payload: any): Promise<void> {
     head_sha: run.head_sha,
     session_id: verifier,
   });
+  // The owner may have archived the session after merging. The verify turn
+  // runs either way; unarchive it first so that turn, and anything it opens,
+  // is visible in the sidebar instead of running out of sight.
+  await surfaceArchivedSession(verifier).catch((e) =>
+    console.warn(
+      `[github] could not unarchive ${verifier} for deploy verify:`,
+      e,
+    ),
+  );
   await deliver(control, [verifier], verifyPrompt, deliveryKey);
   if (rest.length) await deliver(control, rest, message, deliveryKey);
+}
+
+async function surfaceArchivedSession(id: string): Promise<void> {
+  const [{ findSessionAsync }, { unarchiveForHumanTurn }] = await Promise.all([
+    import("../../server/session-cache"),
+    import("../../server/session-unarchive"),
+  ]);
+  const session = await findSessionAsync(id);
+  if (!session || !(await unarchiveForHumanTurn(session))) return;
+  console.log(`[github] unarchived ${id} to verify its deploy`);
+  audit({ msg: "github_deploy_verify_unarchived", session_id: id });
 }
 
 /** The session that verifies a deploy: the first one a person works in. The
