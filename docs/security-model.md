@@ -324,7 +324,7 @@ users, operators must qualify the Daytona provider, enable the review
 automation, and keep fork-origin GitHub Actions disabled or approval-gated. The
 shipped PR workflows additionally skip every job whose head repository differs
 from the base repository. Ordinary App installation tokens exclude repository Administration.
-The App grant includes it for the admin-only private repository creation
+The App grant includes it for the private repository creation
 route, which mints a separate uncached token. Connected-user tokens inherit
 the widened grant intersected with the person's permissions, including in
 interactive code runs; they cannot be narrowed by the installation-token
