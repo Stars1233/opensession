@@ -146,6 +146,10 @@ const hostPortalWakes = (portalGlobal.__opensessionHostPortalWakes ??=
   new Map());
 const hostPortalReservations =
   (portalGlobal.__opensessionHostPortalReservations ??= new Set());
+/** A Sandbox that just woke fetches its files on first read, so the relay's
+ * bun start can take a while. */
+const SANDBOX_PORTAL_RELAY_CONNECT_MS = 45_000;
+
 export const SANDBOX_PORTAL_AGENT_ENTRY = `${REPO_ROOT}/packages/core/opensession-server/src/runner-host/sandbox-portal-agent.ts`;
 
 function portalKey(name: string): string {
@@ -2044,17 +2048,16 @@ async function startSandboxPortalServiceInner(
         sandboxId: input.sandbox.id,
         port: awake.port,
       },
-      15_000,
+      SANDBOX_PORTAL_RELAY_CONNECT_MS,
     ))
   ) {
-    await stopPortal(
-      sandboxPortalOps(input.sandbox, input.sessionId),
-      awake.name,
-    );
-    revokeSandboxPortalRelay(input.sandbox.id, awake.port);
+    // The app is up; only its way out is not. Leave it running: the next
+    // visit rebuilds the relay (sandbox-portal-recovery.ts). Stopping it
+    // here recorded the Portal as stopped, which no visit or wake relaunches,
+    // so one slow relay start after a wake killed the Portal for good.
     forgetRemoteSandboxPortalAgents(input.sandbox.id, awake.port);
     throw new Error(
-      `Portal relay did not connect within 15 seconds. See sandbox-portal-${awake.port}.log in this session's scratch directory.`,
+      `Portal relay did not connect within ${SANDBOX_PORTAL_RELAY_CONNECT_MS / 1000} seconds. The app is still running; opening the Portal retries. See sandbox-portal-${awake.port}.log in this session's scratch directory.`,
     );
   }
   audit({

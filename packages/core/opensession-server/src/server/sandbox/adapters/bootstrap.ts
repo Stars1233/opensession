@@ -356,6 +356,20 @@ function statePath(provider: string, sandboxId: string): string {
   return `${STATE_DIR}/${provider}-${sanitizeName(sandboxId)}.json`;
 }
 
+/** readRemoteState without blocking the event loop, for request handlers. */
+export async function readRemoteStateAsync(
+  provider: string,
+  sandboxId: string,
+): Promise<RemoteSandboxState | null> {
+  try {
+    return withTrustPolicy(
+      JSON.parse(await readFile(statePath(provider, sandboxId), "utf-8")),
+    );
+  } catch {
+    return null;
+  }
+}
+
 export function readRemoteState(
   provider: string,
   sandboxId: string,
