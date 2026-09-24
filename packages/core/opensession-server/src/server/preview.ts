@@ -20,6 +20,7 @@
  * outbound Portal relay (sandbox-portal-relay.ts).
  */
 import { $ } from "bun";
+import { CADDY_STREAM_CLOSE_DELAY } from "./caddy-stream";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import type { Repo } from "./config";
@@ -484,6 +485,7 @@ export function previewServerConfig(
   const serviceProxy = {
     handler: "reverse_proxy",
     upstreams: [{ dial: upstream }],
+    stream_close_delay: CADDY_STREAM_CLOSE_DELAY,
   };
   // Dev servers behind a Portal serve uncompressed JavaScript (the relay's
   // fetch decodes whatever the app compressed), and a Next dev page is tens
