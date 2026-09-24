@@ -252,8 +252,9 @@ export async function handleDeployWorkflowRun(payload: any): Promise<void> {
   // the same branch would otherwise each verify, and each might open its own
   // fix or revert PR. The rest keep the plain FYI.
   const ghRepo: string = entry.ghRepo || payload?.repository?.full_name || "";
+  const verifier = success ? deployVerifierSession(sessionIds) : null;
   const verifyPrompt =
-    success && ghRepo
+    verifier && ghRepo
       ? await deployVerifyPrompt(entry, {
           ghRepo,
           sha: run.head_sha,
@@ -267,11 +268,11 @@ export async function handleDeployWorkflowRun(payload: any): Promise<void> {
         })
       : null;
   const deliveryKey = `github-deploy:${run.id || run.head_sha}:${run.conclusion || "unknown"}`;
-  if (!verifyPrompt) {
+  if (!verifier || !verifyPrompt) {
     await deliver(control, sessionIds, message, deliveryKey);
     return;
   }
-  const [verifier, ...rest] = sessionIds;
+  const rest = sessionIds.filter((id) => id !== verifier);
   audit({
     msg: "github_deploy_verify_prompt",
     pr_number: entry.prNumber,
@@ -281,6 +282,14 @@ export async function handleDeployWorkflowRun(payload: any): Promise<void> {
   });
   await deliver(control, [verifier], verifyPrompt, deliveryKey);
   if (rest.length) await deliver(control, rest, message, deliveryKey);
+}
+
+/** The session that verifies a deploy: the first one a person works in. The
+ *  PR agent's own sessions (`bks-ghpr-<pr>-review`, `-autofix`, ...) match the
+ *  branch too, but a reviewer did not write the change and must not act on
+ *  production. With only those, nobody verifies and everyone gets the FYI. */
+export function deployVerifierSession(sessionIds: string[]): string | null {
+  return sessionIds.find((id) => !id.startsWith("bks-ghpr-")) ?? null;
 }
 
 /** Fill `{{name}}` placeholders; unknown names stay as written so a typo in
