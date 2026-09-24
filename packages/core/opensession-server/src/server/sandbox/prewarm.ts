@@ -463,7 +463,12 @@ export async function requestPrewarm(
     entry = undefined;
   }
   if (entry && (entry.state === "bootstrapping" || entry.state === "ready")) {
-    if (options.refreshTemplate && !entry.refreshTemplate) {
+    // A ready entry's refresh is over (published, or skipped for a waiter);
+    // a new refresh request is due work, not a duplicate of it.
+    if (
+      options.refreshTemplate &&
+      (!entry.refreshTemplate || entry.state === "ready")
+    ) {
       await invalidatePrewarm(provider, repoId);
       record = undefined;
       entry = undefined;
@@ -746,6 +751,10 @@ async function runPrewarmBootstrap(
     entry.stage = "Ready";
     entry.progress = 100;
     entry.lastTouchedAt = new Date().toISOString();
+    // The refresh is done. Left set, the flag made this standby unclaimable
+    // (claimPrewarm skips refresh entries) and answered every later refresh
+    // request with "ready", so the image never moved again.
+    delete entry.refreshTemplate;
     persist(entry);
     console.log(
       releaseToWaiter()
