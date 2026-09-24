@@ -43,6 +43,7 @@ import {
   remoteLayoutForProvider,
   shellQuoteWord,
 } from "./sandbox/adapters/bootstrap";
+import { boxAwaitHydratedHomeCommand } from "./sandbox/adapters/box";
 import { sandboxHttpsPortFor } from "./sandbox/preview-ports";
 import { warmSandboxPortal } from "./sandbox-portal-warm";
 import { cacheSandboxPortalRecords } from "./sandbox-portals";
@@ -1979,6 +1980,15 @@ async function startSandboxPortalServiceInner(
   // macOS has no setsid; the provider's detached lane (nohup) already
   // detaches the process there.
   const detach = guest.os === "darwin" ? "" : "setsid ";
+  // A dev server started while Boat is still restoring the disk runs on its
+  // FUSE layer for its whole life, several times slower. The restore takes
+  // about a minute; waiting for it is far cheaper than the slow start.
+  if (input.sandbox.provider === "box")
+    await input.sandbox
+      .exec(["bash", "-c", boxAwaitHydratedHomeCommand(150)], {
+        timeoutMs: 170_000,
+      })
+      .catch(() => {});
   const awake = await startPortal(
     sandboxPortalOps(input.sandbox, input.sessionId),
     {

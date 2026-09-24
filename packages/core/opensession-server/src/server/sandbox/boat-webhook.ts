@@ -18,7 +18,8 @@
  *   sandbox.ready     the machine is up: record `awake` and relaunch the
  *                     workspace's dead Portals, which warm their pages.
  *   sandbox.error     logged with the session it belongs to.
- *   sandbox.hydrated  logged: when a lazily restored disk is complete.
+ *   sandbox.hydrated  the lazily restored disk is complete: move the
+ *                     workspace off Boat's slow FUSE layer (box.ts).
  *
  * Machines are matched through their state file (one read, no scan). A
  * prewarmed standby has no session yet and is ignored.
@@ -182,7 +183,9 @@ async function applyBoatEvent(event: BoatWebhookEvent): Promise<void> {
     `[sandbox:boat] ${event.type} ${sandboxId}${transition}${owner ? ` for ${owner.sessionId}${owner.role === "portal" ? " (Portal Sandbox)" : ""}` : ""}`,
   );
   if (!owner) return;
-  if (event.type === "sandbox.archived") await markAsleep(sandboxId, owner);
+  if (event.type === "sandbox.hydrated") await leaveLazyHome(sandboxId);
+  else if (event.type === "sandbox.archived")
+    await markAsleep(sandboxId, owner);
   else if (event.type === "sandbox.ready") {
     await Bun.sleep(READY_SETTLE_MS);
     await markAwake(sandboxId, owner);
@@ -219,6 +222,16 @@ async function persist(
     owner.sessionId,
     owner.role === "workspace" ? { sandbox: patch } : { portalSandbox: patch },
   );
+}
+
+/** The restore finished: move the workspace off Boat's FUSE layer now
+ * (every Box command does this on its way in; this one needs no command
+ * to come along first). */
+async function leaveLazyHome(sandboxId: string): Promise<void> {
+  const { getSandboxProvider } = await import("./index");
+  const sandbox = await getSandboxProvider("box").get(sandboxId);
+  if (sandbox && (await sandbox.status()) === "running")
+    await sandbox.exec(["true"]);
 }
 
 async function markAsleep(sandboxId: string, owner: Owner): Promise<void> {

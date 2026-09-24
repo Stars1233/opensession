@@ -5,6 +5,8 @@ import {
   BOX_PREVIEW_URL_PATTERN,
   BOX_RUNTIME_HOME_COMMAND,
   BOX_HOME_GUARD,
+  BOX_HOME_RETIRE_LAZY,
+  boxAwaitHydratedHomeCommand,
   BOX_RUNTIME_HOME_LAZY_MARKER,
   boxCommandPlaneUnavailable,
   boxComposeShell,
@@ -191,6 +193,28 @@ describe("Box command readiness", () => {
     expect(
       composed.indexOf("cd /home/ubuntu/worktrees/acme-feature"),
     ).toBeGreaterThan(BOX_HOME_GUARD.length);
+  });
+
+  test("moves /home/ubuntu off Boat's lazy-restore layer once it retires", async () => {
+    // Every command checks; it only rebinds while /home/ubuntu is FUSE and
+    // /home/user is not (the restore finished), and never fails the command.
+    expect(BOX_HOME_GUARD).toEndWith(BOX_HOME_RETIRE_LAZY);
+    expect(BOX_HOME_RETIRE_LAZY).toContain(
+      "sudo -n mount --bind /home/user /home/ubuntu",
+    );
+    expect(BOX_HOME_RETIRE_LAZY).not.toContain("umount");
+    for (const script of [
+      BOX_HOME_RETIRE_LAZY,
+      boxAwaitHydratedHomeCommand(150),
+    ]) {
+      const syntax = Bun.spawnSync(["bash", "-n", "-c", script]);
+      expect(syntax.exitCode).toBe(0);
+    }
+    // Off a lazily restored Box it returns at once and succeeds.
+    const started = Date.now();
+    const run = Bun.spawnSync(["bash", "-c", boxAwaitHydratedHomeCommand(150)]);
+    expect(run.exitCode).toBe(0);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   test("only retries explicit no-command 409 states", () => {

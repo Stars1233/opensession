@@ -511,13 +511,47 @@ export const BOX_RUNTIME_HOME_COMMAND =
   "sudo -n mkdir -p /home/ubuntu && sudo -n mount --bind /home/user /home/ubuntu; " +
   "fi && test ! -L /home/ubuntu && mountpoint -q /home/ubuntu && test -w /home/ubuntu";
 
+/** Leave Boat's lazy-restore layer once it has finished.
+ *
+ *  A restored Box serves /home/user through a FUSE layer (ascii-lazyfs)
+ *  while it copies the disk in, about a minute for tella-fusion. When it is
+ *  done Boat retires the layer from /home/user, but our bind at
+ *  /home/ubuntu still holds it, so every file lookup there kept going
+ *  through FUSE for the machine's whole life: listing 20k files took 12.5 s
+ *  instead of 0.03 s, and a dev server start took minutes instead of 40 s.
+ *  Once /home/user is plain disk again while /home/ubuntu is still FUSE,
+ *  bind the real one over it. Stacking keeps the path present throughout;
+ *  processes already inside keep the old view until they restart. Never
+ *  fails the command it prefixes. */
+export const BOX_HOME_RETIRE_LAZY =
+  `{ case "$(stat -f -c %T /home/ubuntu 2>/dev/null)" in fuse*) ` +
+  `case "$(stat -f -c %T /home/user 2>/dev/null)" in fuse*|"") ;; ` +
+  `*) flock /tmp/.opensession-home-retire.lock sh -c ` +
+  `'case "$(stat -f -c %T /home/ubuntu)" in fuse*) sudo -n mount --bind /home/user /home/ubuntu;; esac' ` +
+  `>/dev/null 2>&1;; esac;; esac; true; }`;
+
+/** Shell that waits, up to `seconds`, for Boat's lazy restore to finish
+ *  and then moves /home/ubuntu onto the real disk. A process started while
+ *  the restore runs stays on the slow path for its whole life, so a dev
+ *  server should start after this. Returns at once on a machine that was
+ *  never lazily restored. */
+export function boxAwaitHydratedHomeCommand(seconds: number): string {
+  const tries = Math.max(0, Math.ceil(seconds / 2));
+  return (
+    `i=0; while [ "$i" -lt ${tries} ]; do ` +
+    `case "$(stat -f -c %T /home/ubuntu 2>/dev/null)" in fuse*) ;; *) break;; esac; ` +
+    `case "$(stat -f -c %T /home/user 2>/dev/null)" in fuse*) sleep 2; i=$((i + 1));; *) break;; esac; ` +
+    `done; ${BOX_HOME_RETIRE_LAZY}`
+  );
+}
+
 /** Prefix of every composed Box command. When Box restarts a VM on its own
  *  (an archive and resume, host maintenance), the bind mount at /home/ubuntu
  *  is gone while this process still holds a driver that already set it up
  *  once, and every command with a workspace cwd then fails with "No such
  *  file or directory". Re-establish it in the same command: one `mountpoint`
  *  check when it is in place. */
-export const BOX_HOME_GUARD = `{ mountpoint -q /home/ubuntu || { ${BOX_RUNTIME_HOME_COMMAND}; } >/dev/null; }`;
+export const BOX_HOME_GUARD = `{ mountpoint -q /home/ubuntu || { ${BOX_RUNTIME_HOME_COMMAND}; } >/dev/null; } && ${BOX_HOME_RETIRE_LAZY}`;
 
 function boxSshTargets(): Map<string, BoxSshTarget> {
   const global = globalThis as typeof globalThis & {
