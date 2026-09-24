@@ -67,7 +67,11 @@ import {
   captureVisibleSdkAssistantToolUses,
 } from "./pi-model-runtime";
 import {
+  PRIOR_IMAGE_PLACEHOLDER,
+  bridgeSdkTurn,
   ensureAnthropicBridgeCwd,
+  flatSdkTurnContent,
+  flatSdkTurnText,
   flattenMessageText,
   pickBridgeAccount,
   replayConversation,
@@ -618,8 +622,114 @@ describe("images survive the turn", () => {
     expect(cont.continuation).toBe(true);
     expect(cont.images).toHaveLength(1);
     expect(cont.images[0]).toMatchObject({ source: { data: "new" } });
-    // A fresh replay re-delivers the whole conversation, images included.
-    expect(planSdkTurn(undefined, messages).images).toHaveLength(2);
+    // A fresh replay re-delivers the whole conversation's TEXT, but only the
+    // current turn's image: the old one is a placeholder, never re-sent.
+    const fresh = planSdkTurn(undefined, messages);
+    expect(fresh.images).toHaveLength(1);
+    expect(fresh.images[0]).toMatchObject({ source: { data: "new" } });
+    expect(fresh.prompt).toContain(`old shot\n${PRIOR_IMAGE_PLACEHOLDER}`);
+  });
+
+  const oldPath = "/home/acme/uploads/shot.png";
+  const png = (data: string) => ({
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data },
+  });
+  const attachedOnce: AnthropicMessage[] = [
+    wire({
+      role: "user",
+      content: [
+        { type: "text", text: `Attached: ${oldPath}\nwhat is this?` },
+        png("old"),
+      ],
+    }),
+    wire({ role: "assistant", content: [{ type: "text", text: "a chart" }] }),
+    wire({ role: "user", content: "thanks, now fix the bug" }),
+    wire({ role: "assistant", content: [{ type: "text", text: "done" }] }),
+    wire({ role: "user", content: "and the tests?" }),
+  ];
+
+  test("a replayed history with an old attachment attaches no image", () => {
+    const plan = planSdkTurn(undefined, attachedOnce);
+    expect(plan.continuation).toBe(false);
+    expect(plan.images).toEqual([]);
+    // Plain-text turn: rides the string prompt, no structured content at all.
+    expect(sdkPromptContent(plan)).toBeNull();
+    expect(plan.prompt).toContain(oldPath);
+    expect(plan.prompt).toContain(PRIOR_IMAGE_PLACEHOLDER);
+    expect(plan.prompt.endsWith("and the tests?")).toBe(true);
+    // The HTTP bridge builds the same turn.
+    const turn = bridgeSdkTurn(attachedOnce);
+    expect(turn.images).toEqual([]);
+    expect(flatSdkTurnContent(turn)).toBeNull();
+    expect(flatSdkTurnText(turn)).toBe(plan.prompt);
+  });
+
+  test("a fresh replay delivers the current turn's image after the history", () => {
+    const messages = [
+      ...attachedOnce.slice(0, 4),
+      wire({
+        role: "user",
+        content: [{ type: "text", text: "and this one?" }, png("new")],
+      }),
+    ];
+    for (const content of [
+      sdkPromptContent(planSdkTurn(undefined, messages))!,
+      flatSdkTurnContent(bridgeSdkTurn(messages))!,
+    ]) {
+      expect(content.map((b) => b.type)).toEqual(["text", "image", "text"]);
+      expect(content[0].text).toContain(PRIOR_IMAGE_PLACEHOLDER);
+      expect(content[0].text).not.toContain("and this one?");
+      expect(content[1]).toMatchObject({ source: { data: "new" } });
+      expect(content[2]).toEqual({ type: "text", text: "and this one?" });
+    }
+  });
+
+  test("a continuation delivers only the new tail's images, tool results included", () => {
+    const messages: AnthropicMessage[] = [
+      ...attachedOnce.slice(0, 4),
+      wire({ role: "user", content: "take a screenshot" }),
+      wire({
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "t1", name: "screenshot", input: {} },
+        ],
+      }),
+      wire({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "t1",
+            content: [{ type: "text", text: "captured" }, png("tool")],
+          },
+        ],
+      }),
+    ];
+    const stored = {
+      sdkSessionId: "sdk-1",
+      messageCount: 6,
+      accountId: "acc-1",
+      lastUsedAt: Date.now(),
+    };
+    const plan = planSdkTurn(stored, messages);
+    expect(plan.continuation).toBe(true);
+    expect(plan.prompt).toBe("captured");
+    expect(plan.images).toEqual([png("tool")]);
+    expect(sdkPromptContent(plan)).toEqual([
+      png("tool"),
+      { type: "text", text: "captured" },
+    ]);
+    const turn = bridgeSdkTurn(messages, 6);
+    expect(turn.images).toEqual([png("tool")]);
+    expect(flatSdkTurnText(turn)).toBe("captured");
+
+    // A stale count that re-delivers an older assistant turn still keeps its
+    // images as history.
+    const stale = planSdkTurn({ ...stored, messageCount: 1 }, messages);
+    expect(stale.continuation).toBe(true);
+    expect(stale.images).toEqual([png("tool")]);
+    expect(bridgeSdkTurn(messages, 0).images).toEqual([png("tool")]);
   });
 
   test("sdkPromptContent puts images before the text, and only for image turns", () => {

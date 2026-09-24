@@ -20,7 +20,8 @@
  *
  * Token-level text and thinking events pass through unchanged. SDK usage is
  * cumulative inside a tool loop, so each pi step reports only the unreported
- * delta. Images ride as structured content. Unknown SDK tool names are handed
+ * delta. The current turn's images ride as structured content; earlier
+ * turns' images replay as a text placeholder. Unknown SDK tool names are handed
  * to pi, then the live query is discarded so Claude Code cannot continue on
  * its own synthetic error branch.
  *
@@ -48,12 +49,24 @@ import {
   PASSTHROUGH_PREFIX,
   bridgeDesignationError,
   ensureAnthropicBridgeCwd,
+  IMAGE_ONLY_PROMPT,
+  currentTurnStart,
+  flatSdkTurn,
+  flatSdkTurnContent,
+  flatSdkTurnText,
   flattenMessageText,
   jsonSchemaToZodShape,
   pickBridgeAccount,
   replayConversation,
+  turnImages,
   type AnthropicMessage,
   type ContentBlock,
+} from "./anthropic-bridge";
+export {
+  IMAGE_ONLY_PROMPT,
+  MAX_TURN_IMAGES,
+  PRIOR_IMAGE_PLACEHOLDER,
+  turnImages,
 } from "./anthropic-bridge";
 import { markExhausted, type ClaudeAccount } from "./claude-accounts";
 import {
@@ -366,10 +379,10 @@ export function piImageBlockToAnthropic(
  * blocks become tool_use, toolResult messages become user tool_result
  * messages, thinking blocks are dropped (signatures cannot round-trip through
  * a flat-text replay). User images are KEPT: they do not survive the flat
- * replay either, so planSdkTurn lifts them out and rides them to the SDK as
- * real content blocks. Dropping them here was silent data loss — the model
- * answered as if the person had never attached a screenshot, with no error on
- * either side. Exported for the unit tests.
+ * replay either, so planSdkTurn lifts the current turn's images out and rides
+ * them to the SDK as real content blocks. Dropping them here was silent data
+ * loss — the model answered as if the person had never attached a screenshot,
+ * with no error on either side. Exported for the unit tests.
  */
 export function piMessagesToAnthropic(
   messages: readonly PiWireMessage[],
@@ -477,30 +490,16 @@ export interface PiSdkTurnPlan {
   prompt: string;
   /** Structured tool results delivered after resumeSessionAt. */
   toolResults: ContentBlock[] | null;
-  /** Image blocks from the delivered slice, oldest first. Empty = a plain-text
-   *  turn, which rides the SDK's string prompt exactly as it always has. */
+  /** Image blocks from the current user turn, oldest first. Empty = a
+   *  plain-text turn, which rides the SDK's string prompt exactly as it always
+   *  has. Earlier turns' images are never re-sent (PRIOR_IMAGE_PLACEHOLDER). */
   images: ContentBlock[];
+  /** The part of `prompt` replaying history before the current user turn. */
+  history?: string;
   /** Steering that arrived after a complete live tool-result batch. It is
    * queued before parked handlers resume, matching Claude Code's live input. */
   liveFollowUp?: { prompt: string; images: ContentBlock[] };
   continuation: boolean;
-}
-
-/** Per-turn image ceiling. A fresh replay delivers the whole conversation, so
- *  without a cap a session that had traded a dozen screenshots would re-upload
- *  all of them on every divergence. The newest are the ones the turn is about. */
-export const MAX_TURN_IMAGES = 8;
-
-/** The image blocks a delivered slice carries, newest kept. */
-export function turnImages(messages: AnthropicMessage[]): ContentBlock[] {
-  const images: ContentBlock[] = [];
-  for (const m of messages) {
-    if (m.role !== "user" || !Array.isArray(m.content)) continue;
-    for (const b of m.content) if (b?.type === "image") images.push(b);
-  }
-  return images.length > MAX_TURN_IMAGES
-    ? images.slice(-MAX_TURN_IMAGES)
-    : images;
 }
 
 /** Merge an exact resumed tool-result delta into the one structured user
@@ -601,9 +600,13 @@ export function planSdkTurn(
       return {
         resume: stored.sdkSessionId,
         resumeSessionAt: undefined,
-        prompt: replayConversation(delivered),
         toolResults: null,
-        images: turnImages(delivered),
+        ...flatPlanPrompt(
+          flatSdkTurn(
+            delivered,
+            currentTurnStart(messages) - stored.messageCount,
+          ),
+        ),
         continuation: true,
       };
     }
@@ -611,25 +614,33 @@ export function planSdkTurn(
   return {
     resume: undefined,
     resumeSessionAt: undefined,
-    prompt: replayConversation(messages),
     toolResults: null,
-    images: turnImages(messages),
+    ...flatPlanPrompt(flatSdkTurn(messages)),
     continuation: false,
   };
 }
 
-/** Placeholder for a turn whose only content is an image: replayConversation
- *  skips a message with no text, and an empty prompt reads to the SDK as an
- *  empty turn. */
-export const IMAGE_ONLY_PROMPT = "(see the attached image)";
+function flatPlanPrompt(
+  turn: ReturnType<typeof flatSdkTurn>,
+): Pick<PiSdkTurnPlan, "prompt" | "images" | "history"> {
+  return {
+    prompt: flatSdkTurnText(turn),
+    images: turn.images,
+    ...(turn.history ? { history: turn.history } : {}),
+  };
+}
 
 /** The structured user content for a turn carrying images, or null when the
  *  turn is plain text and should keep using the string prompt. */
 export function sdkPromptContent(plan: PiSdkTurnPlan): ContentBlock[] | null {
   if (plan.toolResults) return plan.toolResults;
-  if (!plan.images.length) return null;
-  const text = plan.prompt.trim();
-  return [...plan.images, { type: "text", text: text || IMAGE_ONLY_PROMPT }];
+  const history = plan.history ?? "";
+  return flatSdkTurnContent({
+    history,
+    // prompt = history + "\n\n" + current (flatSdkTurnText).
+    current: history ? plan.prompt.slice(history.length) : plan.prompt,
+    images: plan.images,
+  });
 }
 
 export const MAX_PI_SDK_SESSIONS = 500;
