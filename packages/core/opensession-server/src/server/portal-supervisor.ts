@@ -1472,7 +1472,23 @@ export async function stopArchivedSessionPortals(
 ): Promise<void> {
   const findSession = options.findSession ?? findMergedSession;
   const session = await findSession(sessionId);
-  if (!session || session.runner || session.sandbox?.sandboxId) return;
+  if (!session) return;
+  if (session.sandbox?.sandboxId || session.portalSandbox?.sandboxId) {
+    // Sleeping waits for the provider's stop (minutes on Box); archiving
+    // does not. The disk stays, so unarchiving wakes it where it was.
+    const id = session.id;
+    void import("./sandbox-archive-sleep")
+      .then(({ sleepArchivedSessionSandboxes }) =>
+        sleepArchivedSessionSandboxes(id),
+      )
+      .catch((error) =>
+        console.warn(
+          `[sandbox] ${id}: could not put the archived session's Sandbox to sleep:`,
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+  }
+  if (session.runner || session.sandbox?.sandboxId) return;
   // A Portal record carries the id its session ran under, which may be the
   // canonical id or an alias merged into it. Every spelling owns the Portal.
   const ownerIds = new Set(portalOwnerIds(session));
@@ -1501,7 +1517,13 @@ export async function stopArchivedSessionPortals(
 
 type ArchivedPortalOwner = Pick<
   UnifiedSession,
-  "id" | "worktreeDir" | "attachedRepos" | "aliasIds" | "runner" | "sandbox"
+  | "id"
+  | "worktreeDir"
+  | "attachedRepos"
+  | "aliasIds"
+  | "runner"
+  | "sandbox"
+  | "portalSandbox"
 >;
 
 /**
@@ -1755,6 +1777,8 @@ export async function ensureRemoteSandboxPortalAgent(input: {
   sessionId: string;
   sandbox: Sandbox;
   port: number;
+  /** A fresh start warms the Portal itself; skip the rebuild warm-up. */
+  starting?: boolean;
 }): Promise<string | null> {
   if (!usesOutboundSandboxPortalRelay(input.sandbox.provider)) return null;
   const agentKey = `${input.sessionId}:${input.sandbox.id}:${input.port}`;
@@ -1799,7 +1823,12 @@ export async function ensureRemoteSandboxPortalAgent(input: {
       throw new Error(
         started.stderr.trim() || "Could not start the Sandbox Portal relay.",
       );
+    const rebuilt = !remoteRelayAgents.has(agentKey);
     remoteRelayAgents.set(agentKey, { expiresAt: grant.expiresAt });
+    // This process never saw the Portal start (a deploy landed while it was
+    // starting, or after): its warm-up may never have run. The script skips
+    // itself when a finished one is on record.
+    if (rebuilt && !input.starting) void warmRebuiltSandboxPortal(input);
     return ensureSandboxPortalRelay(relayIdentity);
   })();
   remoteRelayAgentStarts.set(agentKey, start);
@@ -1809,6 +1838,30 @@ export async function ensureRemoteSandboxPortalAgent(input: {
     if (remoteRelayAgentStarts.get(agentKey) === start)
       remoteRelayAgentStarts.delete(agentKey);
   }
+}
+
+async function warmRebuiltSandboxPortal(input: {
+  sessionId: string;
+  sandbox: Sandbox;
+  port: number;
+}): Promise<void> {
+  try {
+    const record = (
+      await readSandboxPortalRegistry(input.sandbox)
+    ).records.find((candidate) => candidate.port === input.port);
+    if (!record || record.state === "stopped") return;
+    const runtimeDir = join(
+      sandboxSessionScratchDir(input.sessionId, input.sandbox.provider),
+      "portals",
+    );
+    await warmSandboxPortal({
+      sandbox: input.sandbox,
+      port: input.port,
+      logPath: `${runtimeDir}/${record.name}-warm.log`,
+      defaultPath: record.defaultPath,
+      skipIfWarm: true,
+    });
+  } catch {}
 }
 
 export function forgetRemoteSandboxPortalAgents(
@@ -1981,6 +2034,7 @@ async function startSandboxPortalServiceInner(
     sessionId: input.sessionId,
     sandbox: input.sandbox,
     port: awake.port,
+    starting: true,
   });
   if (
     usesOutboundSandboxPortalRelay(input.sandbox.provider) &&

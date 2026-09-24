@@ -57,12 +57,26 @@ export function portalWarmScript(input: {
   host: string;
   routes: string[];
   logPath: string;
+  /** Leave a Portal alone whose last warm-up finished (a relay rebuilt
+   *  after a server restart, not a new dev server). */
+  skipIfWarm?: boolean;
 }): string {
   const base = `http://127.0.0.1:${input.port}`;
   const headers = `-H ${shellQuoteWord(`Host: ${input.host}`)} -H 'X-Forwarded-Proto: https'`;
   const routes = input.routes.map(shellQuoteWord).join(" ");
+  const log = shellQuoteWord(input.logPath);
+  const lock = shellQuoteWord(`${input.logPath}.lock`);
   return [
-    `exec >${shellQuoteWord(input.logPath)} 2>&1`,
+    // Nothing to warm until the app listens; leave the log untouched.
+    `(exec 3<>/dev/tcp/127.0.0.1/${input.port}) 2>/dev/null || exit 0`,
+    ...(input.skipIfWarm
+      ? [`[ "$(tail -n 1 ${log} 2>/dev/null)" = done ] && exit 0`]
+      : []),
+    // One warm-up at a time; a lock older than 15 minutes is a dead run's.
+    `find ${lock} -maxdepth 0 -mmin +15 -exec rmdir {} \\; 2>/dev/null`,
+    `mkdir ${lock} 2>/dev/null || exit 0`,
+    `trap 'rmdir ${lock} 2>/dev/null' EXIT`,
+    `exec >${log} 2>&1`,
     `page=$(mktemp)`,
     `for route in ${routes}; do`,
     `  result=$(curl -s -o "$page" -m 300 ${headers} -w '%{http_code} %{time_total}s' ${shellQuoteWord(base)}"$route")`,
@@ -81,6 +95,7 @@ export async function warmSandboxPortal(input: {
   port: number;
   logPath: string;
   defaultPath?: string;
+  skipIfWarm?: boolean;
 }): Promise<void> {
   try {
     const preview = await input.sandbox.exec([
@@ -99,6 +114,7 @@ export async function warmSandboxPortal(input: {
       host,
       routes,
       logPath: input.logPath,
+      skipIfWarm: input.skipIfWarm,
     });
     // Detached like the Portal process itself: macOS has no setsid, and the
     // provider's background lane already detaches there.
