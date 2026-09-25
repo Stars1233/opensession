@@ -55,7 +55,15 @@ export function autostartSessionPortal(
     }
     const { startSessionPortal } = await import("./routes/preview");
     const started = Date.now();
-    const status = await startSessionPortal(session);
+    // The opening turn is usually running by now. A Portal Sandbox captures
+    // the worktree when it is provisioned, which a running turn normally
+    // blocks: the capture could catch a file mid-edit. Here the worktree was
+    // created moments ago, and the Portal Sandbox receives the finished
+    // tree after every turn (portal-sandbox.ts), so an early capture only
+    // means the app starts on the tree as the session began.
+    const status = await startSessionPortal(session, undefined, {
+      ownTurn: true,
+    });
     const portal = status.services.find((service) => service.managed);
     console.log(
       `[portals] ${sessionId}: started ${portal?.name ?? "Portal"} with the session (${Math.round((Date.now() - started) / 1000)}s)`,

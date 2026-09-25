@@ -140,11 +140,16 @@ export class PortalStartError extends Error {
 export async function startSessionPortal(
   session: UnifiedSession,
   recipeId?: string,
+  startOptions: { ownTurn?: boolean } = {},
 ): Promise<PreviewStatus> {
   // A project that runs its Portals in a Sandbox of their own gets
   // that Sandbox provisioned here, on the first start.
   const sandbox = session.worktreeDir
-    ? await sandboxForPortals(session, { wake: true, provision: true })
+    ? await sandboxForPortals(session, {
+        wake: true,
+        provision: true,
+        ownTurn: startOptions.ownTurn,
+      })
     : null;
   if (portalsInSandbox(session) && !sandbox)
     throw new PortalStartError(409, "This session's Sandbox is unavailable");
