@@ -24,7 +24,15 @@ test("compiles the warm routes, stops the app, and leaves the checkout clean", a
     git(
       "add . && git -c user.email=a@example.test -c user.name=a commit -qm init",
     );
-    const port = 40_000 + Math.floor(Math.random() * 10_000);
+    // A free port: a random one is often taken on a busy machine, and the
+    // warm-up would then wait on someone else's server.
+    const free = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: { data() {} },
+    });
+    const port = free.port;
+    free.stop(true);
     // A stand-in dev server: records requests, rewrites a tracked file and
     // leaves a port file behind, the way a real one might.
     writeFileSync(
@@ -55,9 +63,10 @@ Bun.serve({ port: Number(process.env.PORT), fetch(req) {
     });
     const run = Bun.spawn(["bash", "-c", script], { stdout: "pipe" });
     expect(await run.exited).toBe(0);
-    expect(readFileSync(join(root, "hits"), "utf8")).toBe(
-      "/a handed-over\n/b handed-over\n",
-    );
+    // Warmed in parallel, so in either order.
+    expect(
+      readFileSync(join(root, "hits"), "utf8").trim().split("\n").sort(),
+    ).toEqual(["/a handed-over", "/b handed-over"]);
     // Stopped, cleaned, and the tracked file is back.
     const probe = Bun.spawnSync([
       "bash",

@@ -737,18 +737,31 @@ describe("session Portal supervisor", () => {
     // A wrapper pid that survives its dead dev server: pid alive, port dead,
     // recorded state awake. This must surface as failed, not "starting".
     const wrapper = Bun.spawn(["sleep", "60"]);
+    // A port nothing listens on, whatever else runs on this machine.
+    let port = 18_777;
+    while (
+      await Bun.connect({
+        hostname: "127.0.0.1",
+        port,
+        socket: { data() {} },
+      }).then(
+        (socket) => (socket.end(), true),
+        () => false,
+      )
+    )
+      port += 1;
     const record = {
       name: "web-crashed",
       key: "WEBAPP_PORT",
       command: "just dev",
-      port: 18_777,
+      port,
       state: "awake",
       pid: wrapper.pid,
       startedAt: new Date().toISOString(),
     };
     writeFileSync(
       join(worktree, ".ports.conf"),
-      `${PREFIX(record)}\nWEBAPP_PORT=18777\n`,
+      `${PREFIX(record)}\nWEBAPP_PORT=${port}\n`,
     );
     const [portal] = await listPortalServices(worktree);
     expect(portal?.state).toBe("failed");
