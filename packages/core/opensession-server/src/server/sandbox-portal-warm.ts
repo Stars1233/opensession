@@ -11,8 +11,8 @@
  * (`warmRoutes`, the same list its prepared image uses). A route with a
  * dynamic segment can name any value there: the compile is per route, not
  * per record. After the Portal's relay connects, a detached script inside
- * the Sandbox requests each route in order, then every script and stylesheet
- * a page references. The Portal URL is not held back: a person who opens a
+ * the Sandbox requests the routes a few at a time, then every script and
+ * stylesheet each page references. The Portal URL is not held back: a person who opens a
  * page meanwhile shares the compile already in progress.
  */
 import { configuredServer } from "./config";
@@ -63,6 +63,8 @@ export function portalWarmScript(input: {
   skipIfWarm?: boolean;
   /** How long to wait for the app to listen before giving up. */
   waitSeconds?: number;
+  /** Routes requested at once (default 3). */
+  parallel?: number;
 }): string {
   const base = `http://127.0.0.1:${input.port}`;
   const headers = `-H ${shellQuoteWord(`Host: ${input.host}`)} -H 'X-Forwarded-Proto: https'`;
@@ -97,14 +99,21 @@ export function portalWarmScript(input: {
     `mkdir ${lock} 2>/dev/null || exit 0`,
     `trap 'rmdir ${lock} 2>/dev/null' EXIT`,
     `exec >${log} 2>&1`,
-    `page=$(mktemp)`,
+    // A few routes at a time: a dev server compiles independent routes in
+    // parallel, so the editor no longer queues behind the slowest page.
+    // Lines are logged as routes finish, not in declaration order.
     `for route in ${routes}; do`,
-    `  result=$(curl -s -o "$page" -m 300 ${headers} -w '%{http_code} %{time_total}s' ${shellQuoteWord(base)}"$route")`,
-    `  echo "$route $result"`,
-    `  grep -oE '/_next/static/[^"'"'"' <>]+\\.(js|css)' "$page" 2>/dev/null | sort -u | ` +
+    `  while [ "$(jobs -rp | wc -l)" -ge ${Math.max(1, Math.floor(input.parallel ?? 3))} ]; do sleep 0.2; done`,
+    `  (`,
+    `    page=$(mktemp)`,
+    `    result=$(curl -s -o "$page" -m 300 ${headers} -w '%{http_code} %{time_total}s' ${shellQuoteWord(base)}"$route")`,
+    `    echo "$route $result"`,
+    `    grep -oE '/_next/static/[^"'"'"' <>]+\\.(js|css)' "$page" 2>/dev/null | sort -u | ` +
       `xargs -P 6 -I{} curl -s -o /dev/null -m 120 ${headers} ${shellQuoteWord(base)}{}`,
+    `    rm -f "$page"`,
+    `  ) &`,
     `done`,
-    `rm -f "$page"`,
+    `wait`,
     `echo done`,
   ].join("\n");
 }

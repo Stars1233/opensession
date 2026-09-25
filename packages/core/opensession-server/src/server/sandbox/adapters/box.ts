@@ -92,6 +92,7 @@ import {
   readRemoteRepoTemplate,
   remoteRepoTemplateName,
   sealRemoteRepoTemplate,
+  trimRemoteRepoTemplate,
   writeRemoteRepoTemplate,
 } from "../remote-repo-template";
 
@@ -1729,6 +1730,7 @@ export const boxPrewarmAdapter: PrewarmAdapter = {
     const cfg = boxClientConfig();
     const name = boxSnapshotName(repo.id);
     const driver = boxDriver(cfg, sandboxId);
+    await trimRemoteRepoTemplate(driver, "box");
     await sealRemoteRepoTemplate(driver, "box", repo);
     const existing = await getNamedSnapshot(cfg, name);
     if (existing && boxSnapshotSaveIsRecoverable(existing)) {

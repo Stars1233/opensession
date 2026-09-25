@@ -80,12 +80,47 @@ describe("portal warm script", () => {
         seen.every((line) => line.startsWith("portal.example.test:21000 ")),
       ).toBe(true);
       const paths = seen.map((line) => line.split(" ")[1]);
-      expect(paths[0]).toBe("/videos");
+      expect(paths).toContain("/video/warmup/edit");
       expect(
         paths.filter((p) => p === "/_next/static/chunks/a.js"),
       ).toHaveLength(1);
-      expect(paths).toContain("/_next/static/chunks/b.css");
-      expect(paths.at(-1)).toBe("/video/warmup/edit");
+      // A page's assets are requested after the page itself.
+      expect(paths.indexOf("/_next/static/chunks/b.css")).toBeGreaterThan(
+        paths.indexOf("/videos"),
+      );
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("requests a few routes at once, never more than the limit", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch() {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await Bun.sleep(150);
+        inFlight -= 1;
+        return new Response("ok");
+      },
+    });
+    try {
+      const logPath = join(scratch, "parallel.log");
+      const script = portalWarmScript({
+        port: server.port!,
+        host: "portal.example.test:21000",
+        routes: ["/a", "/b", "/c", "/d", "/e"],
+        logPath,
+        parallel: 2,
+      });
+      expect(await Bun.spawn(["bash", "-c", script]).exited).toBe(0);
+      expect(peak).toBe(2);
+      const log = readFileSync(logPath, "utf8").trim().split("\n");
+      expect(log).toHaveLength(6);
+      expect(log.at(-1)).toBe("done");
     } finally {
       server.stop(true);
     }
