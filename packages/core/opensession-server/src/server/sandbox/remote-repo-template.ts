@@ -82,29 +82,6 @@ export function remoteRepoTemplateProofPath(
   return `${home}/.opensession/repo-template-${clean(repoId)}.json`;
 }
 
-/**
- * Drop what a sealed image carries but no session reads, before sealing.
- *
- * Every file in the image is restored into each new Sandbox before it is
- * fast (Boat copies the disk in behind a lazy FUSE layer, 40 to 60 s for
- * tella-fusion), so the file count is paid on every create and wake. Bun's
- * download cache was 2.8 GB and 198k files of a 557k-file image: the
- * workspace's node_modules already holds everything the app runs on (its
- * files are hardlinked from the cache, so they stay), and an install after a
- * lockfile change downloads only what changed. Compile caches stay: they are
- * what makes the first Portal start fast.
- */
-export async function trimRemoteRepoTemplate(
-  driver: RemoteDriver,
-  provider: RemoteTemplateProvider,
-): Promise<void> {
-  const L = remoteLayoutForProvider(provider);
-  await driver.exec(
-    `rm -rf ${shellQuoteWord(`${L.home}/.bun/install/cache`)}`,
-    { timeoutMs: 10 * 60_000 },
-  );
-}
-
 /** Fail closed before a provider snapshot is published, then write a nonce
  * into the filesystem. Certification restores a second sandbox and requires
  * the exact nonce, proving it used the artifact rather than merely repeating

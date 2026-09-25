@@ -62,6 +62,31 @@ async function restoring(sandbox: Sandbox): Promise<boolean> {
   }
 }
 
+/**
+ * Boat's restore can lose a file it fetched on demand while the disk copy
+ * was running: `DIRECT-WRITE FAILED .bun/bin/bun: rename into place: No
+ * such file or directory` left a machine without the bun binary its dev
+ * server, Portal relay, and workload identity client all run on. Reinstall
+ * it rather than start a Portal that exits at once.
+ */
+const REPAIR_BUN =
+  'test -x "$HOME/.bun/bin/bun" && exit 0; echo missing; ' +
+  "curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1; " +
+  'test -x "$HOME/.bun/bin/bun" && echo repaired';
+
+async function repairLostFiles(sandbox: Sandbox): Promise<void> {
+  try {
+    const result = await sandbox.exec(["bash", "-c", REPAIR_BUN], {
+      timeoutMs: 300_000,
+    });
+    const out = result.stdout.trim();
+    if (out)
+      console.warn(
+        `[sandbox:boat] ${sandbox.id}: bun binary lost in the disk restore; ${out.includes("repaired") ? "reinstalled" : "reinstall failed"}`,
+      );
+  } catch {}
+}
+
 /** Resolves once the machine's disk is fully restored, or after `maxMs`.
  * Returns how long it waited. */
 export async function waitForBoxHydration(
@@ -86,6 +111,7 @@ export async function waitForBoxHydration(
       signal.cancel();
     }
   }
+  await repairLostFiles(sandbox);
   const waited = Date.now() - started;
   if (waited > 1_000)
     console.log(
