@@ -40,6 +40,13 @@ const READY_SECONDS = 600;
  *  says otherwise: the image then kept the cache's data files without the
  *  index that makes them valid, and every session compiled from nothing. */
 const STOP_SECONDS = 300;
+/** Turbopack writes its cache in the background, after a quiet spell: the
+ *  first write of tella-fusion's finished about 85 s after the dev server
+ *  started, just after the warm-up ended. Stopping the app before then
+ *  left the image with half a write, which the next start discards. Wait
+ *  until the cache's LOG exists and has been still for QUIET seconds. */
+const PERSIST_WAIT_SECONDS = 300;
+const PERSIST_QUIET_SECONDS = 20;
 const RUN_TIMEOUT_MS = 20 * 60_000;
 
 export function portalPrebuildScript(input: {
@@ -77,6 +84,16 @@ export function portalPrebuildScript(input: {
     `pid=$!`,
     `bash -c ${shellQuoteWord(warm)}`,
     `result=$(tail -n 1 ${shellQuoteWord(warmLog)} 2>/dev/null)`,
+    `turbo_logs() { find . -path '*/node_modules' -prune -o -path '*/.next/*/cache/turbopack/*' -name LOG -print 2>/dev/null; }`,
+    `if [ -n "$(find . -path '*/node_modules' -prune -o -path '*/.next/*/cache/turbopack' -print -quit 2>/dev/null)" ]; then`,
+    `  waited=0`,
+    `  while [ "$waited" -lt ${PERSIST_WAIT_SECONDS} ]; do`,
+    `    logs=$(turbo_logs)`,
+    `    if [ -n "$logs" ] && [ -z "$(find $logs -newermt "@$(( $(date +%s) - ${PERSIST_QUIET_SECONDS} ))" 2>/dev/null)" ]; then break; fi`,
+    `    sleep 5; waited=$((waited + 5))`,
+    `  done`,
+    `  echo "waited \${waited}s for the compile cache to be written"`,
+    `fi`,
     // The whole process group: the app, its watchers, the identity refresher.
     `kill -s TERM -- -"$pid" 2>/dev/null`,
     `for i in $(seq 1 ${STOP_SECONDS}); do kill -s 0 -- -"$pid" 2>/dev/null || break; sleep 1; done`,
@@ -140,7 +157,7 @@ export async function prebuildPortalCache(
       { timeoutMs: RUN_TIMEOUT_MS },
     );
     const seconds = Math.round((Date.now() - started) / 1000);
-    const detail = result.stdout.trim().split("\n").slice(-13).join("; ");
+    const detail = result.stdout.trim().split("\n").slice(-14).join("; ");
     if (result.exitCode !== 0) {
       log(`did not finish in ${seconds}s (image ships without it): ${detail}`);
       return false;

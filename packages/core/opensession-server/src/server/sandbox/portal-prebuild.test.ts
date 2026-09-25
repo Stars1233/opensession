@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
@@ -61,8 +62,18 @@ Bun.serve({ port: Number(process.env.PORT), fetch(req) {
       routes: ["/a", "/b"],
       env: { SECRET_FOR_TEST: "handed-over" },
     });
+    // A Turbopack cache whose last write settled a minute ago: nothing to
+    // wait for before stopping the app.
+    const cache = join(dir, ".next", "dev", "cache", "turbopack", "v1");
+    mkdirSync(cache, { recursive: true });
+    writeFileSync(join(cache, "LOG"), "Commit 1\n");
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(join(cache, "LOG"), past, past);
     const run = Bun.spawn(["bash", "-c", script], { stdout: "pipe" });
     expect(await run.exited).toBe(0);
+    expect(await new Response(run.stdout).text()).toContain(
+      "waited 0s for the compile cache to be written",
+    );
     // Warmed in parallel, so in either order.
     expect(
       readFileSync(join(root, "hits"), "utf8").trim().split("\n").sort(),
