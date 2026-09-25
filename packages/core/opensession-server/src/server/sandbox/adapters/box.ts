@@ -1150,6 +1150,12 @@ export class BoxProvider implements SandboxProvider {
     const cfg = boxClientConfig();
     const prevState = findRemoteStateBySession(this.id, spec.sessionId);
     const trust = resolveTrustPolicy(spec, prevState);
+    // Boat installs no outbound policy, and its images may carry a prebuilt
+    // Portal cache with the app's dev secrets (portal-prebuild.ts).
+    if (trust.trustProfile === "automation")
+      throw new Error(
+        "Boat sandboxes are for interactive sessions; automations stay on Daytona",
+      );
     const repo = getRepo(spec.repo || prevState?.repoId);
     const branch = spec.branch || prevState?.branch || repo.defaultBranch;
     const cwd =
