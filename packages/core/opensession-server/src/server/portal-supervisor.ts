@@ -653,10 +653,22 @@ async function startPortal(
   // wrapper, watchers, lock holders). Reap it before starting anew so the
   // fresh start does not collide with orphaned ReScript/Next processes.
   if (current) await terminatePortalProcess(ops, current);
+  // Starting a Portal again takes its own previous port while that is free:
+  // its URL stays the same, and an app that compiles PORT into its build
+  // (Next's `env`) keeps its compile cache. A failed start used to move the
+  // next one to a fresh port, a new URL, and a cold compile.
+  const previousPort =
+    current &&
+    !records.some(
+      (record) => record.name !== name && record.port === current.port,
+    ) &&
+    !(await ops.probePort(current.port))
+      ? current.port
+      : null;
   const port =
-    input.port == null
-      ? await input.allocatePort(records)
-      : validatePort(input.port);
+    input.port != null
+      ? validatePort(input.port)
+      : (previousPort ?? (await input.allocatePort(records)));
   if (
     records.some((record) => record.name !== name && record.port === port) ||
     (await ops.probePort(port))
