@@ -282,6 +282,24 @@ function hostPreviewPortalRecipes(worktreeDir: string): PreviewPortalRecipe[] {
   }
 }
 
+/** The Portal a new session on this checkout can start with it: the first
+ *  `.agents/portals.json` recipe with a command. Read without blocking. */
+export async function repoPortalStarter(
+  repoRoot: string,
+): Promise<{ id: string; name: string } | null> {
+  try {
+    const raw = await Bun.file(
+      join(repoRoot, LIFECYCLE_DIR, "portals.json"),
+    ).text();
+    const recipe = parsePreviewPortalRecipes(raw).find(
+      (candidate) => candidate.command,
+    );
+    return recipe ? { id: recipe.id, name: recipe.name || recipe.id } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** What a repo's committed lifecycle directory provides. Read straight off
  *  the main checkout for Settings → Setup, which tells operators whether
  *  sessions in that repo can prepare themselves and expose their app.
