@@ -581,6 +581,10 @@ export function NewSession({
   // The repo's first declared Portal, offered to start with the session.
   const repoPortal =
     mode === "code" ? repos.find((option) => option.id === repo)?.portal : null;
+  // Where it runs: the session's own Sandbox, or the Portal Sandbox the repo
+  // asks for. Either way, starting it now means booting that machine.
+  const portalBootsSandbox =
+    sandboxProvider !== "" || !!sandboxStatus?.defaults?.portals?.[repo];
 
   // Provider-independent family check, driven by the same server list the
   // create path enforces.
@@ -1811,7 +1815,9 @@ export function NewSession({
                       <span className="flex min-w-0 items-center gap-2">
                         <IconGlobe className="shrink-0 text-dim" size={20} />
                         <span className="truncate">
-                          Start {repoPortal.name} now
+                          {portalBootsSandbox
+                            ? `Boot a Sandbox for ${repoPortal.name}`
+                            : `Start ${repoPortal.name} right away`}
                         </span>
                       </span>
                       <Menu.Check on={startPortal} className="text-dim" />
