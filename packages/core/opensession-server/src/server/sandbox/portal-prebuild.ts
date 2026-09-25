@@ -34,6 +34,12 @@ import {
  *  allocateSandboxPort). Apps that compile PORT in need the same one. */
 export const PREBUILD_PORTAL_PORT = 4_000;
 const READY_SECONDS = 600;
+/** How long the stopped app gets to write its compile cache. Next's server
+ *  writes Turbopack's cache as it shuts down, 2.5 GB for tella-fusion, and
+ *  `next dev` kills it 100 ms after a SIGTERM unless NEXT_EXIT_TIMEOUT_MS
+ *  says otherwise: the image then kept the cache's data files without the
+ *  index that makes them valid, and every session compiled from nothing. */
+const STOP_SECONDS = 300;
 const RUN_TIMEOUT_MS = 20 * 60_000;
 
 export function portalPrebuildScript(input: {
@@ -65,20 +71,23 @@ export function portalPrebuildScript(input: {
     `tmp=$(mktemp -d)`,
     `env HOME=${input.layout.home} PATH=${shellQuoteWord(input.layout.path)} TMPDIR="$tmp" ` +
       `PORT=${input.port} PORTAL_URL=${shellQuoteWord(`https://${input.host}`)} ` +
-      `OPENSESSION_PORTAL=${shellQuoteWord(input.name)} ${envArgs} ` +
+      `OPENSESSION_PORTAL=${shellQuoteWord(input.name)} ` +
+      `NEXT_EXIT_TIMEOUT_MS=${STOP_SECONDS * 1000} ${envArgs} ` +
       `setsid bash -c ${shellQuoteWord(`exec ${input.command}`)} </dev/null >${shellQuoteWord(log)} 2>&1 &`,
     `pid=$!`,
     `bash -c ${shellQuoteWord(warm)}`,
     `result=$(tail -n 1 ${shellQuoteWord(warmLog)} 2>/dev/null)`,
     // The whole process group: the app, its watchers, the identity refresher.
     `kill -s TERM -- -"$pid" 2>/dev/null`,
-    `for i in $(seq 1 30); do kill -s 0 -- -"$pid" 2>/dev/null || break; sleep 1; done`,
+    `for i in $(seq 1 ${STOP_SECONDS}); do kill -s 0 -- -"$pid" 2>/dev/null || break; sleep 1; done`,
     `kill -s KILL -- -"$pid" 2>/dev/null`,
     `rm -rf "$tmp" .ports.conf .ports`,
     `find . -maxdepth 5 -path '*/.next/dev/lock' -not -path '*/node_modules/*' -delete 2>/dev/null`,
     `dirty=$(git status --porcelain --untracked-files=no)`,
     `if [ -n "$dirty" ]; then echo "restored: $dirty" | head -5; git checkout -q -- .; fi`,
     `cat ${shellQuoteWord(warmLog)} 2>/dev/null`,
+    // Turbopack's index: without these files the cache is discarded on start.
+    `echo "turbopack cache index files: $(find . -path '*/node_modules' -prune -o -path '*/.next/*/cache/turbopack/*' -name '*.meta' -print 2>/dev/null | wc -l)"`,
     `[ "$result" = done ]`,
   ].join("\n");
 }
@@ -131,7 +140,7 @@ export async function prebuildPortalCache(
       { timeoutMs: RUN_TIMEOUT_MS },
     );
     const seconds = Math.round((Date.now() - started) / 1000);
-    const detail = result.stdout.trim().split("\n").slice(-12).join("; ");
+    const detail = result.stdout.trim().split("\n").slice(-13).join("; ");
     if (result.exitCode !== 0) {
       log(`did not finish in ${seconds}s (image ships without it): ${detail}`);
       return false;

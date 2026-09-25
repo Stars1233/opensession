@@ -32,6 +32,12 @@ test("compiles the warm routes, stops the app, and leaves the checkout clean", a
       `import { appendFileSync, writeFileSync } from "fs";
 writeFileSync("tracked.txt", "rewritten\\n");
 writeFileSync(".ports.conf", "WEBAPP_PORT=" + process.env.PORT + "\\n");
+// Like Next writing its compile cache on shutdown: slow, and only allowed
+// to finish when the server is given the time.
+process.on("SIGTERM", () => setTimeout(() => {
+  writeFileSync(${JSON.stringify(join(root, "persisted"))}, String(process.env.NEXT_EXIT_TIMEOUT_MS));
+  process.exit(0);
+}, 1500));
 Bun.serve({ port: Number(process.env.PORT), fetch(req) {
   appendFileSync(${JSON.stringify(join(root, "hits"))}, new URL(req.url).pathname + " " + process.env.SECRET_FOR_TEST + "\\n");
   return new Response("ok");
@@ -59,6 +65,8 @@ Bun.serve({ port: Number(process.env.PORT), fetch(req) {
       `(exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null && echo open || echo closed`,
     ]);
     expect(probe.stdout.toString().trim()).toBe("closed");
+    // The app finished its shutdown write, and Next was told to allow it.
+    expect(readFileSync(join(root, "persisted"), "utf8")).toBe("300000");
     expect(existsSync(join(dir, ".ports.conf"))).toBe(false);
     expect(readFileSync(join(dir, "tracked.txt"), "utf8")).toBe("original\n");
   } finally {
