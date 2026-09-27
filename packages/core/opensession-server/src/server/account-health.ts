@@ -13,9 +13,11 @@
  *  - Pool Claude accounts and all codex accounts → DM the instance owner.
  *
  * Detected issues: unreadable/expired Claude OAuth credential files, revoked
- * setup-tokens (401 from the usage endpoint), Claude refresh tokens within a
- * week of expiry, and codex ChatGPT access tokens expired or within a day of
- * expiry. The sweep first runs refreshIdleCodexTokens (codex-token-refresh.ts)
+ * setup-tokens (401 from the usage endpoint), failed Claude OAuth refreshes,
+ * and codex ChatGPT access tokens expired or within a day of expiry. Claude
+ * refresh-token expiry is deliberately not predicted: the stored
+ * `refreshTokenExpiresAt` is not extended when a refresh rotates the token,
+ * so it goes stale and produced false alerts for healthy logins. The sweep first runs refreshIdleCodexTokens (codex-token-refresh.ts)
  * so a codex expiry alert only ever fires when the in-process refresh itself
  * failed (dead refresh token, endpoint trouble).
  *
@@ -47,7 +49,6 @@ const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 // Let the usage poller populate its cache before the first sweep reads it.
 const FIRST_SWEEP_DELAY_MS = 10 * 60 * 1000;
 const REALERT_MS = 24 * 60 * 60 * 1000;
-const CLAUDE_REFRESH_WARN_MS = 7 * 24 * 60 * 60 * 1000;
 const CODEX_ACCESS_WARN_MS = 24 * 60 * 60 * 1000;
 const configuredHealthOwner = configuredIntegration("accountHealth").notifyUser;
 // Pool-wide alerts go to the configured owner, then the first directory entry.
@@ -148,34 +149,6 @@ function claudeIssues(): Issue[] {
         message: `It's ${personaName()} — ${label}: its OAuth credentials expired and the refresh failed. ${relogin}`,
         notify: who,
       });
-      continue;
-    }
-    // Look-ahead: a refresh token near expiry means a forced re-login soon.
-    if (a.credentialsPath && existsSync(a.credentialsPath)) {
-      try {
-        const creds = JSON.parse(
-          readFileSync(a.credentialsPath, "utf-8"),
-        )?.claudeAiOauth;
-        const refreshExp = Number(creds?.refreshTokenExpiresAt) || 0;
-        if (refreshExp > 0) {
-          const left = refreshExp - Date.now();
-          if (left <= 0) {
-            issues.push({
-              key: `claude:${a.id}:refresh-expired`,
-              message: `It's ${personaName()} — ${label}: its OAuth refresh token has expired; the next access-token refresh will fail. ${relogin}`,
-              notify: who,
-            });
-          } else if (left < CLAUDE_REFRESH_WARN_MS) {
-            issues.push({
-              key: `claude:${a.id}:refresh-expiring`,
-              message: `It's ${personaName()} — heads-up: ${label}'s OAuth refresh token expires in ${days(left)}. ${relogin}`,
-              notify: who,
-            });
-          }
-        }
-      } catch {
-        // Unreadable file is caught by the poller error branch above next sweep.
-      }
     }
   }
   return issues;
