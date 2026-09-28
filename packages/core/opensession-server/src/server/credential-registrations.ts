@@ -50,6 +50,9 @@ type Pending = {
   /** Set while a submitted secret is being saved, so a second answer from
    *  another tab cannot race it. */
   answering: boolean;
+  /** The agent's call was cancelled while a save was in flight. The save
+   *  decides the outcome: registered if it lands, declined if it fails. */
+  aborted: boolean;
 };
 
 /** Long enough to find a key in a provider dashboard. */
@@ -146,6 +149,7 @@ export function requestCredentialRegistration(
     const entry: Pending = {
       request,
       answering: false,
+      aborted: false,
       login: input.login.toLowerCase(),
       resolve: (result) => {
         signal?.removeEventListener("abort", onAbort);
@@ -157,7 +161,13 @@ export function requestCredentialRegistration(
         else settle(sessionId, entry, { status: "expired" });
       }, ttlMs),
     };
-    const onAbort = () => settle(sessionId, entry, { status: "declined" });
+    const onAbort = () => {
+      // Never report a decline for a credential that is being written: the
+      // card would close and the tool would say nothing was saved, while
+      // the store ends up holding it.
+      if (entry.answering) entry.aborted = true;
+      else settle(sessionId, entry, { status: "declined" });
+    };
     pending.set(sessionId, entry);
     audit({
       kind: "keychain_registration_requested",
@@ -229,15 +239,19 @@ export async function submitCredentialRegistration(
   try {
     credential = await addCredentialAsync({ ...spec, owner, secret });
   } catch (error) {
+    entry.answering = false;
+    // Cancelled mid-save and nothing was written: close it as declined.
+    if (entry.aborted) settle(sessionId, entry, { status: "declined" });
     // addCredentialAsync's messages describe the spec or the store, never
     // the secret.
     throw new CredentialRegistrationError(
       error instanceof Error ? error.message : "Couldn't save the credential",
       409,
     );
-  } finally {
-    entry.answering = false;
   }
+  entry.answering = false;
+  // Settled as registered even if the agent's call was cancelled meanwhile:
+  // the credential exists, so the card closes on what really happened.
   settle(sessionId, entry, { status: "registered", credential });
   return credential;
 }

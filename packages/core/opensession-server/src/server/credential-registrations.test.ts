@@ -322,6 +322,39 @@ describe("saving off the gateway thread", () => {
     expectNoSecretLeaked(result);
   });
 
+  test("cancelling the agent's call during a save still reports the save", async () => {
+    let release!: () => void;
+    writeGate = new Promise((resolve) => (release = resolve));
+    const controller = new AbortController();
+    const waiting = open("s-abort-save", "acme-abort-save", controller.signal);
+    const { request } = reg.pendingCredentialRegistration("s-abort-save")!;
+    const saving = reg.submitCredentialRegistration(
+      "s-abort-save",
+      request.id,
+      "alex-gh",
+      SECRET,
+    );
+    controller.abort();
+    await Bun.sleep(5);
+    // Still open: the abort waits for the write to decide.
+    expect(reg.pendingCredentialRegistration("s-abort-save")).not.toBeNull();
+    expect(broadcasts.some((m: any) => m.status === "declined")).toBe(false);
+    writeGate = null;
+    release();
+    const meta = await saving;
+    const result = await waiting;
+    expect(result.status).toBe("registered");
+    expect(kc.findCredential("acme-abort-save")?.id).toBe(meta.id);
+    expect(
+      broadcasts.filter(
+        (m: any) => m.type === "credential_registration_resolved",
+      ),
+    ).toEqual([
+      expect.objectContaining({ requestId: request.id, status: "registered" }),
+    ]);
+    expectNoSecretLeaked(result);
+  });
+
   test("async and sync writes interleaved end on the latest state", async () => {
     const pendingWrite = kc.addCredentialAsync({
       owner: "Alex",
