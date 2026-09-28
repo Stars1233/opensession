@@ -18,6 +18,7 @@ import { sessionHasPr } from "../lib/session-prs";
 import { sessionHasWorkspace } from "../lib/session-workspace";
 import { absoluteLink, copyToClipboard, sessionPath } from "../lib/share-link";
 import { matchesShortcut } from "../lib/shortcuts";
+import { getLane } from "../lib/lanes";
 import { isClaimed, ownedBy } from "../lib/sidebar-lanes";
 import { unreadChatsInOrder } from "../lib/unread-chats";
 import { previewSidebarSelection } from "../lib/sidebar-selection";
@@ -323,6 +324,7 @@ export function useSidebarWorkspaceController({
       selectedId,
       reads,
       activeSnoozeKeys,
+      (session) => ownedBy(session, currentUser) || !!getLane(session.id),
     );
     const signature = JSON.stringify(chats);
     if (reportedUnreadChats.current === signature) return;

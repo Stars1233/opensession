@@ -26,6 +26,7 @@ function session(
     ...patch,
   };
 }
+const mine = (s: UnifiedSession) => s.startedBy === "Michiel";
 function row(key: string, sessions: UnifiedSession[]) {
   return { key, sessions, workspace: null };
 }
@@ -52,7 +53,9 @@ describe("Next unread destinations", () => {
       row("c", [session("after")]),
     ];
     expect(
-      unreadChatsInOrder(rows, "selected", reads, new Set()).map((s) => s.id),
+      unreadChatsInOrder(rows, "selected", reads, new Set(), mine).map(
+        (s) => s.id,
+      ),
     ).toEqual(["sibling", "after", "before"]);
   });
 
@@ -63,6 +66,7 @@ describe("Next unread destinations", () => {
         "selected",
         reads,
         new Set(),
+        mine,
       ).map((s) => s.id),
     ).toEqual(["after"]);
   });
@@ -79,7 +83,9 @@ describe("Next unread destinations", () => {
         session("never-visited"),
       ]),
     ];
-    expect(unreadChatsInOrder(rows, "selected", reads, new Set())).toEqual([]);
+    expect(
+      unreadChatsInOrder(rows, "selected", reads, new Set(), mine),
+    ).toEqual([]);
   });
 
   test("a running sibling does not hide another ready unread session", () => {
@@ -87,7 +93,7 @@ describe("Next unread destinations", () => {
       row("a", [session("running", { isRunning: true }), session("sibling")]),
     ];
     expect(
-      unreadChatsInOrder(rows, null, reads, new Set()).map((s) => s.id),
+      unreadChatsInOrder(rows, null, reads, new Set(), mine).map((s) => s.id),
     ).toEqual(["sibling"]);
   });
 
@@ -95,10 +101,26 @@ describe("Next unread destinations", () => {
     const ready = row("ready", [session("after")]);
     const rows = [row("later", [session("snoozed")]), ready, ready];
     expect(
-      unreadChatsInOrder(rows, null, reads, new Set(["later"])).map(
+      unreadChatsInOrder(rows, null, reads, new Set(["later"]), mine).map(
         (s) => s.id,
       ),
     ).toEqual(["after"]);
+  });
+
+  test("skips sessions that are not yours", () => {
+    const rows = [
+      row("review", [session("teammate", { startedBy: "Alex" })]),
+      row("shared", [
+        session("selected"),
+        session("teammate-sibling", { startedBy: "Alex" }),
+        session("sibling"),
+      ]),
+    ];
+    expect(
+      unreadChatsInOrder(rows, "selected", reads, new Set(), mine).map(
+        (s) => s.id,
+      ),
+    ).toEqual(["sibling"]);
   });
 
   test("uses each destination's project, not the current session's project", () => {
@@ -106,7 +128,7 @@ describe("Next unread destinations", () => {
       row("a", [session("selected"), session("after", { repo: "website" })]),
     ];
     expect(
-      unreadChatsInOrder(rows, "selected", reads, new Set())[0]?.repo,
+      unreadChatsInOrder(rows, "selected", reads, new Set(), mine)[0]?.repo,
     ).toBe("website");
   });
 
@@ -117,6 +139,7 @@ describe("Next unread destinations", () => {
         null,
         reads,
         new Set(),
+        mine,
       ),
     ).toEqual([]);
   });
@@ -128,7 +151,7 @@ describe("Next unread destinations", () => {
         session("after", { lastActivity: "2026-08-20T12:00:00.000Z" }),
       ]),
     ];
-    expect(unreadChatsInOrder(rows, null, reads, new Set())).toEqual([
+    expect(unreadChatsInOrder(rows, null, reads, new Set(), mine)).toEqual([
       { id: "after", title: "after", workspace: "", repo: "opensession" },
       {
         id: "before",
