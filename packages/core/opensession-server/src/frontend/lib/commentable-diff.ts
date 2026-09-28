@@ -27,6 +27,8 @@ export interface CommentableDiffOptions {
   disabledHint?: string;
   /** Expand this many leading files on first render. */
   defaultExpandedFiles?: number;
+  /** Remember which files are open under this key across remounts. */
+  expansionKey?: string;
   /** Omit the global expander when mounting every file would exhaust the tab. */
   allowExpandAll?: boolean;
   /** Move the global file controls into a parent toolbar. Omit to keep them inline. */

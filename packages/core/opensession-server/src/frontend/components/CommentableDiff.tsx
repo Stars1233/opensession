@@ -1,4 +1,10 @@
-import React, { startTransition, useEffect, useRef, useState } from "react";
+import React, {
+  startTransition,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { parsePatchFiles } from "@pierre/diffs";
 import { EditProvider, FileDiff } from "@pierre/diffs/react";
@@ -38,7 +44,13 @@ import {
   IconUndo,
 } from "./icons";
 import { copyToClipboard } from "../lib/share-link";
-import { canAutoExpandDiffFile } from "../lib/review-diff";
+import {
+  applyDiffDefaults,
+  applyViewedCollapse,
+  rememberDiffExpansion,
+  rememberedDiffExpansion,
+  setDiffFileOpen,
+} from "../lib/diff-expansion";
 import { diffFilesFromNewText } from "../lib/diff-expand";
 import { noAutofill } from "../lib/composer-autofill";
 import { Tooltip } from "../ui/tooltip";
@@ -71,8 +83,10 @@ const DIFF_DEL = "font-semibold text-red";
 const FILE_ROW = "min-w-0 max-w-full";
 const FILE_HEADER =
   "group relative flex min-h-9 w-full min-w-0 items-center gap-1.5 overflow-clip rounded-md px-2 text-left text-fg hover:bg-hover phone:min-h-11 phone:px-2.5";
+// `selectable` opts the code back into text selection: the body rule turns it
+// off app-wide, and the diff's shadow root inherits it from this host.
 const FILE_BODY =
-  "relative z-0 mt-1.5 max-w-full overflow-clip rounded-lg phone:rounded-none";
+  "selectable relative z-0 mt-1.5 max-w-full overflow-clip rounded-lg phone:rounded-none";
 // Sidebar Changes still pins filenames. Its canvas fill masks passing code;
 // the filename row draws its own edge only while pinned.
 const STICKY_FILE_HEADER =
@@ -213,6 +227,7 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i;
 export function CommentableDiff({ patch, options }: Props) {
   const {
     defaultExpandedFiles = 0,
+    expansionKey,
     allowExpandAll = true,
     controlsTarget,
     showViewedProgress = true,
@@ -252,45 +267,63 @@ export function CommentableDiff({ patch, options }: Props) {
   const viewed = viewedFiles ?? NO_VIEWED;
   const stats = files.map(fileStats);
 
-  // Files render collapsed by default (just the header row) — mounting a
+  // Files render collapsed by default (just the header row): mounting a
   // FileDiff parses + highlights on the main thread, so a large change would
-  // otherwise block the tab. `expanded` holds the indices the user opened.
-  const [expanded, setExpanded] = useState<ReadonlySet<number>>(
-    () =>
-      new Set(
-        files
-          .slice(0, defaultExpandedFiles)
-          .map((_, index) => index)
-          .filter((index) =>
-            canAutoExpandDiffFile(
-              files[index].name,
-              stats[index].add + stats[index].del,
-            ),
-          ),
-      ),
+  // otherwise block the tab. Open state is keyed by path, not position, so a
+  // polled patch or a reordered list keeps what the reader opened and closed,
+  // and `expansionKey` carries it across remounts.
+  const expansionFiles = files.map((file, index) => ({
+    name: file.name,
+    lines: stats[index].add + stats[index].del,
+  }));
+  const [expansion, setExpansion] = useState(() =>
+    applyDiffDefaults(
+      rememberedDiffExpansion(expansionKey),
+      expansionFiles,
+      defaultExpandedFiles,
+    ),
   );
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
+  const expanded = expansion.open;
+  const collapsedGroups = expansion.collapsedGroups;
+  const fileNamesKey = files.map((file) => file.name).join("\0");
+  const applyDefaults = useEffectEvent(() => {
+    setExpansion((prev) =>
+      applyDiffDefaults(prev, expansionFiles, defaultExpandedFiles),
+    );
+  });
+  useEffect(() => {
+    applyDefaults();
+  }, [fileNamesKey, defaultExpandedFiles]);
+  useEffect(() => {
+    rememberDiffExpansion(expansionKey, expansion);
+  }, [expansionKey, expansion]);
   // How many of the currently-open files may mount their FileDiff. Grows a
   // batch per frame until it covers them all (see MOUNT_FIRST_BATCH).
   const [mountBudget, setMountBudget] = useState(MOUNT_FIRST_BATCH);
-  const toggle = (i: number) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
-    });
-  };
-  const allOpen = expanded.size >= files.length && files.length > 0;
+  const setFileOpen = (name: string, open: boolean) =>
+    setExpansion((prev) => setDiffFileOpen(prev, name, open));
+  const toggle = (name: string) =>
+    setExpansion((prev) => setDiffFileOpen(prev, name, !prev.open.has(name)));
+  const allOpen =
+    files.length > 0 && files.every((file) => expanded.has(file.name));
   const toggleAll = () => {
-    setExpanded((prev) => {
-      if (prev.size >= files.length) return new Set();
-      setCollapsedGroups(new Set());
-      return new Set(files.map((_, i) => i));
+    setExpansion((prev) => {
+      const open = new Set(prev.open);
+      if (allOpen) {
+        for (const file of files) open.delete(file.name);
+        return { ...prev, open };
+      }
+      for (const file of files) open.add(file.name);
+      return { ...prev, open, collapsedGroups: new Set() };
     });
   };
+  const toggleGroup = (title: string) =>
+    setExpansion((prev) => {
+      const collapsed = new Set(prev.collapsedGroups);
+      if (collapsed.has(title)) collapsed.delete(title);
+      else collapsed.add(title);
+      return { ...prev, collapsedGroups: collapsed };
+    });
 
   const groupedFiles = (() => {
     if (!groups?.length) return null;
@@ -312,10 +345,6 @@ export function CommentableDiff({ patch, options }: Props) {
       resolved.push({ title: "Other", files: [], indices: remaining });
     return resolved.length >= 2 ? resolved : null;
   })();
-
-  useEffect(() => {
-    setCollapsedGroups(new Set());
-  }, [groups]);
 
   // Discard is destructive + irreversible, so it's a two-click arm/confirm:
   // the first click arms a row (button flips to "Discard changes?"), the second
@@ -382,54 +411,25 @@ export function CommentableDiff({ patch, options }: Props) {
     });
   };
 
-  const viewedCollapseKey = useRef<string | null>(null);
-  useEffect(() => {
-    setExpanded(
-      new Set(
-        files
-          .slice(0, defaultExpandedFiles)
-          .map((_, index) => index)
-          .filter((index) =>
-            canAutoExpandDiffFile(
-              files[index].name,
-              stats[index].add + stats[index].del,
-            ),
-          ),
-      ),
-    );
-    setMountBudget(MOUNT_FIRST_BATCH);
-    viewedCollapseKey.current = null;
-  }, [patch, defaultExpandedFiles, files, stats]);
-
   // Collapse already-viewed files once GitHub's viewed state arrives (it
-  // loads async, after the diff renders). Applied once per patch so it never
-  // fights a user who re-expands a viewed file.
-  useEffect(() => {
-    if (viewedFiles === undefined || viewedCollapseKey.current === patch)
-      return;
-    viewedCollapseKey.current = patch;
-    if (viewedFiles.size === 0) return;
-    setExpanded(
-      (prev) =>
-        new Set(
-          [...prev].filter(
-            (index) => !viewedFiles.has(files[index]?.name ?? ""),
-          ),
-        ),
+  // loads async, after the diff renders). Applied once per file so it never
+  // fights a reader who re-expands a viewed file.
+  const collapseViewed = useEffectEvent(() => {
+    if (viewedFiles === undefined) return;
+    setExpansion((prev) =>
+      applyViewedCollapse(prev, expansionFiles, viewedFiles),
     );
-  }, [viewedFiles, patch, files]);
+  });
+  useEffect(() => {
+    collapseViewed();
+  }, [viewedFiles, fileNamesKey]);
 
-  const toggleViewed = (file: FileDiffMetadata, index: number) => {
+  const toggleViewed = (file: FileDiffMetadata) => {
     if (!onToggleViewed) return;
     const wasViewed = viewed.has(file.name);
     onToggleViewed(file.name, !wasViewed);
     // Marking viewed collapses the file (done reading it); unmarking reopens.
-    setExpanded((prev) => {
-      const n = new Set(prev);
-      if (wasViewed) n.add(index);
-      else n.delete(index);
-      return n;
-    });
+    setFileOpen(file.name, wasViewed);
   };
 
   // ---- Edit mode (@pierre/diffs edit) ------------------------------------
@@ -445,11 +445,11 @@ export function CommentableDiff({ patch, options }: Props) {
   );
   const editorRef = useRef<Editor<Meta> | null>(null);
 
-  const startEdit = async (file: FileDiffMetadata, index: number) => {
+  const startEdit = async (file: FileDiffMetadata) => {
     if (!editModuleRef.current) editModuleRef.current = await loadEditModule();
     setEditError(null);
     setEditingPath(file.name);
-    setExpanded((prev) => new Set(prev).add(index));
+    setFileOpen(file.name, true);
   };
 
   const cancelEdit = () => {
@@ -609,7 +609,7 @@ export function CommentableDiff({ patch, options }: Props) {
   // has to stay on screen: a comment being written, comments already added, an
   // edit session (collapsing would unmount the editor mid-edit).
   const isOpenAt = (file: FileDiffMetadata, index: number) =>
-    expanded.has(index) ||
+    expanded.has(file.name) ||
     draft?.fileIndex === index ||
     (pendingByFile.get(file.name)?.length ?? 0) > 0 ||
     editingPath === file.name;
@@ -641,7 +641,7 @@ export function CommentableDiff({ patch, options }: Props) {
     // the diff), already-added pending comments (so they stay visible), or an
     // active edit session (collapsing would unmount the editor mid-edit).
     const isOpen =
-      expanded.has(i) || isDraftFile || pend.length > 0 || isEditing;
+      expanded.has(file.name) || isDraftFile || pend.length > 0 || isEditing;
     // Open, but its turn to parse has not come round yet — the header is
     // already drawn open, and the diff drops in a frame or two later.
     const mounted = (mountRank.get(i) ?? 0) < mountBudget;
@@ -699,7 +699,7 @@ export function CommentableDiff({ patch, options }: Props) {
               aria-expanded={isOpen}
               onClick={() => {
                 disarm();
-                toggle(i);
+                toggle(file.name);
               }}
             >
               <IconChevronRight
@@ -726,7 +726,7 @@ export function CommentableDiff({ patch, options }: Props) {
                   aria-label="Edit this file in place"
                   onClick={(e) => {
                     e.stopPropagation();
-                    void startEdit(file, i);
+                    void startEdit(file);
                   }}
                 >
                   <IconPencil size={16} />
@@ -839,7 +839,7 @@ export function CommentableDiff({ patch, options }: Props) {
               >
                 <Checkbox
                   checked={isViewed}
-                  onCheckedChange={() => toggleViewed(file, i)}
+                  onCheckedChange={() => toggleViewed(file)}
                 />
                 <span className="phone:sr-only">Reviewed</span>
               </label>
@@ -861,7 +861,7 @@ export function CommentableDiff({ patch, options }: Props) {
                 </Tooltip>
                 <Menu.Popup align="end" className="min-w-[230px]">
                   {isPhone && editable && !isEditing && (
-                    <Menu.Item onClick={() => void startEdit(file, i)}>
+                    <Menu.Item onClick={() => void startEdit(file)}>
                       <IconPencil size={18} className={MENU_ICON} />
                       Edit file in place
                     </Menu.Item>
@@ -1041,7 +1041,7 @@ export function CommentableDiff({ patch, options }: Props) {
       {groupedFiles
         ? groupedFiles.map((group) => {
             const groupKey = `${group.title}\0${group.indices.join(",")}`;
-            const collapsed = collapsedGroups.has(groupKey);
+            const collapsed = collapsedGroups.has(group.title);
             const totals = group.indices.reduce(
               (sum, index) => ({
                 add: sum.add + stats[index].add,
@@ -1063,14 +1063,7 @@ export function CommentableDiff({ patch, options }: Props) {
                     group.indices.map((index) => files[index].name),
                   )}
                   aria-expanded={!collapsed}
-                  onClick={() =>
-                    setCollapsedGroups((previous) => {
-                      const next = new Set(previous);
-                      if (next.has(groupKey)) next.delete(groupKey);
-                      else next.add(groupKey);
-                      return next;
-                    })
-                  }
+                  onClick={() => toggleGroup(group.title)}
                 >
                   <IconChevronRight
                     size={16}
