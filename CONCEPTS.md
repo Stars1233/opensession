@@ -111,6 +111,10 @@ created in it inherit that worktree by default. Sessions that inherit it share a
 checkout and contribute to one review unit. Stacked sessions and integration
 runs can use dedicated worktrees while remaining in the same workspace.
 
+A workspace belongs to whoever created it, and its sidebar row files into their
+lanes. Add teammates as collaborators from the info panel and the row files into
+their sidebar the same way. Each one is notified once, when they are added.
+
 A workspace with no worktree is fine too — that is what an ask-style workspace
 looks like, or a feed workspace for a ticket where there is nothing to check
 out, or a fresh one before any code session materializes it.

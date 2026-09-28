@@ -68,6 +68,7 @@ import {
 } from "../lib/session-viewer-classes";
 import { openLightbox } from "../lib/media-lightbox";
 import { SandboxBadge } from "./SandboxBadge";
+import { WorkspaceCollaborators } from "./WorkspaceCollaborators";
 import {
   IconBell,
   IconCheck,
@@ -1649,6 +1650,10 @@ export function WorkspaceInfo({
           <div className={INFO_LIST_CLASS}>{reviewerRow}</div>
         </div>
       )}
+      <WorkspaceCollaborators
+        workspaceId={workspaceId}
+        sessionId={sessionId || undefined}
+      />
       {sandbox && (
         // `px-3`, the label inset: the badge is a section's worth of content
         // with no plate under it, so it lines up with the labels rather than

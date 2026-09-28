@@ -34,6 +34,7 @@ import { handleSessionGitRoutes } from "./session-git";
 import { handleSessionBranchRoutes } from "./session-branch";
 import { handlePreviewRoutes } from "./preview";
 import { handleWorkspaceRoutes } from "./workspace";
+import { handleWorkspaceCollaboratorRoutes } from "./workspace-collaborators";
 import { handleAutomationsRoutes } from "./automations";
 import { handleHumanAsksRoutes } from "./human-asks";
 import { handleKeychainRoutes } from "./keychain";
@@ -102,6 +103,8 @@ export const routeHandlers: RouteHandler[] = [
   handleSessionGitRoutes,
   handleSessionBranchRoutes,
   handlePreviewRoutes,
+  // Before the generic /api/workspaces/:id PATCH/DELETE.
+  handleWorkspaceCollaboratorRoutes,
   handleWorkspaceRoutes,
   handleAutomationsRoutes,
   handleHumanAsksRoutes,

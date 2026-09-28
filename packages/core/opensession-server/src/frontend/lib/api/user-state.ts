@@ -44,7 +44,7 @@ export async function savePinsApi(
 export interface MentionRecord {
   sessionId: string;
   by: string;
-  source: "prompt" | "note";
+  source: "prompt" | "note" | "collaborator";
   preview: string;
   ts: number;
 }

@@ -419,6 +419,14 @@ export function workspaceRowIsFeedOnly(
   );
 }
 
+/** A collaborator sees the workspace in their sidebar like its creator does. */
+export function rowHasCollaborator(row: WsRow, person: string): boolean {
+  const key = person.toLowerCase();
+  return !!row.workspace?.collaborators?.some(
+    (collaborator) => collaborator.name.toLowerCase() === key,
+  );
+}
+
 interface DeriveWorkspacePlacementInput {
   rows: WsRow[];
   filter: FilterState;
@@ -450,6 +458,7 @@ export function deriveWorkspacePlacement({
         ? row.status === "pending"
         : (row.owner === focus &&
             (showAutoCreated || !rowWasAutoCreated(row))) ||
+          rowHasCollaborator(row, focus) ||
           (!!row.mention && focus === currentUser.toLowerCase()) ||
           row.sessions.some(
             (session) =>

@@ -27,6 +27,7 @@ const { catalogDocuments, importApplicationCatalog } =
 const {
   DEFAULT_WORKSPACE_MODEL_SETTINGS,
   __resetWorkspaceProjectionForTest,
+  addWorkspaceCollaborator,
   createWorkspace,
   deleteWorkspace,
   findWorkspaceByBranch,
@@ -35,6 +36,7 @@ const {
   getWorkspace,
   listWorkspaces,
   peekWorkspace,
+  removeWorkspaceCollaborator,
   restampWorkspaceWorktree,
   stampWorkspaceIdentity,
   updateWorkspace,
@@ -654,4 +656,33 @@ test("conditional auto-naming preserves a manually renamed workspace", async () 
   expect((await getWorkspace(workspace.id))?.name).toBe("Chosen name");
   await updateWorkspace(workspace.id, { name: "Next title" }, "Chosen name");
   expect((await getWorkspace(workspace.id))?.name).toBe("Next title");
+});
+
+describe("collaborators", () => {
+  test("adds a person once and reports only the first add", async () => {
+    const ws = await createWorkspace({ name: "Shared", createdBy: "Kent" });
+    const first = await addWorkspaceCollaborator(ws.id, "Ada", "Kent");
+    expect(first?.added).toBe(true);
+    expect(first?.workspace.collaborators).toEqual([
+      { name: "Ada", by: "Kent", at: expect.any(String) },
+    ]);
+    const again = await addWorkspaceCollaborator(ws.id, "ada", "Grace");
+    expect(again?.added).toBe(false);
+    expect((await getWorkspace(ws.id))?.collaborators).toHaveLength(1);
+  });
+
+  test("removes a person and drops the empty list", async () => {
+    const ws = await createWorkspace({ name: "Shared", createdBy: "Kent" });
+    await addWorkspaceCollaborator(ws.id, "Ada", "Kent");
+    const removed = await removeWorkspaceCollaborator(ws.id, "ADA");
+    expect(removed?.collaborators).toBeUndefined();
+    expect(await getWorkspace(ws.id)).not.toHaveProperty("collaborators");
+  });
+
+  test("a missing workspace is null", async () => {
+    expect(await addWorkspaceCollaborator("ws-missing", "Ada", "Kent")).toBe(
+      null,
+    );
+    expect(await removeWorkspaceCollaborator("ws-missing", "Ada")).toBe(null);
+  });
 });

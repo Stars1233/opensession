@@ -28,8 +28,9 @@ export interface Mention {
   sessionId: string;
   /** Display name of whoever wrote the mention. */
   by: string;
-  /** Where it was written: a prompt in the transcript, or a team note. */
-  source: "prompt" | "note";
+  /** Where it came from: a prompt in the transcript, a team note, or being
+   *  added as a workspace collaborator. */
+  source: "prompt" | "note" | "collaborator";
   /** First line or so of the text, for a hover card or a mentions list. */
   preview: string;
   /** ms epoch */
@@ -57,7 +58,9 @@ function cleanMentions(value: unknown): Mention[] {
       "preview" in value &&
       typeof value.preview === "string" &&
       "source" in value &&
-      (value.source === "prompt" || value.source === "note"),
+      (value.source === "prompt" ||
+        value.source === "note" ||
+        value.source === "collaborator"),
   );
 }
 

@@ -51,6 +51,7 @@ import {
   WsStatusMark,
 } from "./HoverCards";
 import { KeepInSidebarMark } from "./KeepInSidebarMark";
+import { mentionLabel } from "../../lib/mentions";
 import { OriginMark } from "./OriginMark";
 import { SIDEBAR_ROW, SIDEBAR_ROW_TITLE } from "./SidebarItem";
 import { WorkspaceDraftIndicator } from "./WorkspaceDraftIndicator";
@@ -475,8 +476,8 @@ export function WorkspaceRow({
             // the exact session is what clears the badge (lib/mentions.ts).
             <span
               className="relative ml-1 flex shrink-0 cursor-pointer items-center"
-              title={`${row.mention} mentioned you — open`}
-              aria-label={`${row.mention} mentioned you — open`}
+              title={`${mentionLabel(row.mention, row.mentionSessionId)}, open`}
+              aria-label={`${mentionLabel(row.mention, row.mentionSessionId)}, open`}
               onClick={
                 row.mentionSessionId
                   ? (e) => {
