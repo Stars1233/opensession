@@ -599,6 +599,7 @@ export function DiffPanel({
                 patch={d.rawPatch || ""}
                 options={{
                   defaultExpandedFiles: 10,
+                  expansionKey: `${sessionId}\0${cur.repo}`,
                   controlsTarget: diffControlsTarget,
                   diffStyle: codeDisplaySettings.diffStyle,
                   wrapLines: codeDisplaySettings.wrapLines,
