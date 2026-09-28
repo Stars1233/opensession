@@ -3,7 +3,7 @@
  * their sidebar the way it does for its creator, and tell them once.
  *
  * `POST /api/workspaces/:id/collaborators` `{ name, sessionId?, user? }` adds
- * one person. Only the first add notifies: a push to their devices and a
+ * one person. Only the first add notifies: an inbox notification and a
  * mention badge on the session it was added from, which clears when they open
  * it. Adding someone already listed changes nothing and sends nothing.
  *
@@ -55,14 +55,16 @@ async function notifyCollaborator(
       broadcastToAll({ type: "mention", user: name, mention });
     }
   }
-  const { sendPushToUser } = await import("../push");
-  await sendPushToUser(name, {
-    title: `${by} added you to ${workspace.name}`.slice(0, 120),
+  const { notifyUser } = await import("../notifications");
+  await notifyUser(name, {
+    kind: "collaborator",
+    subject: { type: "workspace", id: workspace.id, title: workspace.name },
+    reason: `${by} added you to ${workspace.name}`,
     body: "It's in your sidebar now.",
+    actor: by,
     url: sessionId
       ? `/session/${encodeURIComponent(sessionId)}`
       : `/workspace/${encodeURIComponent(workspace.id)}`,
-    tag: `opensession-collaborator-${workspace.id}`,
   });
 }
 

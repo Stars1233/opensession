@@ -289,7 +289,8 @@ self.addEventListener("push", (event) => {
         tag: data.tag || undefined,
         icon: PREFIX + "/icon-192.png",
         badge: PREFIX + "/icon-192.png",
-        data: { url: localUrl(data.url) },
+        // `id` is the inbox row, so a tap can mark it read.
+        data: { url: localUrl(data.url), id: data.id || null },
       })
       .then(() => updateAppBadge()),
   );
@@ -311,9 +312,13 @@ self.addEventListener("push", (event) => {
  */
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = localUrl(event.notification.data && event.notification.data.url);
+  const data = event.notification.data || {};
+  const url = localUrl(data.url);
   event.waitUntil(
-    Promise.all([updateAppBadge(event.notification.tag), openApp(url)]),
+    Promise.all([
+      updateAppBadge(event.notification.tag),
+      openApp(url, data.id || null),
+    ]),
   );
 });
 
@@ -322,7 +327,7 @@ self.addEventListener("notificationclick", (event) => {
 // short is a document navigation that did not need to happen.
 const NAV_ACK_MS = 700;
 
-async function openApp(url) {
+async function openApp(url, id) {
   const wins = await self.clients.matchAll({
     type: "window",
     includeUncontrolled: true,
@@ -337,7 +342,7 @@ async function openApp(url) {
   // Focus first. It needs the tap's transient activation, which an awaited
   // round trip to the page could outlive.
   if ("focus" in client) await client.focus().catch(() => {});
-  if (await postNavigate(client, url)) return;
+  if (await postNavigate(client, url, id)) return;
   if (client.navigate) {
     try {
       await client.navigate(url);
@@ -349,7 +354,7 @@ async function openApp(url) {
 
 // Ask a page to route itself, and wait for it to say it did. The ack is what
 // keeps the fallbacks from navigating a page that already handled the tap.
-function postNavigate(client, url) {
+function postNavigate(client, url, id) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (ok) => {
@@ -360,7 +365,7 @@ function postNavigate(client, url) {
     try {
       const channel = new MessageChannel();
       channel.port1.onmessage = () => finish(true);
-      client.postMessage({ type: "os1-navigate", url }, [channel.port2]);
+      client.postMessage({ type: "os1-navigate", url, id }, [channel.port2]);
     } catch {
       finish(false);
     }

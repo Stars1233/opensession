@@ -34,6 +34,7 @@ import {
 import type { CommandMenuHandle } from "./CommandMenuHost";
 import { OrganizationSwitcher } from "./OrganizationSwitcher";
 import { UpdatePill } from "./UpdatePill";
+import { InboxBarButton } from "./notifications/InboxBarButton";
 import { IconCall, IconRobot, IconSearch } from "./icons";
 
 interface AppMobileHeaderProps {
@@ -223,13 +224,16 @@ export function AppMobileHeader({
 						    which lives in the top bar on phones instead of the sidebar.
 						    The Desk rides the bottom-right FAB cluster instead. */}
             {!mobileDetail && (
-              <button
-                className={MOBILE_SEARCH_BTN}
-                onClick={() => commandMenuRef.current?.open()}
-                aria-label="Open command menu"
-              >
-                <IconSearch size={22} />
-              </button>
+              <>
+                <InboxBarButton onOpen={() => navigate({ view: "inbox" })} />
+                <button
+                  className={MOBILE_SEARCH_BTN}
+                  onClick={() => commandMenuRef.current?.open()}
+                  aria-label="Open command menu"
+                >
+                  <IconSearch size={22} />
+                </button>
+              </>
             )}
             {mobileDetail && deskCallActive && (
               <button

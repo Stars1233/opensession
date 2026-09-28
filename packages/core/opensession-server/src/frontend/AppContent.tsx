@@ -98,6 +98,8 @@ import { NEW_SESSION_DRAFT_KEY, clearDraft, saveDraft } from "./lib/drafts";
 import { DESK_FAB, MOBILE_FAB } from "./lib/fab-classes";
 import { pickLandingSession } from "./lib/landing-session";
 import { receiveMention, receiveMentionsCleared } from "./lib/mentions";
+import { InboxPage } from "./components/notifications/InboxPage";
+import { useNotificationInbox } from "./hooks/useNotificationInbox";
 import type { NavigationActions } from "./lib/navigation";
 import {
   errorMatchesPendingCreate,
@@ -375,8 +377,6 @@ export function AppContent({
     navigate,
     goBack,
     detailPaneRef,
-    sessions,
-    connected,
     setTabColors,
   });
   const {
@@ -523,6 +523,7 @@ export function AppContent({
   useEffect(() => {
     if (connected) resyncSidebar();
   }, [connected]);
+  useNotificationInbox({ navigate, connected, addHandler });
   // When a session is created from the New Session form or Ask box, jump straight into it
   // The handler reads `inject`/`navigate` through effect events, so the
   // subscription doesn't re-arm just because their closures moved.
@@ -1643,6 +1644,8 @@ export function AppContent({
                       send={send}
                       addHandler={addHandler}
                     />
+                  ) : route.view === "inbox" ? (
+                    <InboxPage />
                   ) : route.view === "archived" ? (
                     <Archived
                       sessions={sessions}

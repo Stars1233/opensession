@@ -1,14 +1,15 @@
+import { z } from "zod";
 import { os1Shell } from "./os1-shell";
 
-// Desktop-notification + sound alerts for your own sessions: when one flips into
-// "needs input" (blocked on an AskUserQuestion) or finishes a run. All behaviour
-// is driven by a single preference object persisted in localStorage and edited in
-// Settings › Notifications. The desktop banner additionally requires the browser's
-// own Notification permission.
+// This device's alert behaviour: whether a banner shows, which sound plays,
+// and when. What to notify about is the person's server-side setting
+// (lib/notifications.ts); this file only decides how this device presents a
+// notification it has been handed. Persisted in localStorage and edited in
+// Settings › Notifications. The desktop banner additionally requires the
+// browser's own Notification permission.
 
 export type NotifSound = "chime" | "ping" | "bell" | "none";
 export type NotifWhen = "always" | "unfocused" | "off";
-export type NotifEvent = "needsInput" | "done";
 
 export interface NotifSettings {
   /** Show a desktop banner (needs OS Notification permission too). */
@@ -17,10 +18,6 @@ export interface NotifSettings {
   sound: NotifSound;
   /** When to alert at all. */
   when: NotifWhen;
-  /** Alert when a session needs input. */
-  needsInput: boolean;
-  /** Alert when a run completes. */
-  done: boolean;
 }
 
 export const SOUND_OPTIONS: { value: NotifSound; label: string }[] = [
@@ -45,28 +42,75 @@ const DEFAULTS: NotifSettings = {
   desktop: true,
   sound: "chime",
   when: "unfocused",
-  needsInput: true,
-  done: false,
 };
 
-export function getNotifSettings(): NotifSettings {
+// What an earlier or later build may have left in storage. Each field is
+// optional and a bad one falls away on its own, so one stale value never
+// resets the rest.
+const storedSettingsSchema = z.object({
+  desktop: z.boolean().optional().catch(undefined),
+  sound: z.enum(["chime", "ping", "bell", "none"]).optional().catch(undefined),
+  when: z.enum(["always", "unfocused", "off"]).optional().catch(undefined),
+  // The event switches from before they moved to the server.
+  needsInput: z.boolean().optional().catch(undefined),
+  done: z.boolean().optional().catch(undefined),
+});
+type StoredSettings = z.infer<typeof storedSettingsSchema>;
+
+function storedSettings(): StoredSettings | null {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
-    // One-time migration: a user who had explicitly muted the old flag keeps
-    // alerts off; otherwise fall through to defaults.
-    if (localStorage.getItem(LEGACY_KEY) === "off") {
-      return { ...DEFAULTS, when: "off" };
-    }
+    if (!raw) return null;
+    const parsed = storedSettingsSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
   } catch {
-    // Corrupt JSON — fall back to defaults.
+    return null;
+  }
+}
+
+export interface LegacyEventSettings {
+  needsInput?: boolean;
+  done?: boolean;
+}
+
+/**
+ * The event switches this device used to keep before they moved to the
+ * server, when they differ from the defaults. Read once to carry a person's
+ * choice over (lib/notifications.ts), never written.
+ */
+export function legacyEventSettings(): LegacyEventSettings | null {
+  const stored = storedSettings();
+  if (!stored) return null;
+  const out: LegacyEventSettings = {};
+  if (stored.needsInput === false) out.needsInput = false;
+  if (stored.done === true) out.done = true;
+  return Object.keys(out).length ? out : null;
+}
+
+export function getNotifSettings(): NotifSettings {
+  const stored = storedSettings();
+  if (stored)
+    return {
+      desktop: stored.desktop ?? DEFAULTS.desktop,
+      sound: stored.sound ?? DEFAULTS.sound,
+      when: stored.when ?? DEFAULTS.when,
+    };
+  // One-time migration: a user who had explicitly muted the old flag keeps
+  // alerts off; otherwise fall through to defaults.
+  try {
+    if (localStorage.getItem(LEGACY_KEY) === "off")
+      return { ...DEFAULTS, when: "off" };
+  } catch {
+    // Storage unavailable: defaults.
   }
   return { ...DEFAULTS };
 }
 
 export function setNotifSettings(patch: Partial<NotifSettings>): NotifSettings {
   const next = { ...getNotifSettings(), ...patch };
-  localStorage.setItem(KEY, JSON.stringify(next));
+  // Keep keys this version no longer owns (the legacy event switches), so
+  // the one-time carry-over still sees them.
+  localStorage.setItem(KEY, JSON.stringify({ ...storedSettings(), ...next }));
   // Any settings edit is a user gesture — a good moment to arm audio and ask for
   // notification permission if we'll want them.
   armAudio();
@@ -160,25 +204,16 @@ export function playSound(kind: NotifSound = getNotifSettings().sound): void {
   }
 }
 
-function focused(): boolean {
+/** The person is looking at this window right now. */
+export function appFocused(): boolean {
   return document.visibilityState === "visible" && document.hasFocus();
-}
-
-// The gate every alert passes through: is this event enabled, and does the
-// when-rule allow it right now?
-function shouldAlert(event: NotifEvent, s: NotifSettings): boolean {
-  if (s.when === "off") return false;
-  if (event === "needsInput" && !s.needsInput) return false;
-  if (event === "done" && !s.done) return false;
-  if (s.when === "unfocused" && focused()) return false;
-  return true;
 }
 
 // Bring the app forward from a notification click. In the desktop shell the
 // page's own window.focus() does not raise the window on macOS, so the shell's
 // main process is asked to do it (os1-mac preload). Older shells do not expose
 // that bridge, hence the feature check.
-function focusApp(): void {
+export function focusApp(): void {
   try {
     const shell = os1Shell();
     if (shell?.focusWindow instanceof Function) shell.focusWindow();
@@ -192,36 +227,60 @@ function focusApp(): void {
   }
 }
 
-// Fire an alert (sound + optional desktop banner) for a session event, subject to
-// the user's notification settings.
-export function notifyEvent(
-  event: NotifEvent,
-  title: string,
-  body: string,
-  onClick: () => void,
-  // What this banner collapses onto. Alerts about the same session replace one
-  // another; two sessions each keep their own banner, so a click still reaches
-  // the session it names. Without it every "Needs input" shared one tag and
-  // only the newest session was ever reachable.
-  key?: string,
-): void {
+// Banners this page raised, by tag, so a read on another device can take
+// them down again.
+const shown = new Map<string, Notification>();
+
+/**
+ * Present one notification on this device: sound and a desktop banner,
+ * subject to this device's settings. `tag` names what it is about, so a newer
+ * banner about the same thing replaces the older one instead of stacking.
+ */
+export function showAlert(alert: {
+  title: string;
+  body: string;
+  tag: string;
+  onClick: () => void;
+}): void {
   const s = getNotifSettings();
-  if (!shouldAlert(event, s)) return;
+  if (s.when === "off") return;
+  if (s.when === "unfocused" && appFocused()) return;
   playSound(s.sound);
   if (!s.desktop) return;
   try {
     if (!("Notification" in window) || Notification.permission !== "granted")
       return;
-    const n = new Notification(title, {
-      body,
-      tag: `opensession-${event}${key ? `-${key}` : ""}`,
+    const n = new Notification(alert.title, {
+      body: alert.body,
+      tag: alert.tag,
     });
+    shown.get(alert.tag)?.close();
+    shown.set(alert.tag, n);
     n.onclick = () => {
       focusApp();
-      onClick();
+      alert.onClick();
       n.close();
+    };
+    n.onclose = () => {
+      if (shown.get(alert.tag) === n) shown.delete(alert.tag);
     };
   } catch {
     // Constructing a Notification can throw on some platforms — ignore.
   }
+}
+
+/** Take down a banner once what it announced has been seen elsewhere. */
+export function closeAlert(tag: string): void {
+  shown.get(tag)?.close();
+  shown.delete(tag);
+  // Pushed banners belong to the service worker, not this page.
+  try {
+    void navigator.serviceWorker
+      ?.getRegistration()
+      .then((registration) => registration?.getNotifications({ tag }))
+      .then((notifications) => {
+        for (const n of notifications ?? []) n.close();
+      })
+      .catch(() => {});
+  } catch {}
 }

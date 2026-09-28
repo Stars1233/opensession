@@ -433,6 +433,7 @@ const server: import("bun").Server<WSClientData> = hotServe({
       "/settings",
       "/settings/*",
       "/archived",
+      "/inbox",
       "/catchup",
       "/reviews",
       "/reviews/*",

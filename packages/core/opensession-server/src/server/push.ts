@@ -1,61 +1,80 @@
 /**
- * Web Push: phone/desktop notifications that work with the app closed —
- * unlike lib/notify.ts's tab-bound Notification API. Requires the app to be
- * opened over a secure origin; plain HTTP origins have no service workers.
+ * Web Push: phone/desktop notifications that work with the app closed.
+ * Requires the app to be opened over a secure origin; plain HTTP origins have
+ * no service workers.
+ *
+ * This is a delivery channel only. What to notify, and whether an event was
+ * already delivered, is decided by src/server/notifications.ts; call
+ * `notifyUser` there rather than pushing directly.
  *
  * VAPID keys are generated once and persisted; subscriptions are stored per
  * user (a person can have several devices). Dead subscriptions (404/410 from
- * the push service) are pruned on send. Delivery is strictly best-effort —
- * push failures never affect the flow that triggered them.
+ * the push service) are pruned on send. All file access is asynchronous and
+ * serialized, so the gateway thread never blocks on it and two writers cannot
+ * lose each other's update.
  */
-import { mkdirSync, readFileSync, existsSync } from "fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import webpush from "web-push";
-import { writeJsonAtomic } from "./shared/atomic-write";
-import { stateDir } from "./paths";
+import { writeJsonAtomicAsync } from "./shared/atomic-write";
+import { legacyCatalogDirectory } from "./catalog-documents";
 import { configuredIntegration } from "./config";
-
-const PUSH_DIR = stateDir("push");
-const VAPID_PATH = `${PUSH_DIR}/vapid.json`;
-const SUBS_PATH = `${PUSH_DIR}/subscriptions.json`;
-
-mkdirSync(PUSH_DIR, { recursive: true });
 
 interface VapidKeys {
   publicKey: string;
   privateKey: string;
 }
 
-let vapid: VapidKeys | null = null;
-let configured = false;
+let vapid: Promise<VapidKeys> | null = null;
 
-export function getVapidPublicKey(): string {
-  ensureVapid();
-  return vapid!.publicKey;
+async function pushPath(file: string): Promise<string> {
+  return join(await legacyCatalogDirectory("push"), file);
 }
 
-function ensureVapid(): void {
-  if (vapid) return;
+async function readJson(file: string): Promise<unknown> {
   try {
-    if (existsSync(VAPID_PATH)) {
-      vapid = JSON.parse(readFileSync(VAPID_PATH, "utf-8"));
-    }
-  } catch {}
-  if (!vapid?.publicKey || !vapid?.privateKey) {
-    vapid = webpush.generateVAPIDKeys();
-    writeJsonAtomic(VAPID_PATH, vapid);
-    console.log("[push] generated VAPID keypair");
+    return JSON.parse(await readFile(await pushPath(file), "utf-8"));
+  } catch {
+    return null;
   }
-  if (!configured) {
+}
+
+function ensureVapid(): Promise<VapidKeys> {
+  vapid ??= (async () => {
+    const stored = await readJson("vapid.json");
+    let keys: VapidKeys;
+    if (
+      stored &&
+      typeof stored === "object" &&
+      "publicKey" in stored &&
+      "privateKey" in stored &&
+      typeof stored.publicKey === "string" &&
+      typeof stored.privateKey === "string"
+    ) {
+      keys = { publicKey: stored.publicKey, privateKey: stored.privateKey };
+    } else {
+      keys = webpush.generateVAPIDKeys();
+      await writeJsonAtomicAsync(await pushPath("vapid.json"), keys);
+      console.log("[push] generated VAPID keypair");
+    }
     const subject = configuredIntegration("push").vapidSubject;
     webpush.setVapidDetails(
       typeof subject === "string" && subject.trim()
         ? subject.trim()
         : "mailto:admin@example.com",
-      vapid!.publicKey,
-      vapid!.privateKey,
+      keys.publicKey,
+      keys.privateKey,
     );
-    configured = true;
-  }
+    return keys;
+  })().catch((error) => {
+    vapid = null;
+    throw error;
+  });
+  return vapid;
+}
+
+export async function getVapidPublicKey(): Promise<string> {
+  return (await ensureVapid()).publicKey;
 }
 
 export interface PushSubscriptionRecord {
@@ -66,61 +85,98 @@ export interface PushSubscriptionRecord {
   createdAt: string;
 }
 
-interface SubsFile {
-  subscriptions: PushSubscriptionRecord[];
+function isSubscription(value: unknown): value is PushSubscriptionRecord {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "user" in value &&
+    typeof value.user === "string" &&
+    "endpoint" in value &&
+    typeof value.endpoint === "string" &&
+    "keys" in value &&
+    value.keys !== null &&
+    typeof value.keys === "object" &&
+    "p256dh" in value.keys &&
+    typeof value.keys.p256dh === "string" &&
+    "auth" in value.keys &&
+    typeof value.keys.auth === "string"
+  );
 }
 
-function readSubs(): SubsFile {
-  try {
-    if (existsSync(SUBS_PATH)) {
-      const s = JSON.parse(readFileSync(SUBS_PATH, "utf-8"));
-      if (Array.isArray(s.subscriptions)) return s;
-    }
-  } catch {}
-  return { subscriptions: [] };
+async function readSubs(): Promise<PushSubscriptionRecord[]> {
+  const stored = await readJson("subscriptions.json");
+  if (
+    stored &&
+    typeof stored === "object" &&
+    "subscriptions" in stored &&
+    Array.isArray(stored.subscriptions)
+  )
+    return stored.subscriptions.filter(isSubscription);
+  return [];
 }
 
-export function listPushSubscriptions(user?: string): PushSubscriptionRecord[] {
-  const all = readSubs().subscriptions;
-  return user ? all.filter((s) => s.user === user) : all;
+// Read-modify-write under one queue: a subscribe racing a prune must not
+// write back a list that lost the other's change.
+let writes: Promise<unknown> = Promise.resolve();
+function updateSubs(
+  mutate: (subs: PushSubscriptionRecord[]) => PushSubscriptionRecord[] | null,
+): Promise<void> {
+  const next = writes.then(async () => {
+    const subs = mutate(await readSubs());
+    if (subs)
+      await writeJsonAtomicAsync(await pushPath("subscriptions.json"), {
+        subscriptions: subs,
+      });
+  });
+  writes = next.catch(() => {});
+  return next;
 }
 
-export function addPushSubscription(input: {
+export async function listPushSubscriptions(
+  user?: string,
+): Promise<PushSubscriptionRecord[]> {
+  const all = await readSubs();
+  if (!user) return all;
+  const wanted = user.trim().toLowerCase();
+  return all.filter((s) => s.user.trim().toLowerCase() === wanted);
+}
+
+export async function addPushSubscription(input: {
   user: string;
   subscription: {
     endpoint?: string;
     keys?: { p256dh?: string; auth?: string };
   };
   userAgent?: string;
-}): { ok: true } | { error: string } {
+}): Promise<{ ok: true } | { error: string }> {
   const { endpoint, keys } = input.subscription || {};
   if (!input.user?.trim()) return { error: "user required" };
   if (!endpoint || !keys?.p256dh || !keys?.auth)
     return { error: "subscription must carry endpoint + p256dh/auth keys" };
-  const store = readSubs();
-  store.subscriptions = store.subscriptions.filter(
-    (s) => s.endpoint !== endpoint,
-  );
-  store.subscriptions.push({
+  const record: PushSubscriptionRecord = {
     user: input.user.trim(),
     endpoint,
     keys: { p256dh: keys.p256dh, auth: keys.auth },
     userAgent: input.userAgent?.slice(0, 200),
     createdAt: new Date().toISOString(),
-  });
-  writeJsonAtomic(SUBS_PATH, store);
+  };
+  await updateSubs((subs) => [
+    ...subs.filter((s) => s.endpoint !== endpoint),
+    record,
+  ]);
   return { ok: true };
 }
 
-export function removePushSubscription(endpoint: string): boolean {
-  const store = readSubs();
-  const before = store.subscriptions.length;
-  store.subscriptions = store.subscriptions.filter(
-    (s) => s.endpoint !== endpoint,
-  );
-  if (store.subscriptions.length === before) return false;
-  writeJsonAtomic(SUBS_PATH, store);
-  return true;
+export async function removePushSubscription(
+  endpoint: string,
+): Promise<boolean> {
+  let removed = false;
+  await updateSubs((subs) => {
+    const next = subs.filter((s) => s.endpoint !== endpoint);
+    removed = next.length !== subs.length;
+    return removed ? next : null;
+  });
+  return removed;
 }
 
 export interface PushPayload {
@@ -129,52 +185,22 @@ export interface PushPayload {
   /** In-app path to open on tap, e.g. /session/<id>. */
   url?: string;
   tag?: string;
-}
-
-// Dedupe ledger: pushes that must survive a restart without refiring (a
-// service restart resumes ask-blocked runs, which re-ask the same question —
-// the person already got that buzz). Keyed by caller-chosen fingerprint.
-const SENT_DEDUPE_PATH = `${PUSH_DIR}/sent-dedupe.json`;
-const DEDUPE_TTL_MS = 48 * 60 * 60 * 1000;
-
-function readSentDedupe(): Record<string, string> {
-  try {
-    if (existsSync(SENT_DEDUPE_PATH)) {
-      const s = JSON.parse(readFileSync(SENT_DEDUPE_PATH, "utf-8"));
-      if (s && typeof s === "object" && !Array.isArray(s)) return s;
-    }
-  } catch {}
-  return {};
+  /** Notification thread id, so a tap can mark the right row read. */
+  id?: string;
 }
 
 /**
- * Send a push to every device `user` has registered (matched by exact display
- * name — the same value UserPicker stores). Fire-and-forget; prunes dead subs.
- *
- * `dedupeKey` (optional) suppresses the send when the same key was already
- * pushed within the last 48h — the ledger is on disk, so a re-ask of the same
- * question after a service restart doesn't buzz the same person twice.
+ * Send a push to every device `user` has registered (matched by display name,
+ * case-insensitively). Prunes dead subscriptions. Use notifyUser instead of
+ * calling this directly: it records the event and applies alert settings.
  */
 export async function sendPushToUser(
   user: string,
   payload: PushPayload,
-  opts?: { dedupeKey?: string },
 ): Promise<void> {
-  if (opts?.dedupeKey) {
-    const sent = readSentDedupe();
-    const now = Date.now();
-    const prev = sent[opts.dedupeKey] ? Date.parse(sent[opts.dedupeKey]) : NaN;
-    if (Number.isFinite(prev) && now - prev < DEDUPE_TTL_MS) return;
-    for (const [k, v] of Object.entries(sent)) {
-      const t = Date.parse(v);
-      if (!Number.isFinite(t) || now - t >= DEDUPE_TTL_MS) delete sent[k];
-    }
-    sent[opts.dedupeKey] = new Date(now).toISOString();
-    writeJsonAtomic(SENT_DEDUPE_PATH, sent);
-  }
-  const subs = listPushSubscriptions(user);
+  const subs = await listPushSubscriptions(user);
   if (subs.length === 0) return;
-  ensureVapid();
+  await ensureVapid();
   const body = JSON.stringify(payload);
   await Promise.all(
     subs.map(async (s) => {
@@ -184,13 +210,19 @@ export async function sendPushToUser(
           body,
           { TTL: 60 * 60 },
         );
-      } catch (e: any) {
-        const code = e?.statusCode;
+      } catch (e: unknown) {
+        const code =
+          e && typeof e === "object" && "statusCode" in e
+            ? e.statusCode
+            : undefined;
         if (code === 404 || code === 410) {
-          removePushSubscription(s.endpoint);
+          await removePushSubscription(s.endpoint);
           console.log(`[push] pruned dead subscription for ${s.user}`);
         } else {
-          console.error(`[push] send failed for ${s.user}:`, e?.message || e);
+          console.error(
+            `[push] send failed for ${s.user}:`,
+            e instanceof Error ? e.message : e,
+          );
         }
       }
     }),

@@ -33,6 +33,8 @@ export interface OS1ShellBridge {
   desktop?: boolean;
   materialBackdrop?: boolean;
   focusWindow?: () => void;
+  /** Dock badge count (os1-mac preload). */
+  setBadge?: (count: number) => void;
   organizations?: unknown;
   updates?: unknown;
   voiceAudio?: NativeVoiceAudioBridge;

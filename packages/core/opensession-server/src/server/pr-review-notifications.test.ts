@@ -38,8 +38,8 @@ function harness(initial: OpenPrEntry[] = []) {
     },
     getPrs: () => prs,
     resolveUser: (key) => (key === "alex" ? "Alex" : null),
-    sendPush: async (user, payload) => {
-      pushes.push({ user, title: payload.title, url: payload.url });
+    notify: async (user, event) => {
+      pushes.push({ user, title: event.reason, url: event.url });
     },
   });
   return {
@@ -68,7 +68,7 @@ describe("GitHub review request push notifications", () => {
     expect(h.pushes).toEqual([
       {
         user: "Alex",
-        title: "GitHub review requested",
+        title: "Review requested on GitHub",
         url: "/pr/tella-fusion/review-2",
       },
     ]);
@@ -111,7 +111,7 @@ describe("GitHub review request push notifications", () => {
       },
       getPrs: () => [],
       resolveUser: () => null,
-      sendPush: async () => {},
+      notify: async () => {},
     });
     const first = notifier.pollOnce();
     const second = notifier.pollOnce();
@@ -129,7 +129,7 @@ describe("GitHub review request push notifications", () => {
       getPrs: () => prs,
       resolveUser: () => "Alex",
       shouldSuppress: (_pr, reviewer) => reviewer === "alex",
-      sendPush: async (user) => {
+      notify: async (user) => {
         pushes.push(user);
       },
     });

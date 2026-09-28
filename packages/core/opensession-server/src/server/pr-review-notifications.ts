@@ -1,4 +1,4 @@
-import { sendPushToUser, type PushPayload } from "./push";
+import { notifyUser, type NotificationEvent } from "./notifications";
 import { getOpenPrs, refreshPrCache, type OpenPrEntry } from "./sessions";
 import { personKeyToDisplayName } from "./shared/user-mappings";
 import { configuredRepos } from "./config";
@@ -37,7 +37,7 @@ interface PrReviewNotificationDeps {
   getPrs: () => OpenPrEntry[];
   resolveUser: (personKey: string) => string | null;
   shouldSuppress?: (pr: OpenPrEntry, reviewer: string) => boolean;
-  sendPush: (user: string, payload: PushPayload) => Promise<void>;
+  notify: (user: string, event: NotificationEvent) => Promise<unknown>;
 }
 
 const defaultDeps: PrReviewNotificationDeps = {
@@ -45,7 +45,7 @@ const defaultDeps: PrReviewNotificationDeps = {
   getPrs: getOpenPrs,
   resolveUser: personKeyToDisplayName,
   shouldSuppress: consumeInternalMirror,
-  sendPush: sendPushToUser,
+  notify: notifyUser,
 };
 
 function assignmentKey(pr: OpenPrEntry, reviewer: string): string {
@@ -82,7 +82,7 @@ export function createPrReviewNotifier(
         previousByRepo.set(repo, assignments);
       }
 
-      const sends: Promise<void>[] = [];
+      const sends: Promise<unknown>[] = [];
       for (const { pr, reviewer } of assignments) {
         const old = previous.get(pr.repo);
         if (!old || old.has(assignmentKey(pr, reviewer))) continue;
@@ -90,9 +90,16 @@ export function createPrReviewNotifier(
         const user = deps.resolveUser(reviewer);
         if (!user) continue;
         sends.push(
-          deps.sendPush(user, {
-            title: "GitHub review requested",
-            body: `${pr.title} by ${pr.author} (#${pr.number})`.slice(0, 180),
+          deps.notify(user, {
+            kind: "review_requested",
+            subject: {
+              type: "pr",
+              id: `${pr.repo}#${pr.number}`,
+              title: pr.title,
+              context: `${pr.repo} #${pr.number}`,
+            },
+            reason: "Review requested on GitHub",
+            body: `Opened by ${pr.author}`,
             url: `/pr/${encodeURIComponent(pr.repo)}/${encodeURIComponent(pr.branch)}`,
           }),
         );

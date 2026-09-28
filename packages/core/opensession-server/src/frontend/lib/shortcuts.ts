@@ -42,6 +42,7 @@ export type ShortcutId =
   | "desk"
   | "history-back"
   | "history-forward"
+  | "notifications"
   | "sidebar-toggle"
   | "sidebar-next"
   | "sidebar-prev"
@@ -97,6 +98,13 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
     description: "Search sessions and jump anywhere",
     group: "Navigation",
     defaults: ["mod+k"],
+  },
+  {
+    id: "notifications",
+    title: "Notifications",
+    description: "Open your notifications",
+    group: "Navigation",
+    defaults: ["mod+shift+u"],
   },
   {
     id: "desk",

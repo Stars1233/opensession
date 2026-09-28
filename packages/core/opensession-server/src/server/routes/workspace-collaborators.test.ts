@@ -13,12 +13,10 @@ mock.module("../people", () => ({
     { name: "Kent", fullName: "Kent Example" },
   ],
 }));
-mock.module("../push", () => ({
-  sendPushToUser: async (
-    user: string,
-    payload: { title: string; url: string },
-  ) => {
-    pushes.push({ user, payload });
+mock.module("../notifications", () => ({
+  notifyUser: async (user: string, event: { reason: string; url: string }) => {
+    pushes.push({ user, payload: { title: event.reason, url: event.url } });
+    return null;
   },
 }));
 mock.module("../mentions", () => ({

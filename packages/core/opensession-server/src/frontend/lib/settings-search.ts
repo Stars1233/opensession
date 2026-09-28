@@ -85,6 +85,11 @@ export const SETTINGS_KEYWORDS = {
     "alerts",
     "needs input",
     "run complete",
+    "finished runs",
+    "reviews",
+    "mentions",
+    "reminders",
+    "inbox",
   ],
   shortcuts: [
     "keyboard",

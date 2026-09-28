@@ -23,6 +23,7 @@ import { handleSessionContextRoutes } from "./session-context";
 import { handleSessionVoiceRoutes } from "./session-voice";
 import { handleEffectiveConfigRoutes } from "./effective-config";
 import { handleMentionsRoutes } from "./mentions";
+import { handleNotificationsRoutes } from "./notifications";
 import { handleMentionPaletteRoutes } from "./mention-palette";
 import { handleSandboxRoutes } from "./sandbox";
 import { handleSandboxesRoutes } from "./sandboxes";
@@ -93,6 +94,7 @@ export const routeHandlers: RouteHandler[] = [
   handleSessionVoiceRoutes,
   handleEffectiveConfigRoutes,
   handleMentionsRoutes,
+  handleNotificationsRoutes,
   handleMentionPaletteRoutes,
   handleSandboxesRoutes,
   handleSandboxRoutes,

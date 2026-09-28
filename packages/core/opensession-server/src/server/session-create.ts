@@ -1709,13 +1709,7 @@ export async function openCreatedSession(
       // any other message: the session exists now, so the badge has a row
       // to land on. Scanned from the raw prompt, never the assembled one,
       // so a repo note or a handoff cannot invent a mention.
-      void notifyMentions(
-        spec.titlePrompt,
-        spec.user || "",
-        bksId,
-        "prompt",
-        spec.title || "a session",
-      );
+      void notifyMentions(spec.titlePrompt, spec.user || "", bksId, "prompt");
       // Projection is latency-sensitive; the agent turn is capacity-sensitive.
       // Persist and announce every accepted session first, then wait for one of
       // the bounded opening-run slots. Keeping the gate here prevents eight long

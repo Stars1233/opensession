@@ -1098,7 +1098,18 @@ export type WSServerMessage =
   | { type: "mention"; user: string; mention: MentionRecord }
   // The mention was seen: one session when `sessionId` is set, otherwise all
   // of them. Keeps a person's other devices in step.
-  | { type: "mentions_cleared"; user: string; sessionId?: string };
+  | { type: "mentions_cleared"; user: string; sessionId?: string }
+  // A new inbox notification for `user` (lib/notifications.ts). Sent once,
+  // when the server first records the event; `alert` says whether the
+  // person's settings want a banner and sound for it.
+  | {
+      type: "notification";
+      user: string;
+      notification: unknown;
+      alert: boolean;
+    }
+  // `user`'s inbox changed on another device (read, done, settings).
+  | { type: "notifications_changed"; user: string };
 
 // ── Analytics (sidebar → Analytics; GET /api/analytics) ──
 

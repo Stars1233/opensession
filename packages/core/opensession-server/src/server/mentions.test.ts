@@ -206,7 +206,6 @@ describe("mentions", () => {
         sender,
         "os-notify",
         "prompt",
-        "a session",
       ),
     ).toEqual([person]);
     const stored = (await listMentions(person)).find(
@@ -215,13 +214,7 @@ describe("mentions", () => {
     expect(stored?.by).toBe(sender);
     expect(stored?.source).toBe("prompt");
     expect(
-      await notifyMentions(
-        "nobody tagged",
-        sender,
-        "os-quiet",
-        "note",
-        "a session note",
-      ),
+      await notifyMentions("nobody tagged", sender, "os-quiet", "note"),
     ).toEqual([]);
   });
 

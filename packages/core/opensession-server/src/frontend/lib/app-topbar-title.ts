@@ -15,31 +15,33 @@ export function appTopbarTitle(
 ): string {
   return route.view === "archived"
     ? "Archived"
-    : route.view === "tasks"
-      ? "Tasks"
-      : route.view === "feed"
-        ? "Feed"
-        : route.view === "prs"
-          ? "Pull requests"
-          : route.view === "issues"
-            ? "Issues"
-            : route.view === "new"
-              ? "New session"
-              : // A PR opened by number is on its way to a workspace. It brings no
-                // bar of its own while it resolves, so name it here instead of
-                // leaving the window with nothing to drag by.
-                route.view === "pr" && route.number !== undefined
-                ? `${repoLabel(route.repo)} #${route.number}`
-                : route.view === "workspace"
-                  ? routeWorkspace
-                    ? [
-                        routeWorkspace.repo
-                          ? repoLabel(routeWorkspace.repo)
-                          : null,
-                        routeWorkspace.name,
-                      ]
-                        .filter(Boolean)
-                        .join(" › ")
-                    : "Workspace"
-                  : "";
+    : route.view === "inbox"
+      ? "Notifications"
+      : route.view === "tasks"
+        ? "Tasks"
+        : route.view === "feed"
+          ? "Feed"
+          : route.view === "prs"
+            ? "Pull requests"
+            : route.view === "issues"
+              ? "Issues"
+              : route.view === "new"
+                ? "New session"
+                : // A PR opened by number is on its way to a workspace. It brings no
+                  // bar of its own while it resolves, so name it here instead of
+                  // leaving the window with nothing to drag by.
+                  route.view === "pr" && route.number !== undefined
+                  ? `${repoLabel(route.repo)} #${route.number}`
+                  : route.view === "workspace"
+                    ? routeWorkspace
+                      ? [
+                          routeWorkspace.repo
+                            ? repoLabel(routeWorkspace.repo)
+                            : null,
+                          routeWorkspace.name,
+                        ]
+                          .filter(Boolean)
+                          .join(" › ")
+                      : "Workspace"
+                    : "";
 }

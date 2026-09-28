@@ -89,7 +89,6 @@ import { MAX_PROMPT_IMAGES } from "@tellahq/opensession-protocol/session";
 import { SessionKernelActorError } from "../session-kernel/actor-client";
 import { notifyMentions } from "../mentions";
 import { reviewTeamFor } from "../people";
-import { sendPushToUser } from "../push";
 import { unarchiveForHumanTurn } from "../session-unarchive";
 import {
   sessionChangesSince,
@@ -1425,13 +1424,7 @@ export async function handleSessionsRoutes(
         await unarchiveForHumanTurn(session);
       }
       if (session && !result.duplicate) {
-        await notifyMentions(
-          content,
-          String(user || ""),
-          sessionId,
-          "prompt",
-          session.title || "a session",
-        );
+        await notifyMentions(content, String(user || ""), sessionId, "prompt");
       }
       const payload = {
         ...result,
@@ -1856,8 +1849,8 @@ export async function handleSessionsRoutes(
   // Set (or clear) a session's review request — the info panel's Reviewer
   // picker. `reviewer` is a teammate display name or configured review-team
   // GitHub spec; null/empty clears the
-  // request. Setting one pushes a "needs your review" notification to the
-  // reviewer's registered devices (mirrors the needs-input ask push).
+  // request. Setting one sends the reviewer a "needs your review"
+  // notification (src/server/notifications.ts).
   const reviewMatch = path.match(/^\/api\/sessions\/(.+)\/review$/);
   if (reviewMatch && req.method === "PUT") {
     const sessionId = decodeURIComponent(reviewMatch[1]);
@@ -1901,15 +1894,14 @@ export async function handleSessionsRoutes(
       ) {
         void (async () => {
           try {
-            const { sendPushToUser } = await import("../../server/push");
-            await sendPushToUser(existing.by, {
-              title: "Review complete",
-              body: `${by || "Someone"} reviewed ${session.title || sessionId}`.slice(
-                0,
-                180,
-              ),
-              url: `/session/${encodeURIComponent(sessionId)}`,
-              tag: `review-${sessionId}`,
+            const { notifyUser, sessionSubject, sessionUrl } =
+              await import("../../server/notifications");
+            await notifyUser(existing.by, {
+              kind: "review_done",
+              subject: sessionSubject(sessionId, session),
+              reason: `${by || "Someone"} reviewed it`,
+              actor: by || undefined,
+              url: sessionUrl(sessionId),
             });
           } catch {}
         })();
@@ -2024,17 +2016,16 @@ export async function handleSessionsRoutes(
       // Best-effort phone buzz — never let a push hiccup fail the request.
       void (async () => {
         try {
-          const { sendPushToUser } = await import("../../server/push");
+          const { notifyUser, sessionSubject, sessionUrl } =
+            await import("../../server/notifications");
           await Promise.all(
             (reviewTeam?.members || [reviewer]).map((recipient) =>
-              sendPushToUser(recipient, {
-                title: "Needs your review",
-                body: `${by || "Someone"} asked you to review ${session.title || sessionId}`.slice(
-                  0,
-                  180,
-                ),
-                url: `/session/${encodeURIComponent(sessionId)}`,
-                tag: `review-${sessionId}`,
+              notifyUser(recipient, {
+                kind: "review_requested",
+                subject: sessionSubject(sessionId, session),
+                reason: `${by || "Someone"} asked for your review`,
+                actor: by || undefined,
+                url: sessionUrl(sessionId),
               }),
             ),
           );

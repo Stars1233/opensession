@@ -14,6 +14,7 @@ import { cn } from "../ui/cn";
 import { Tooltip } from "../ui/tooltip";
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
+import { NotificationBell } from "./notifications/NotificationBell";
 import { ServerHealthMonitor } from "./ServerHealthMonitor";
 
 interface AppSidebarProps {
@@ -207,6 +208,10 @@ export function AppSidebar({
               <ServerHealthMonitor />
             </div>
           )}
+          {/* Beside the back/forward/search cluster rather than inside it:
+              TitleBar also renders a floating copy for a collapsed sidebar,
+              and one bell is enough. */}
+          <NotificationBell />
           <TitleBar onSearch={() => commandMenuRef.current?.open()} />
         </div>
         <Sidebar
