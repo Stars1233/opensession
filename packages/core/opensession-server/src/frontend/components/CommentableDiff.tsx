@@ -72,6 +72,7 @@ import {
   DIFF_SURFACE_STYLE,
   diffAppearanceOptions,
 } from "../lib/commentable-diff-appearance";
+import { ensureDiffLanguages } from "../lib/diff-languages";
 
 /* The +/− counts. DiffPanel's summary strip carries the same pair, and the two
    must read alike. */
@@ -225,6 +226,7 @@ function countViewed(
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i;
 
 export function CommentableDiff({ patch, options }: Props) {
+  ensureDiffLanguages();
   const {
     defaultExpandedFiles = 0,
     expansionKey,
