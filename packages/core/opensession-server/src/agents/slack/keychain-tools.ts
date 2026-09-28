@@ -32,6 +32,7 @@ import {
   macKeychainRequests,
 } from "../../server/mac-keychain-requests";
 import {
+  ensureKeychainLoaded,
   listCredentials,
   listGrants,
   listKeychainAsks,
@@ -268,6 +269,8 @@ export function createKeychainMcpServer(ctx: KeychainToolContext) {
         if (refusal) return text(refusal);
         const owner = resolveTeammate(ctx.user)!.name;
         const login = githubLoginFor(ctx.user)!;
+        // Load the store off-thread; the spec check below reads it.
+        await ensureKeychainLoaded();
         let waiting;
         try {
           waiting = requestCredentialRegistration(

@@ -59,7 +59,8 @@
 
 import { stateDir } from "./paths";
 import { existsSync, readFileSync, chmodSync } from "node:fs";
-import { writeJsonAtomic } from "./shared/atomic-write";
+import { readFile } from "node:fs/promises";
+import { writeJsonAtomic, writeJsonAtomicAsync } from "./shared/atomic-write";
 import { audit } from "./audit";
 import { resolveTeammate } from "./shared/user-mappings";
 import {
@@ -160,18 +161,64 @@ const keychainAsks: Map<string, KeychainAskRecord> = (g.__keychainAsks ??=
 /** The path we last loaded from — a change (only tests do this) reloads. */
 let loadedFrom: string | null = null;
 
-function persist(): void {
-  const path = storePath();
-  writeJsonAtomic(path, {
+/** Bumped on every in-memory change that is persisted, so an async write
+ *  that raced a newer one knows to write again. */
+let revision = 0;
+
+function snapshot(): Stored {
+  return {
     credentials: [...credentials.values()],
     grants: [...grants.values()],
     asks: [...keychainAsks.values()],
-  } satisfies Stored);
+  };
+}
+
+function persist(): void {
+  revision++;
+  const path = storePath();
+  writeJsonAtomic(path, snapshot());
   try {
     chmodSync(path, 0o600);
   } catch {
     // best-effort — the file holds secrets, but a chmod failure must not
     // lose the write (the box is single-tenant either way)
+  }
+}
+
+let asyncWrites: Promise<void> = Promise.resolve();
+
+/**
+ * Persist without blocking the calling thread, for request handlers on the
+ * gateway. Writes are serialized, and each one re-writes if the store changed
+ * while it was in flight (including through a synchronous persist), so the
+ * file always ends on the latest state. The temp file is created 0600, so
+ * the secret-bearing file is never readable by others, even briefly.
+ */
+function persistAsync(): Promise<void> {
+  revision++;
+  const write = asyncWrites.then(async () => {
+    let written: number;
+    do {
+      written = revision;
+      await writeJsonAtomicAsync(storePath(), snapshot(), true, 0o600);
+    } while (written !== revision);
+  });
+  asyncWrites = write.catch(() => {});
+  return write;
+}
+
+function ingest(data: Stored): void {
+  const cutoff = Date.now() - TERMINAL_RETENTION_MS;
+  for (const c of data.credentials || []) credentials.set(c.id, c);
+  for (const gr of data.grants || []) {
+    if (gr.status !== "active" && new Date(gr.createdAt).getTime() < cutoff)
+      continue;
+    grants.set(gr.id, gr);
+  }
+  for (const a of data.asks || []) {
+    if (a.status !== "pending" && new Date(a.createdAt).getTime() < cutoff)
+      continue;
+    keychainAsks.set(a.id, a);
   }
 }
 
@@ -181,19 +228,31 @@ function load(): void {
   loadedFrom = path;
   if (!existsSync(path)) return;
   try {
-    const data: Stored = JSON.parse(readFileSync(path, "utf-8"));
-    const cutoff = Date.now() - TERMINAL_RETENTION_MS;
-    for (const c of data.credentials || []) credentials.set(c.id, c);
-    for (const gr of data.grants || []) {
-      if (gr.status !== "active" && new Date(gr.createdAt).getTime() < cutoff)
-        continue;
-      grants.set(gr.id, gr);
-    }
-    for (const a of data.asks || []) {
-      if (a.status !== "pending" && new Date(a.createdAt).getTime() < cutoff)
-        continue;
-      keychainAsks.set(a.id, a);
-    }
+    ingest(JSON.parse(readFileSync(path, "utf-8")));
+  } catch (e) {
+    console.error("[keychain] failed to load store:", e);
+  }
+}
+
+/** Async counterpart of load(), for request handlers on the gateway. After
+ *  it resolves, the synchronous load() inside the store's functions is a
+ *  no-op. */
+export async function ensureKeychainLoaded(): Promise<void> {
+  const path = storePath();
+  if (loadedFrom === path) return;
+  let raw: string | null = null;
+  try {
+    raw = await readFile(path, "utf-8");
+  } catch (e: any) {
+    if (e?.code !== "ENOENT")
+      console.error("[keychain] failed to read store:", e);
+  }
+  // Another caller may have loaded while this one awaited.
+  if (loadedFrom === path) return;
+  loadedFrom = path;
+  if (raw === null) return;
+  try {
+    ingest(JSON.parse(raw));
   } catch (e) {
     console.error("[keychain] failed to load store:", e);
   }
@@ -328,9 +387,9 @@ export function normalizeCredentialSpec(
   };
 }
 
-export function addCredential(
-  input: AddCredentialInput,
-): KeychainCredentialMeta {
+/** Validate and insert, without persisting. Synchronous from the check to
+ *  the insert, so two concurrent adds cannot both take one service slug. */
+function insertCredential(input: AddCredentialInput): KeychainCredential {
   const spec = normalizeCredentialSpec(input);
   if (!input.secret.trim()) throw new Error("secret is empty");
   const now = new Date().toISOString();
@@ -343,7 +402,10 @@ export function addCredential(
     updatedAt: now,
   };
   credentials.set(cred.id, cred);
-  persist();
+  return cred;
+}
+
+function auditAdded(cred: KeychainCredential): KeychainCredentialMeta {
   audit({
     kind: "keychain_credential_added",
     credential_id: cred.id,
@@ -352,6 +414,34 @@ export function addCredential(
     host: cred.host,
   });
   return meta(cred);
+}
+
+export function addCredential(
+  input: AddCredentialInput,
+): KeychainCredentialMeta {
+  const cred = insertCredential(input);
+  persist();
+  return auditAdded(cred);
+}
+
+/** addCredential for request handlers: loads and persists asynchronously so
+ *  the gateway thread never blocks on the store. If the write fails, the
+ *  credential is taken back out of memory and the error propagates. */
+export async function addCredentialAsync(
+  input: AddCredentialInput,
+): Promise<KeychainCredentialMeta> {
+  await ensureKeychainLoaded();
+  const cred = insertCredential(input);
+  try {
+    await persistAsync();
+  } catch (error) {
+    credentials.delete(cred.id);
+    await persistAsync().catch(() => {});
+    // A filesystem error names the store path, never the secret.
+    console.error("[keychain] failed to save credential:", error);
+    throw new Error("couldn't write the keychain store");
+  }
+  return auditAdded(cred);
 }
 
 export function deleteCredential(id: string, by: string): boolean {

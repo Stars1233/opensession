@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -27,6 +33,20 @@ mock.module("./audit", () => ({
   ...realAudit,
   audit: (event: Record<string, unknown>) => {
     audits.push(event);
+  },
+}));
+// Holds async keychain writes open while a test needs a save in flight.
+let writeGate: Promise<void> | null = null;
+const realWrite = await import("./shared/atomic-write");
+// Captured before mocking: mock.module swaps the namespace in place.
+const writeJsonAtomicAsync = realWrite.writeJsonAtomicAsync;
+mock.module("./shared/atomic-write", () => ({
+  ...realWrite,
+  writeJsonAtomicAsync: async (
+    ...args: Parameters<typeof writeJsonAtomicAsync>
+  ) => {
+    await writeGate;
+    return writeJsonAtomicAsync(...args);
   },
 }));
 // A two-person roster: Alex drives sessions, Blair is another teammate.
@@ -77,6 +97,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  writeGate = null;
   Object.assign(console, originalConsole);
   resetKeychain();
 });
@@ -139,7 +160,7 @@ describe("registration requests", () => {
     expect(request.host).toBe("api.example.test");
     expect(request.owner).toBe("Alex");
 
-    const meta = reg.submitCredentialRegistration(
+    const meta = await reg.submitCredentialRegistration(
       "s-ok",
       request.id,
       "Alex-GH",
@@ -165,16 +186,16 @@ describe("registration requests", () => {
     const waiting = open("s-auth");
     const { request } = reg.pendingCredentialRegistration("s-auth")!;
     for (const login of ["blair-gh", ""]) {
-      expect(() =>
+      await expect(
         reg.submitCredentialRegistration("s-auth", request.id, login, SECRET),
-      ).toThrow(/Only Alex/);
+      ).rejects.toThrow(/Only Alex/);
       expect(() =>
         reg.declineCredentialRegistration("s-auth", request.id, login),
       ).toThrow(/Only Alex/);
     }
-    expect(() =>
+    await expect(
       reg.submitCredentialRegistration("s-auth", request.id, "alex-gh", "  "),
-    ).toThrow("Paste the secret first");
+    ).rejects.toThrow("Paste the secret first");
     expect(kc.listCredentials()).toEqual([]);
     reg.declineCredentialRegistration("s-auth", request.id, "alex-gh");
     expect(await waiting).toEqual({ status: "declined" });
@@ -200,9 +221,9 @@ describe("registration requests", () => {
       host: "api.example.test",
       secret: "other",
     });
-    expect(() =>
+    await expect(
       reg.submitCredentialRegistration("s-race", request.id, "alex-gh", SECRET),
-    ).toThrow(/already exists/);
+    ).rejects.toThrow(/already exists/);
     expect(reg.pendingCredentialRegistration("s-race")?.request.id).toBe(
       request.id,
     );
@@ -261,6 +282,66 @@ describe("registration requests", () => {
     controller.abort();
     expect(await aborted).toEqual({ status: "declined" });
     expect(reg.pendingCredentialRegistration("s-abort")).toBeNull();
+  });
+});
+
+describe("saving off the gateway thread", () => {
+  test("a second answer during the save is refused, and expiry waits for it", async () => {
+    let release!: () => void;
+    writeGate = new Promise((resolve) => (release = resolve));
+    const waiting = open("s-inflight", "acme-inflight", undefined, 5);
+    const { request } = reg.pendingCredentialRegistration("s-inflight")!;
+    const first = reg.submitCredentialRegistration(
+      "s-inflight",
+      request.id,
+      "alex-gh",
+      SECRET,
+    );
+    await expect(
+      reg.submitCredentialRegistration(
+        "s-inflight",
+        request.id,
+        "alex-gh",
+        SECRET,
+      ),
+    ).rejects.toThrow(/no longer open/);
+    // The TTL passes while the write is held.
+    await Bun.sleep(30);
+    expect(reg.pendingCredentialRegistration("s-inflight")).not.toBeNull();
+    writeGate = null;
+    release();
+    const meta = await first;
+    const result = await waiting;
+    expect(result.status).toBe("registered");
+    expect(kc.findCredential("acme-inflight")?.id).toBe(meta.id);
+    expect(
+      JSON.parse(readFileSync(STORE, "utf8")).credentials.map(
+        (c: { service: string }) => c.service,
+      ),
+    ).toEqual(["acme-inflight"]);
+    expectNoSecretLeaked(result);
+  });
+
+  test("async and sync writes interleaved end on the latest state", async () => {
+    const pendingWrite = kc.addCredentialAsync({
+      owner: "Alex",
+      service: "acme-a",
+      host: "api.example.test",
+      secret: "a",
+    });
+    kc.addCredential({
+      owner: "Alex",
+      service: "acme-b",
+      host: "api.example.test",
+      secret: "b",
+    });
+    await pendingWrite;
+    expect(
+      JSON.parse(readFileSync(STORE, "utf8"))
+        .credentials.map((c: { service: string }) => c.service)
+        .sort(),
+    ).toEqual(["acme-a", "acme-b"]);
+    expect(statSync(STORE).mode & 0o777).toBe(0o600);
   });
 });
 
@@ -362,7 +443,7 @@ describe("register_credential tool", () => {
     }
     const { request } = open!;
     expect(request.allowedMethods).toEqual(["GET"]);
-    reg.submitCredentialRegistration(
+    await reg.submitCredentialRegistration(
       "s-tool-alex",
       request.id,
       "alex-gh",

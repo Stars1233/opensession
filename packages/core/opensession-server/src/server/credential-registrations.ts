@@ -21,7 +21,7 @@
 import { broadcastToSession } from "./ws-hub";
 import { audit } from "./audit";
 import {
-  addCredential,
+  addCredentialAsync,
   normalizeCredentialSpec,
   type CredentialSpec,
   type KeychainCredentialMeta,
@@ -47,6 +47,9 @@ type Pending = {
   login: string;
   resolve: (result: CredentialRegistrationResult) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** Set while a submitted secret is being saved, so a second answer from
+   *  another tab cannot race it. */
+  answering: boolean;
 };
 
 /** Long enough to find a key in a provider dashboard. */
@@ -142,15 +145,17 @@ export function requestCredentialRegistration(
   return new Promise((resolve) => {
     const entry: Pending = {
       request,
+      answering: false,
       login: input.login.toLowerCase(),
       resolve: (result) => {
         signal?.removeEventListener("abort", onAbort);
         resolve(result);
       },
-      timer: setTimeout(
-        () => settle(sessionId, entry, { status: "expired" }),
-        ttlMs,
-      ),
+      timer: setTimeout(function expire() {
+        // A save in flight wins over expiry; look again once it lands.
+        if (entry.answering) entry.timer = setTimeout(expire, 1_000);
+        else settle(sessionId, entry, { status: "expired" });
+      }, ttlMs),
     };
     const onAbort = () => settle(sessionId, entry, { status: "declined" });
     pending.set(sessionId, entry);
@@ -181,7 +186,7 @@ function answerable(
   login: string,
 ): Pending {
   const entry = pending.get(sessionId);
-  if (!entry || entry.request.id !== requestId)
+  if (!entry || entry.request.id !== requestId || entry.answering)
     throw new CredentialRegistrationError(
       "This request is no longer open",
       409,
@@ -195,17 +200,18 @@ function answerable(
 }
 
 /**
- * The driver's answer. Registers through addCredential with them as owner and
- * hands the waiting tool call metadata only. On a validation error (empty
- * secret, a slug taken meanwhile) the request stays open for another try or a
- * decline.
+ * The driver's answer. Registers through addCredentialAsync (the request
+ * handler runs on the gateway thread, so the store is written without
+ * blocking it) with them as owner, and hands the waiting tool call metadata
+ * only. On a validation or write error (empty secret, a slug taken
+ * meanwhile) the request stays open for another try or a decline.
  */
-export function submitCredentialRegistration(
+export async function submitCredentialRegistration(
   sessionId: string,
   requestId: string,
   login: string,
   secret: unknown,
-): KeychainCredentialMeta {
+): Promise<KeychainCredentialMeta> {
   const entry = answerable(sessionId, requestId, login);
   if (typeof secret !== "string" || !secret.trim())
     throw new CredentialRegistrationError("Paste the secret first");
@@ -219,14 +225,18 @@ export function submitCredentialRegistration(
     ...spec
   } = entry.request;
   let credential: KeychainCredentialMeta;
+  entry.answering = true;
   try {
-    credential = addCredential({ ...spec, owner, secret });
+    credential = await addCredentialAsync({ ...spec, owner, secret });
   } catch (error) {
-    // addCredential's messages describe the spec, never the secret.
+    // addCredentialAsync's messages describe the spec or the store, never
+    // the secret.
     throw new CredentialRegistrationError(
       error instanceof Error ? error.message : "Couldn't save the credential",
       409,
     );
+  } finally {
+    entry.answering = false;
   }
   settle(sessionId, entry, { status: "registered", credential });
   return credential;

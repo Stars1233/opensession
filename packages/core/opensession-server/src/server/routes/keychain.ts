@@ -22,7 +22,7 @@
 import type { RouteContext } from "./context";
 import { requestUser } from "./context";
 import {
-  addCredential,
+  addCredentialAsync,
   brokerHeaders,
   consumeGrantForBroker,
   deleteCredential,
@@ -190,7 +190,7 @@ export async function handleKeychainRoutes(
     }
     try {
       return Response.json({
-        credential: addCredential({
+        credential: await addCredentialAsync({
           owner,
           service: body.service,
           host: String(body.host || ""),
@@ -305,7 +305,7 @@ async function handleRegistrationRoutes(ctx: RouteContext): Promise<Response> {
       declineCredentialRegistration(sessionId, match[1]!, login);
       return reply({ ok: true });
     }
-    const credential = submitCredentialRegistration(
+    const credential = await submitCredentialRegistration(
       sessionId,
       match[1]!,
       login,
