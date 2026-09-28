@@ -13,6 +13,7 @@ import {
   githubReadRunEnv,
   runGithubEnv,
   runGithubMergeGuard,
+  usesHostGithubLogin,
 } from "./pi-runner";
 
 const keys = [
@@ -140,6 +141,59 @@ describe("GitHub publication authority", () => {
           }),
         ).toEqual({ baseBranch: "production" });
       }
+    }
+  });
+});
+
+describe("host GitHub login without an App", () => {
+  test("interactive host runs inject nothing; others stay fail-closed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opensession-host-github-"));
+    try {
+      const cwd = join(dir, "repo");
+      mkdirSync(cwd);
+      const config = join(dir, "config.json");
+      writeFileSync(
+        config,
+        JSON.stringify({
+          integrations: { github: {} },
+          repos: {
+            app: { repo: cwd, ghRepo: "acme/app", defaultBranch: "main" },
+          },
+        }),
+      );
+      process.env.OPENSESSION_CONFIG = config;
+      await getConfigAsync();
+      delete process.env[GITHUB_RUN_AUTH_FILE_ENV];
+
+      const base = { remote: false, unattended: false, isolatedHome: false };
+      expect(await usesHostGithubLogin(base)).toBe(true);
+      for (const override of [
+        { remote: true },
+        { unattended: true },
+        { isolatedHome: true },
+      ])
+        expect(await usesHostGithubLogin({ ...base, ...override })).toBe(false);
+
+      for (const isCode of [true, false])
+        expect(
+          await runGithubEnv({
+            isCode,
+            ownerTurn: true,
+            githubKindRun: false,
+            cwd,
+            hostLogin: true,
+          }),
+        ).toEqual({});
+      // Without hostLogin the run still gets the empty, SSH-rewriting env.
+      const closed = await runGithubEnv({
+        isCode: true,
+        ownerTurn: false,
+        githubKindRun: false,
+        cwd,
+      });
+      expect(closed.GH_TOKEN).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
