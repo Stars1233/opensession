@@ -40,7 +40,7 @@ import { getCurrentUser, TEAM } from "./UserPicker";
  * panel's row and the summary card's section. Null when there is no
  * workspace record or nobody to add.
  */
-function useWorkspaceCollaborators(
+export function useWorkspaceCollaborators(
   workspaceId: string | null,
   sessionId?: string,
 ) {

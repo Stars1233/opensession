@@ -237,6 +237,12 @@ export type CtxEntry =
       onPick: (status: MineStatus | null) => void;
     }
   | {
+      kind: "collaborators";
+      workspaceId: string;
+      /** The session a new collaborator's notification points at. */
+      sessionId?: string;
+    }
+  | {
       kind: "snooze";
       /** Active snooze expiry (ISO), or null when not snoozed. */
       until: string | null;
