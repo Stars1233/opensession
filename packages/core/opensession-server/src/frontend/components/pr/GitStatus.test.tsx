@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { PrDetails } from "../../lib/types";
 import { GitStatusRows } from "./GitStatus";
 
+// SAFETY: GitStatusRows only reads the fields set here; the rest of
+// PrDetails is irrelevant to the status row under test.
 const pr = (over: Partial<PrDetails>) =>
   ({
     number: 7,
