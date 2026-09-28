@@ -157,7 +157,7 @@ export const INTERNAL_MCP_CAPABILITIES = {
   "opensession-schedule": {
     summary: "Schedule a prompt for this session at a future time.",
     guidance:
-      "Check back on slow external work (a release workflow, CI, a deploy) by scheduling a prompt to this session and ending the turn, instead of polling, sleeping, or reaching for harness cron tools. For another session's reply, use `wait_for` kind `session_turn` instead.",
+      "Check back on any long wait (a job you started, a release workflow, CI, a deploy) with the direct `schedule_prompt` tool and end the turn, instead of sleeping or reaching for harness cron tools. For another session's reply, use `wait_for` kind `session_turn` instead.",
   },
   "opensession-papercuts": {
     summary: "Append-only friction log.",

@@ -1015,9 +1015,9 @@ Schedule a prompt for this session at a future time.
 
 ### `schedule_prompt`
 
-`mcp__opensession-schedule__schedule_prompt` · input: `at` (string, required), `prompt` (string, required)
+`mcp__opensession-schedule__schedule_prompt` · input: `in_minutes` (number), `at` (string), `prompt` (string, required)
 
-Schedule a prompt to be sent to THIS session at a future time, then end your turn. Use it to check back on something that takes a while (a release workflow, CI, a deploy, a long job) instead of polling or sleeping. The prompt arrives in this conversation marked as a scheduled check-back, so write it to your future self with everything needed to pick the work up: what to run, what "done" looks like, what to do on failure. Fires once; survives restarts. Do not use harness built-ins like CronCreate or ScheduleWakeup here; they do not exist in this session.
+Schedule a prompt to be sent to THIS session later, then end your turn. Use it instead of `sleep` for any wait longer than a few minutes: a benchmark or job you started, a release workflow, CI, a deploy. Give `in_minutes` (simplest) or an absolute `at`. The prompt arrives in this conversation marked as a scheduled check-back, so write it to your future self with everything needed to pick the work up: what to run, what "done" looks like, what to do on failure. Fires once; survives restarts. Do not use harness built-ins like CronCreate or ScheduleWakeup here; they do not exist in this session.
 
 ### `list_scheduled_prompts`
 

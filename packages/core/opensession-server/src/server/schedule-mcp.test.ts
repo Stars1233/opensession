@@ -12,7 +12,7 @@ import {
   __setScheduledPromptStoreForTest,
   listScheduledPrompts,
 } from "./scheduled-prompts";
-import { createScheduleMcpServer } from "./schedule-mcp";
+import { createScheduleMcpServer, resolveDeliveryTime } from "./schedule-mcp";
 
 let dir: string;
 let previousPath: string;
@@ -107,5 +107,39 @@ describe("opensession-schedule", () => {
     );
     expect(refused).toContain("No scheduled prompt");
     expect(listScheduledPrompts("s1")).toHaveLength(1);
+  });
+
+  test("takes a relative delay so the model never computes a timestamp", async () => {
+    const client = await connect("s1");
+    const before = Date.now();
+    const created = textOf(
+      await client.callTool({
+        name: "schedule_prompt",
+        arguments: { in_minutes: 20, prompt: "check the benchmark" },
+      }),
+    );
+    expect(created).toContain("Scheduled [sched-");
+    const [prompt] = listScheduledPrompts("s1");
+    const delay = Date.parse(prompt!.at) - before;
+    expect(delay).toBeGreaterThanOrEqual(20 * 60_000 - 1_000);
+    expect(delay).toBeLessThan(20 * 60_000 + 5_000);
+  });
+
+  test("needs exactly one of in_minutes or at", () => {
+    const now = Date.parse("2026-09-01T12:00:00Z");
+    expect(resolveDeliveryTime({ in_minutes: 1.5 }, now)).toEqual({
+      at: "2026-09-01T12:01:30.000Z",
+    });
+    expect(resolveDeliveryTime({ at: " 2026-09-02T00:00:00Z " }, now)).toEqual({
+      at: "2026-09-02T00:00:00Z",
+    });
+    expect(resolveDeliveryTime({}, now)).toHaveProperty("error");
+    expect(
+      resolveDeliveryTime({ in_minutes: 5, at: "2026-09-02T00:00:00Z" }, now),
+    ).toHaveProperty("error");
+    expect(resolveDeliveryTime({ in_minutes: 0 }, now)).toHaveProperty("error");
+    expect(resolveDeliveryTime({ in_minutes: 20_000 }, now)).toHaveProperty(
+      "error",
+    );
   });
 });

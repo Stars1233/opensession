@@ -1525,6 +1525,9 @@ export interface PiBashAuditEvent {
   command_kind: string;
   sleep_calls?: number;
   sleep_seconds?: number;
+  /** The sleep sits in a while/until loop: a capped poll, not a fixed wait.
+   *  Separates the pattern the Waiting prompt asks for from the one it bans. */
+  sleep_in_loop?: boolean;
   timeout_s: number;
   duration_ms?: number;
   exit_code?: number | null;
@@ -1549,6 +1552,8 @@ const AUDITED_COMMAND_KINDS = new Set([
   "sleep",
 ]);
 
+const SLEEP_IN_LOOP = /\b(?:while|until)\b[\s\S]*?\bdo\b[\s\S]*?\bsleep\s/;
+
 /** Keep command observability useful without recording arguments or text. */
 function summarizeBashAuditCommand(
   command: string,
@@ -1570,7 +1575,7 @@ function summarizeBashAuditCommand(
   let sleepCalls = 0;
   let sleepSeconds = 0;
   for (const match of command.matchAll(
-    /(?:^|[;&|]\s*|\n\s*)sleep\s+(\d+(?:\.\d+)?)([smhd]?)(?=\s|[;&|]|$)/g,
+    /(?:^|[;&|(]\s*|\n\s*|\b(?:do|then|else)\s+)sleep\s+(\d+(?:\.\d+)?)([smhd]?)(?=\s|[;&|)]|$)/g,
   )) {
     sleepCalls++;
     const factor = { s: 1, m: 60, h: 3_600, d: 86_400 }[match[2] || "s"] ?? 1;
@@ -1581,7 +1586,11 @@ function summarizeBashAuditCommand(
     command_bytes: new TextEncoder().encode(command).byteLength,
     command_kind: commandKind,
     ...(sleepCalls > 0
-      ? { sleep_calls: sleepCalls, sleep_seconds: sleepSeconds }
+      ? {
+          sleep_calls: sleepCalls,
+          sleep_seconds: sleepSeconds,
+          sleep_in_loop: SLEEP_IN_LOOP.test(command),
+        }
       : {}),
   };
 }
@@ -2615,6 +2624,7 @@ async function* runPiAttempt(
     let steeringBoundaryPending = false;
     const baseCustomTools: ToolDefinition<any, any, any>[] = [
       ...mcpBridge.discoveryTools,
+      ...mcpBridge.directTools,
       ...(dialOracleAgent ? [makePiDialOracleTool(dialOracleAgent, user)] : []),
     ];
     for (const name of localTools) {
@@ -2792,6 +2802,7 @@ async function* runPiAttempt(
         // can actually reach through the two discovery tools.
         mcpTools: mcpBridge.tools.map((t) => t.name).sort(),
         discovery: mcpBridge.discoveryTools.map((t) => t.name).sort(),
+        direct: mcpBridge.directTools.map((t) => t.name).sort(),
         // Pi's local tools are enabled by name and every name is backed by a
         // guarded custom definition (see the enabled-name list above).
         local: [...localTools].sort(),
