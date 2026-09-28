@@ -286,13 +286,10 @@ async function handleRegistrationRoutes(ctx: RouteContext): Promise<Response> {
       { error: "Sign in with GitHub to add a credential to the keychain" },
       401,
     );
-  if (
-    (req.headers.get("origin") &&
-      req.headers.get("origin") !== ctx.url.origin) ||
-    req.headers.get("sec-fetch-site") === "cross-site"
-  ) {
-    return reply({ error: "Cross-origin requests are not allowed" }, 403);
-  }
+  // Cross-site POSTs are refused before routing (opensession.ts,
+  // web-auth.ts crossSiteViolation), against the public Host header. Do not
+  // compare Origin with ctx.url here: behind the proxy that is the internal
+  // backend address, so every real same-site answer would be refused.
   let body: { sessionId?: unknown; secret?: unknown };
   try {
     body = JSON.parse(await readRequestTextWithinLimit(req, 16 * 1024));

@@ -70,6 +70,7 @@ mock.module("./shared/user-mappings", () => ({
 const reg = await import("./credential-registrations");
 const kc = await import("./keychain");
 const { handleKeychainRoutes } = await import("./routes/keychain");
+const { crossSiteViolation } = await import("./web-auth");
 const { createKeychainMcpServer } =
   await import("../agents/slack/keychain-tools");
 
@@ -389,13 +390,19 @@ describe("registration routes", () => {
       expect((await route(path, auth, body)).status).toBe(401);
     }
     expect((await route(path, blair, body)).status).toBe(403);
+    // The gateway's cross-site guard covers this path; the route itself
+    // must not compare Origin with its (internal) request URL.
     expect(
-      (
-        await route(path, alex, body, {
-          origin: "https://evil.example.test",
-        })
-      ).status,
-    ).toBe(403);
+      crossSiteViolation(
+        new Request(`https://os.example.test${path}`, {
+          method: "POST",
+          headers: {
+            host: "os.example.test",
+            origin: "https://evil.example.test",
+          },
+        }),
+      ),
+    ).not.toBeNull();
     expect(kc.listCredentials()).toEqual([]);
 
     const peek = `/api/keychain/registrations?sessionId=s-route`;
@@ -404,7 +411,12 @@ describe("registration routes", () => {
     expect(own.canAnswer).toBe(true);
     expect(own.request.id).toBe(request.id);
 
-    const res = await route(path, alex, body);
+    // A same-site browser answer behind the proxy: public Origin, internal
+    // request URL.
+    const res = await route(path, alex, body, {
+      origin: "https://os.public.example.test",
+      "sec-fetch-site": "same-origin",
+    });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
     const text = await res.text();
