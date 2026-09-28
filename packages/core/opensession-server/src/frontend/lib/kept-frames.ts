@@ -1,3 +1,12 @@
+import {
+  type FrameHistory,
+  frameEntered,
+  frameLoaded,
+  frameReturned,
+  frameStepped,
+  freshFrameHistory,
+} from "./frame-history";
+
 /**
  * Framed pages (the Browser and Portal tabs) that outlive the pane showing
  * them. An iframe reloads whenever its element leaves the document or moves
@@ -24,6 +33,8 @@ export interface KeptFrame extends KeptFrameSpec {
   key: string;
   /** What the frame loaded: the pane's URL, or one typed in its address bar. */
   address: string;
+  /** How far Back and Forward can go; see frame-history.ts. */
+  history: FrameHistory;
   /** Bumped by Reload so the frame remounts on the same address. */
   nonce: number;
   loading: boolean;
@@ -103,6 +114,7 @@ export function showKeptFrame(
           ...spec,
           key,
           address: spec.url,
+          history: freshFrameHistory(0),
           nonce: 0,
           loading: true,
           slot,
@@ -117,7 +129,12 @@ export function showKeptFrame(
     ...spec,
     ...(frame.url === spec.url
       ? null
-      : { address: spec.url, nonce: frame.nonce + 1, loading: true }),
+      : {
+          address: spec.url,
+          history: freshFrameHistory(frame.history.length),
+          nonce: frame.nonce + 1,
+          loading: true,
+        }),
     slot,
     shownAt,
   }));
@@ -135,15 +152,44 @@ export function loadKeptFrame(key: string, address: string) {
   update(key, (frame) => ({
     ...frame,
     address,
+    history: freshFrameHistory(frame.history.length),
     nonce: frame.nonce + 1,
     loading: true,
   }));
 }
 
-export function keptFrameLoaded(key: string) {
+/**
+ * The frame element finished a load: its first, which starts its history, or
+ * a later one, which is navigation inside the page.
+ */
+export function keptFrameLoaded(key: string, length: number) {
   update(key, (frame) =>
-    frame.loading ? { ...frame, loading: false } : frame,
+    frame.loading
+      ? { ...frame, loading: false, history: freshFrameHistory(length) }
+      : { ...frame, history: frameLoaded(frame.history, length) },
   );
+}
+
+/** Records a Back (-1) or Forward (1) the toolbar sent to the window. */
+export function keptFrameStepped(key: string, delta: -1 | 1, length: number) {
+  update(key, (frame) => {
+    const history = frameStepped(frame.history, delta, length);
+    return history === frame.history ? frame : { ...frame, history };
+  });
+}
+
+export function keptFrameEntered(key: string) {
+  update(key, (frame) => {
+    const history = frameEntered(frame.history);
+    return history === frame.history ? frame : { ...frame, history };
+  });
+}
+
+export function keptFrameReturned(key: string, length: number) {
+  update(key, (frame) => {
+    const history = frameReturned(frame.history, length);
+    return history === frame.history ? frame : { ...frame, history };
+  });
 }
 
 /** Closing the tab unloads its page. */
