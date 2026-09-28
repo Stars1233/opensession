@@ -1,20 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ASK_CARD_SHELL } from "../lib/ask-card-classes";
 import { BASE_PATH } from "../lib/base";
 import { AGENT_NAME } from "../lib/brand";
-import type { WSServerMessage } from "../lib/types";
-import { useSessionSocket } from "../hooks/useSessionSocket";
+import type { CredentialRequest } from "../lib/credential-registration-store";
+import { useCredentialRegistration } from "../hooks/useCredentialRegistration";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-
-type CredentialRequest = NonNullable<
-  Extract<
-    WSServerMessage,
-    { type: "credential_registration_request" }
-  >["credentialRequest"]
->;
-
-type Open = { request: CredentialRequest; canAnswer: boolean };
 
 /** POST an answer. Outside the component so its throws stay out of React
  *  Compiler's way. The secret is only ever in this request body. */
@@ -48,50 +39,7 @@ export function CredentialRegistrationCard({
 }: {
   sessionId: string;
 }) {
-  const { addHandler } = useSessionSocket();
-  const [open, setOpen] = useState<Open | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    // The broadcast carries no viewer identity, so every change re-asks the
-    // server whether this viewer may answer.
-    const load = () =>
-      fetch(
-        `${BASE_PATH}/api/keychain/registrations?sessionId=${encodeURIComponent(sessionId)}`,
-      )
-        .then((res) => (res.ok ? res.json() : null))
-        .then((body) => {
-          if (!live || !body) return;
-          setOpen(
-            body.request
-              ? { request: body.request, canAnswer: !!body.canAnswer }
-              : null,
-          );
-        })
-        .catch(() => {});
-    void load();
-    const off = addHandler((message) => {
-      if (
-        message.type === "credential_registration_request" &&
-        message.sessionId === sessionId
-      ) {
-        if (message.credentialRequest) void load();
-        else setOpen(null);
-      } else if (
-        message.type === "credential_registration_resolved" &&
-        message.sessionId === sessionId
-      ) {
-        setOpen((current) =>
-          current?.request.id === message.requestId ? null : current,
-        );
-      }
-    });
-    return () => {
-      live = false;
-      off();
-    };
-  }, [sessionId, addHandler]);
-
+  const open = useCredentialRegistration(sessionId);
   if (!open) return null;
   return (
     <RequestCard
