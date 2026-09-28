@@ -272,6 +272,10 @@ export async function runGithubEnv(input: {
   cwd: string;
   /** Automation.readRepos; only automation runs carry it. */
   readRepos?: string[];
+  /** No GitHub App is configured and the run shares the host's HOME (see
+   *  usesHostGithubLogin): inject no credential so gh and git use the
+   *  host's own login. */
+  hostLogin?: boolean;
 }): Promise<Record<string, string>> {
   const primary = await runPrimaryGithubEnv(input);
   if (!input.readRepos?.length) return primary;
@@ -288,13 +292,31 @@ async function runPrimaryGithubEnv(input: {
   githubKindRun: boolean;
   launcherEnv?: Record<string, string>;
   cwd: string;
+  hostLogin?: boolean;
 }): Promise<Record<string, string>> {
-  if (!input.isCode) return githubReadRunEnv(input.cwd);
+  if (!input.isCode) return input.hostLogin ? {} : githubReadRunEnv(input.cwd);
   const person = input.ownerTurn ? githubUserRunEnv(input.user) : {};
   if (person.GH_TOKEN) return person;
   if (input.githubKindRun && input.launcherEnv?.GH_TOKEN)
     return input.launcherEnv;
+  if (input.hostLogin) return {};
   return githubCodeRunEnv(input.cwd);
+}
+
+/** Whether a run's `gh` and git use the host's own GitHub login instead of
+ * an injected credential. Only when no GitHub App is configured: without one
+ * there is no App token to inject, so the run-scoped empty credential would
+ * leave gh "not logged in" even for the operator's own sessions. Remote,
+ * unattended, and automation runs never qualify; they stay fail-closed. */
+export async function usesHostGithubLogin(input: {
+  remote: boolean;
+  unattended: boolean;
+  isolatedHome: boolean;
+}): Promise<boolean> {
+  if (input.remote || input.unattended || input.isolatedHome) return false;
+  if (process.env[GITHUB_RUN_AUTH_FILE_ENV]) return false;
+  const { githubAppConfigured } = await import("./github-app");
+  return !githubAppConfigured();
 }
 
 /** Person-started code turns follow the live checkout's direct-push workflow.
@@ -1569,8 +1591,12 @@ export function piBashHomeEnv(input: {
   scratchDir?: string;
   isolated: boolean;
   hostHome?: string;
+  /** usesHostGithubLogin: keep the host's gh config, and with it its login. */
+  hostGithubLogin?: boolean;
 }): Record<string, string> {
   const key = input.runKey.replace(/[^A-Za-z0-9_-]/g, "_");
+  if (!input.isolated && input.hostGithubLogin)
+    return input.hostHome ? { HOME: input.hostHome } : {};
   if (!input.isolated)
     return {
       ...(input.hostHome ? { HOME: input.hostHome } : {}),
@@ -2358,6 +2384,11 @@ async function* runPiAttempt(
     // GitHub permissions and repository rulesets bound the chosen credential.
     // Ask, unattended, and publication-policy command gates still apply.
     const githubKindRun = baseJournalKind(journal?.kind).startsWith("github-");
+    const hostGithubLogin = await usesHostGithubLogin({
+      remote: Boolean(remote),
+      unattended: Boolean(policy.unattended),
+      isolatedHome: Boolean(opts.publicationPolicy),
+    });
     const githubEnv = await runGithubEnv({
       isCode: mode === "code",
       ownerTurn,
@@ -2368,6 +2399,7 @@ async function* runPiAttempt(
       // found through its registered checkout on this machine.
       cwd: remote ? cwdRepo?.repo || "" : cwd,
       readRepos: opts.readRepos,
+      hostLogin: hostGithubLogin,
     });
     const agentGitEnv = await agentGitIdentityEnv(author);
     const mergeGuard = runGithubMergeGuard({
@@ -2508,6 +2540,7 @@ async function* runPiAttempt(
       scratchDir: opts.scratchDir,
       isolated: Boolean(opts.publicationPolicy),
       hostHome: process.env.HOME,
+      hostGithubLogin,
     });
     if (!remote && opts.publicationPolicy && homeEnv.HOME)
       mkdirSync(homeEnv.HOME, { recursive: true, mode: 0o700 });

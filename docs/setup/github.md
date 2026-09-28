@@ -139,6 +139,10 @@ launcher-supplied token. The gateway still uses a person's token for the UI
 buttons (merge, close, review, comment). Agents use `gh` directly, without
 dedicated PR MCP tools. A run never inherits the host operator's `gh` login:
 its `GH_CONFIG_DIR` is run-scoped, so a missing token fails with "not logged in".
+The exception is an instance with no GitHub App configured: there is no App
+token to inject, so interactive runs on the host get no GitHub credential,
+credential helper, or `GH_CONFIG_DIR` override, and `gh` and git use the host's
+own login. Unattended runs, automations, and sandbox runs stay fail-closed.
 See [github-authority.md](../github-authority.md) for the credential and
 publication boundaries.
 

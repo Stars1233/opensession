@@ -1626,6 +1626,27 @@ test("host runs never resolve the operator's ambient gh identity", () => {
   expect(env.GH_CONFIG_DIR).toBe("/scratch/session/gh-config-run_unsafe");
 });
 
+test("without a GitHub App, host runs keep the host's gh login", () => {
+  expect(
+    piBashHomeEnv({
+      runKey: "run/unsafe",
+      scratchDir: "/scratch/session",
+      isolated: false,
+      hostHome: "/Users/operator",
+      hostGithubLogin: true,
+    }),
+  ).toEqual({ HOME: "/Users/operator" });
+  // An automation's isolated home never reaches the host login.
+  expect(
+    piBashHomeEnv({
+      runKey: "run/unsafe",
+      scratchDir: "/scratch/session",
+      isolated: true,
+      hostGithubLogin: true,
+    }).GH_CONFIG_DIR,
+  ).toBe("/scratch/session/automation-home-run_unsafe/.config/gh");
+});
+
 test("automation descendants receive an isolated CLI home", () => {
   expect(
     piBashHomeEnv({
