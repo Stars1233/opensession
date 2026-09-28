@@ -825,6 +825,10 @@ export const csPrHost: PrHost = {
 
   editPrReviewers: async () => unsupported("Requesting reviewers"),
   updatePrBody: async () => unsupported("Editing a PR description"),
+  // Branches are never drafts here, so there is nothing to take out of draft.
+  markPrReady: async () => ({
+    error: "code.storage has no draft PRs, so there is nothing to mark ready",
+  }),
 
   async mergePr(branch, opts, repo, credential) {
     try {

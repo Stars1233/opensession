@@ -41,12 +41,14 @@ import {
   submitPrReviewApi,
   mergePrApi,
   closePrApi,
+  markPrReadyApi,
   unlinkPrApi,
 } from "../lib/api";
 import {
   submitPrPreviewReviewApi,
   mergePrPreviewApi,
   closePrPreviewApi,
+  markPrPreviewReadyApi,
 } from "../lib/api";
 import { Button } from "../ui/button";
 import { toast } from "../ui/toast";
@@ -325,6 +327,7 @@ export function PrPanel({
   const [closing, setClosing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
+  const [markingReady, setMarkingReady] = useState(false);
   // The branch has no PR yet and the bar's Create PR action has been asked for.
   // The agent does the work, so this only confirms the ask briefly while the PR
   // itself is still being created.
@@ -678,6 +681,29 @@ export function PrPanel({
       }
     }
     setClosing(false);
+  }
+
+  async function handleMarkReady() {
+    if (markingReady) return;
+    setMarkingReady(true);
+    setMergeError(null);
+    const actionTargetKey = loadTargetKey;
+    try {
+      if (previewTarget) {
+        await markPrPreviewReadyApi(previewTarget.repo, previewTarget.branch);
+      } else {
+        await markPrReadyApi(sessionId, active?.repo, active?.branch);
+      }
+      if (actionTargetKey === activeLoadTargetRef.current) {
+        toast("Marked ready for review");
+        await load(true);
+      }
+    } catch (error) {
+      if (actionTargetKey === activeLoadTargetRef.current) {
+        setMergeError(errorMessage(error, "Failed to mark ready for review"));
+      }
+    }
+    setMarkingReady(false);
   }
 
   // Roll the per-check list up into headline counts, and split deployments
@@ -1275,18 +1301,26 @@ export function PrPanel({
     checkSummary.failed === 0 &&
     checkSummary.pending === 0;
   const phoneMergeAction =
-    pr.state === "OPEN" ? (
+    pr.state === "OPEN" && pr.isDraft ? (
+      <Button
+        variant="soft"
+        className="min-h-11 shrink-0"
+        disabled={markingReady}
+        onClick={handleMarkReady}
+        title="Mark this pull request ready for review"
+      >
+        {markingReady ? "Marking ready…" : "Ready for review"}
+      </Button>
+    ) : pr.state === "OPEN" ? (
       <Button
         variant="soft"
         className="min-h-11 shrink-0"
         disabled={merging || (!mergeScheduled && !canMergeAfterReview)}
         onClick={handleMerge}
         title={
-          pr.isDraft
-            ? "Mark ready before merging"
-            : !canMergeAfterReview
-              ? "Resolve conflicts and wait for checks before merging"
-              : "Squash and merge"
+          !canMergeAfterReview
+            ? "Resolve conflicts and wait for checks before merging"
+            : "Squash and merge"
         }
       >
         {merging ? "Merging…" : mergeScheduled ? "Undo" : "Merge"}
@@ -1316,6 +1350,8 @@ export function PrPanel({
       merging={merging}
       mergeScheduled={mergeScheduled}
       mergeError={mergeError}
+      onMarkReady={handleMarkReady}
+      markingReady={markingReady}
       onOpenFile={scrollToFile}
       onOpenFiles={() => setPage("files")}
       onStartSession={onStartSession}
@@ -1546,6 +1582,12 @@ export function PrPanel({
         {pr.state === "OPEN" && (
           <>
             <Menu.Separator />
+            {pr.isDraft && (
+              <Menu.Item onClick={handleMarkReady} disabled={markingReady}>
+                <IconCheck size={18} className={MENU_ICON} />
+                {markingReady ? "Marking ready…" : "Ready for review"}
+              </Menu.Item>
+            )}
             {canMergeAfterReview && (
               <Menu.Item onClick={handleMerge} disabled={merging}>
                 {mergeScheduled ? (

@@ -31,6 +31,7 @@ import {
   getPrDetailsFresh,
   getPrDiff,
   invalidatePrInfo,
+  markPrReady,
   mergePr,
   postPrComment,
   prMetaForBranch,
@@ -124,6 +125,12 @@ export interface PrHost {
     credential?: GithubCredential,
   ): Promise<{ ok: true; url?: string } | { error: string }>;
   closePr(
+    branch: string,
+    repo: string,
+    credential?: GithubCredential,
+  ): Promise<{ ok: true; url?: string; number: number } | { error: string }>;
+  /** Take a draft PR out of draft ("Ready for review"). */
+  markPrReady(
     branch: string,
     repo: string,
     credential?: GithubCredential,
@@ -232,6 +239,8 @@ export const githubPrHost: PrHost = {
   mergePr: (branch, opts, repo, credential) =>
     mergePr(branch, opts, repo, credential),
   closePr: (branch, repo, credential) => closePr(branch, repo, credential),
+  markPrReady: (branch, repo, credential) =>
+    markPrReady(branch, repo, credential),
   editPrReviewers: (branch, opts, repo, credential) =>
     editPrReviewers(branch, opts, repo, credential),
   updatePrBody: (branch, mutate, repo) => updatePrBody(branch, mutate, repo),
@@ -374,6 +383,8 @@ const codestoragePrHost: PrHost = {
     (await csHost()).mergePr(branch, opts, repo, credential),
   closePr: async (branch, repo, credential) =>
     (await csHost()).closePr(branch, repo, credential),
+  markPrReady: async (branch, repo, credential) =>
+    (await csHost()).markPrReady(branch, repo, credential),
   editPrReviewers: async (branch, opts, repo, credential) =>
     (await csHost()).editPrReviewers(branch, opts, repo, credential),
   updatePrBody: async (branch, mutate, repo) =>

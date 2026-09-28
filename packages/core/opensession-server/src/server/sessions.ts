@@ -69,6 +69,7 @@ export {
   loadPrCacheSnapshot,
   markCachedPrClosed,
   markCachedPrMerged,
+  markCachedPrReady,
   markCachedPrReviewed,
   markCachedPrReviewRequestsCleared,
   cachedPrBranchByNumber,

@@ -347,6 +347,24 @@ export function markCachedPrMerged(ghRepo: string, branch: string): void {
   persistPrCache(prCache.data);
 }
 
+/** Clear the cached draft flag after a PR is marked ready in OS1, so the
+ *  sidebar and review queue stop showing it as a draft before the next sweep. */
+export function markCachedPrReady(ghRepo: string, branch: string): void {
+  const repoId = prRepos().find((repo) => repo.ghRepo === ghRepo)?.id;
+  if (!repoId) return;
+  const byBranch = prCache.data.get(repoId);
+  const pr = byBranch?.get(branch);
+  if (!byBranch || !pr || !pr.isDraft) return;
+  // In place, like the other write-throughs: an in-flight sweep holds this Map.
+  byBranch.set(branch, {
+    ...pr,
+    isDraft: false,
+    updatedAt: new Date().toISOString(),
+  });
+  prCache.ts = Date.now();
+  persistPrCache(prCache.data);
+}
+
 /**
  * Keep the sidebar's repo-wide PR cache coherent after a review submitted in
  * OS1. The bulk GitHub sweep is intentionally throttled and can otherwise keep
