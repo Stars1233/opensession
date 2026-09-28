@@ -1,20 +1,37 @@
 import {
   type ReactNode,
   useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import {
   getKeptFrame,
   hideKeptFrame,
+  keptFrameStepped,
   loadKeptFrame,
   showKeptFrame,
   subscribeKeptFrames,
 } from "../lib/kept-frames";
+import {
+  type FrameHistory,
+  canStepFrame,
+  frameEntered,
+  frameLoaded,
+  frameReturned,
+  frameStepped,
+  freshFrameHistory,
+} from "../lib/frame-history";
+import { useFrameFocus } from "../hooks/useFrameFocus";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { PageLoader } from "../ui/page-loader";
-import { IconArrowUpRight, IconRestore } from "./icons";
+import {
+  IconArrowUpRight,
+  IconChevronLeft,
+  IconChevronRight,
+  IconRestore,
+} from "./icons";
 
 /**
  * What the person typed, as a URL the frame can load. A bare host gets https,
@@ -57,8 +74,9 @@ interface BrowserPaneProps {
 }
 
 /**
- * A framed page with a browser's toolbar: an address bar, reload, and a
- * break-out to a real browser tab. Portals and preview deployments share it.
+ * A framed page with a browser's toolbar: back and forward, reload, an
+ * address bar, and a break-out to a real browser tab. Portals and preview
+ * deployments share it.
  */
 export function BrowserPane(props: BrowserPaneProps) {
   return props.keepAliveKey ? (
@@ -85,16 +103,33 @@ function OwnedBrowserPane({
   const [address, setAddress] = useState(url);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState(() => freshFrameHistory(0));
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  useFrameFocus(
+    frameRef,
+    () => setHistory(frameEntered),
+    () => setHistory((h) => frameReturned(h, window.history.length)),
+  );
   if (base !== url) {
     setBase(url);
     setAddress(url);
     setLoading(true);
+    setHistory((h) => freshFrameHistory(h.length));
   }
 
   function load(next: string) {
     setAddress(next);
     setLoading(true);
+    setHistory((h) => freshFrameHistory(h.length));
     setReloadNonce((nonce) => nonce + 1);
+  }
+
+  function loaded() {
+    const length = window.history.length;
+    setHistory((h) =>
+      loading ? freshFrameHistory(length) : frameLoaded(h, length),
+    );
+    setLoading(false);
   }
 
   return (
@@ -102,7 +137,11 @@ function OwnedBrowserPane({
       <BrowserToolbar
         name={name}
         address={address}
+        history={history}
         onLoad={load}
+        onStep={(delta, length) =>
+          setHistory((h) => frameStepped(h, delta, length))
+        }
         leading={leading}
         actions={actions}
         openWindowName={openWindowName}
@@ -111,10 +150,11 @@ function OwnedBrowserPane({
         {loading ? <BrowserLoading name={name} /> : null}
         <iframe
           key={`${address}#${reloadNonce}`}
+          ref={frameRef}
           className={BROWSER_FRAME}
           src={address}
           title={frameTitle}
-          onLoad={() => setLoading(false)}
+          onLoad={loaded}
           allow={allow}
           sandbox={sandbox}
         />
@@ -155,7 +195,9 @@ function KeptBrowserPane({
       <BrowserToolbar
         name={name}
         address={frame?.url === url ? frame.address : url}
+        history={frame?.url === url ? frame.history : undefined}
         onLoad={(next) => loadKeptFrame(key, next)}
+        onStep={(delta, length) => keptFrameStepped(key, delta, length)}
         leading={leading}
         actions={actions}
         openWindowName={openWindowName}
@@ -183,14 +225,22 @@ export function BrowserLoading({ name }: { name: string }) {
 function BrowserToolbar({
   name,
   address,
+  history,
   onLoad,
+  onStep,
   leading,
   actions,
   openWindowName = "_blank",
 }: {
   name: string;
   address: string;
+  history: FrameHistory | undefined;
   onLoad: (address: string) => void;
+  /**
+   * Records a step at the window's current `history.length`; the toolbar
+   * itself moves the window's history.
+   */
+  onStep: (delta: -1 | 1, length: number) => void;
   leading?: ReactNode;
   actions?: ReactNode;
   openWindowName?: string;
@@ -201,10 +251,40 @@ function BrowserToolbar({
     setShown(address);
     setDraft(address);
   }
+  // The frame's navigations are in the window's history, so stepping it
+  // steps the frame, as the browser's own Back button would. Once the app has
+  // pushed its own entries after the frame's, a step would move the app.
+  const canStep = (delta: -1 | 1) =>
+    !!history &&
+    canStepFrame(history, delta) &&
+    history.length === window.history.length;
+  const step = (delta: -1 | 1) => {
+    const go = canStep(delta);
+    onStep(delta, window.history.length);
+    if (go) window.history.go(delta);
+  };
 
   return (
     <div className="flex min-h-11 items-center gap-1.5 border-b border-divider px-3 py-1.5">
       {leading}
+      <Button
+        variant="ghost"
+        size="md"
+        icon={<IconChevronLeft size={16} />}
+        onClick={() => step(-1)}
+        disabled={!canStep(-1)}
+        aria-label={`Back in ${name}`}
+        title="Back"
+      />
+      <Button
+        variant="ghost"
+        size="md"
+        icon={<IconChevronRight size={16} />}
+        onClick={() => step(1)}
+        disabled={!canStep(1)}
+        aria-label={`Forward in ${name}`}
+        title="Forward"
+      />
       <Button
         variant="ghost"
         size="md"

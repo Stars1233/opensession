@@ -1,10 +1,13 @@
 import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import {
   getKeptFrames,
+  keptFrameEntered,
   keptFrameLoaded,
+  keptFrameReturned,
   subscribeKeptFrames,
   type KeptFrame,
 } from "../lib/kept-frames";
+import { useFrameFocus } from "../hooks/useFrameFocus";
 import { BROWSER_FRAME, BrowserLoading } from "./BrowserPane";
 
 /**
@@ -41,7 +44,13 @@ function KeptFrameBox({
   hostRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
-  const { slot } = frame;
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const { slot, key } = frame;
+  useFrameFocus(
+    frameRef,
+    () => keptFrameEntered(key),
+    () => keptFrameReturned(key, window.history.length),
+  );
 
   // Follows the slot: placed before paint, then on every size change of the
   // slot or the pane (tab strip, side panel, split ratio, window). A slot with
@@ -87,10 +96,11 @@ function KeptFrameBox({
       {frame.loading ? <BrowserLoading name={frame.name} /> : null}
       <iframe
         key={`${frame.address}#${frame.nonce}`}
+        ref={frameRef}
         className={BROWSER_FRAME}
         src={frame.address}
         title={frame.title}
-        onLoad={() => keptFrameLoaded(frame.key)}
+        onLoad={() => keptFrameLoaded(key, window.history.length)}
         allow={frame.allow}
         sandbox={frame.sandbox}
       />

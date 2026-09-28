@@ -6,6 +6,7 @@ import {
   getKeptFrames,
   hideKeptFrame,
   keptFrameLoaded,
+  keptFrameStepped,
   loadKeptFrame,
   resetKeptFrames,
   showKeptFrame,
@@ -22,7 +23,7 @@ test("a hidden frame keeps what it navigated to", () => {
   const first = slot();
   showKeptFrame("staging:a", spec("https://a.example.test/"), first);
   loadKeptFrame("staging:a", "https://a.example.test/deep");
-  keptFrameLoaded("staging:a");
+  keptFrameLoaded("staging:a", 1);
   hideKeptFrame("staging:a", first);
 
   showKeptFrame("staging:a", spec("https://a.example.test/"), slot());
@@ -39,6 +40,18 @@ test("a pane asking for a new URL starts the frame over", () => {
   showKeptFrame("portal:a", spec("https://two.example.test/"), el);
   expect(getKeptFrame("portal:a")!.address).toBe("https://two.example.test/");
   expect(getKeptFrame("portal:a")!.loading).toBe(true);
+});
+
+test("navigation inside a frame enables Back until a reload", () => {
+  showKeptFrame("portal:a", spec("https://a.example.test/"), slot());
+  keptFrameLoaded("portal:a", 2);
+  keptFrameLoaded("portal:a", 3);
+  keptFrameStepped("portal:a", -1, 3);
+  const { back, forward } = getKeptFrame("portal:a")!.history;
+  expect([back, forward]).toEqual([0, 1]);
+  loadKeptFrame("portal:a", "https://a.example.test/");
+  keptFrameLoaded("portal:a", 3);
+  expect(getKeptFrame("portal:a")!.history.forward).toBe(0);
 });
 
 test(`keeps the ${KEPT_FRAME_LIMIT} most recently shown frames`, () => {
