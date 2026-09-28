@@ -33,6 +33,13 @@ import {
   scrubSecret,
 } from "../keychain";
 import { audit } from "../audit";
+import { readRequestTextWithinLimit } from "../shared/bounded-body";
+import {
+  CredentialRegistrationError,
+  declineCredentialRegistration,
+  pendingCredentialRegistration,
+  submitCredentialRegistration,
+} from "../credential-registrations";
 
 /** Hop-by-hop and identity headers we never forward upstream. */
 const STRIPPED_REQUEST_HEADERS = new Set([
@@ -143,6 +150,13 @@ export async function handleKeychainRoutes(
     });
   }
 
+  if (
+    path === "/api/keychain/registrations" ||
+    path.startsWith("/api/keychain/registrations/")
+  ) {
+    return handleRegistrationRoutes(ctx);
+  }
+
   // ── Management ────────────────────────────────────────────────────────────
   if (path === "/api/keychain" && req.method === "GET") {
     return Response.json({
@@ -224,4 +238,84 @@ export async function handleKeychainRoutes(
   }
 
   return undefined;
+}
+
+/**
+ * The driver's side of a register_credential request
+ * (credential-registrations.ts):
+ *
+ *   GET  /api/keychain/registrations?sessionId=     -> { request | null, canAnswer }
+ *   POST /api/keychain/registrations/:id            { sessionId, secret }
+ *   POST /api/keychain/registrations/:id/decline    { sessionId }
+ *
+ * Answering needs a verified GitHub sign-in that matches the person who drove
+ * the session when the agent asked; machine auth and the name picker cannot.
+ * The request body carries the secret, so nothing here logs or echoes it.
+ */
+async function handleRegistrationRoutes(ctx: RouteContext): Promise<Response> {
+  const { req, path } = ctx;
+  const reply = (data: object, status = 200) =>
+    Response.json(data, {
+      status,
+      headers: { "Cache-Control": "no-store" },
+    });
+  const identity = ctx.authUser as
+    | { login?: string; automation?: boolean }
+    | null
+    | undefined;
+  const login =
+    identity?.login && identity.automation !== true ? identity.login : "";
+
+  if (path === "/api/keychain/registrations" && req.method === "GET") {
+    const open = pendingCredentialRegistration(
+      ctx.url.searchParams.get("sessionId") || "",
+    );
+    return reply({
+      request: open?.request ?? null,
+      canAnswer: !!open && !!login && login.toLowerCase() === open.login,
+    });
+  }
+
+  const match = path.match(
+    /^\/api\/keychain\/registrations\/([a-f0-9-]{36})(\/decline)?$/,
+  );
+  if (!match || req.method !== "POST")
+    return reply({ error: "Not found" }, 404);
+  if (!login)
+    return reply(
+      { error: "Sign in with GitHub to add a credential to the keychain" },
+      401,
+    );
+  if (
+    (req.headers.get("origin") &&
+      req.headers.get("origin") !== ctx.url.origin) ||
+    req.headers.get("sec-fetch-site") === "cross-site"
+  ) {
+    return reply({ error: "Cross-origin requests are not allowed" }, 403);
+  }
+  let body: { sessionId?: unknown; secret?: unknown };
+  try {
+    body = JSON.parse(await readRequestTextWithinLimit(req, 16 * 1024));
+  } catch {
+    return reply({ error: "Invalid request" }, 400);
+  }
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+  try {
+    if (match[2]) {
+      declineCredentialRegistration(sessionId, match[1]!, login);
+      return reply({ ok: true });
+    }
+    const credential = submitCredentialRegistration(
+      sessionId,
+      match[1]!,
+      login,
+      body.secret,
+    );
+    return reply({ ok: true, credential });
+  } catch (error) {
+    if (error instanceof CredentialRegistrationError)
+      return reply({ error: error.message }, error.status);
+    // Never log the error object: the request that raised it carried a secret.
+    return reply({ error: "Couldn't save the credential" }, 500);
+  }
 }

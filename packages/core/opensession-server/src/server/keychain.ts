@@ -34,8 +34,10 @@
  * (same bar as opensession-humans — never automation runs), so untrusted
  * ticket text cannot social-engineer an owner with a plausible "purpose".
  * Registration is HTTP-only (routes/keychain.ts, web-auth gated): a secret
- * typed into a session prompt would land in the transcript, so there is
- * deliberately no add_credential tool.
+ * typed into a session prompt would land in the transcript. The
+ * register_credential tool (credential-registrations.ts) keeps that rule: the
+ * agent supplies only metadata, and the session's own driver pastes the
+ * secret into a card that posts straight to that HTTP path.
  *
  * Two limitations, stated rather than papered over:
  *
@@ -241,9 +243,37 @@ export interface AddCredentialInput {
   allowedPathPrefixes?: string[];
 }
 
-export function addCredential(
-  input: AddCredentialInput,
-): KeychainCredentialMeta {
+export type CredentialSpec = Omit<AddCredentialInput, "owner" | "secret">;
+
+export interface NormalizedCredentialSpec {
+  service: string;
+  host: string;
+  description?: string;
+  injection?: { header?: string; scheme?: string };
+  allowedMethods?: string[];
+  allowedPathPrefixes?: string[];
+}
+
+const HTTP_METHODS = new Set([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
+
+/**
+ * Validate and normalize everything about a credential except its owner and
+ * secret. Throws with a message safe to show the caller. Shared by the HTTP
+ * registration route and the register_credential tool, which checks a spec
+ * before it asks the owner for the secret. Also rejects a service slug that
+ * is already taken, since slugs are how asks name a credential.
+ */
+export function normalizeCredentialSpec(
+  input: CredentialSpec,
+): NormalizedCredentialSpec {
   load();
   const service = norm(input.service);
   const host = input.host
@@ -259,13 +289,15 @@ export function addCredential(
   if (!host || !/^[a-z0-9][a-z0-9.-]*$/.test(host) || host.includes(":")) {
     throw new Error("host must be a bare host name (no scheme, port, or path)");
   }
-  if (!input.secret.trim()) throw new Error("secret is empty");
   if ([...credentials.values()].some((c) => c.service === service)) {
     throw new Error(`a credential for service "${service}" already exists`);
   }
   const methods = (input.allowedMethods || [])
     .map((m) => m.trim().toUpperCase())
     .filter(Boolean);
+  for (const m of methods) {
+    if (!HTTP_METHODS.has(m)) throw new Error(`unknown HTTP method: ${m}`);
+  }
   const prefixes = (input.allowedPathPrefixes || [])
     .map((p) => p.trim())
     .filter(Boolean);
@@ -273,17 +305,40 @@ export function addCredential(
     if (!p.startsWith("/"))
       throw new Error(`path prefix must start with /: ${p}`);
   }
+  let injection: NormalizedCredentialSpec["injection"];
+  if (input.injection) {
+    const { header, scheme } = input.injection;
+    if (header !== undefined && !/^[A-Za-z0-9-]{1,64}$/.test(header))
+      throw new Error("injection header must be a plain header name");
+    if (scheme !== undefined && !/^[A-Za-z0-9-]{0,32}$/.test(scheme))
+      throw new Error("injection scheme must be a single word, or empty");
+    injection = {
+      ...(header !== undefined ? { header } : {}),
+      ...(scheme !== undefined ? { scheme } : {}),
+    };
+  }
+  const description = input.description?.trim();
+  return {
+    service,
+    host,
+    ...(description ? { description } : {}),
+    ...(injection && Object.keys(injection).length ? { injection } : {}),
+    ...(methods.length ? { allowedMethods: methods } : {}),
+    ...(prefixes.length ? { allowedPathPrefixes: prefixes } : {}),
+  };
+}
+
+export function addCredential(
+  input: AddCredentialInput,
+): KeychainCredentialMeta {
+  const spec = normalizeCredentialSpec(input);
+  if (!input.secret.trim()) throw new Error("secret is empty");
   const now = new Date().toISOString();
   const cred: KeychainCredential = {
     id: `kc-${crypto.randomUUID()}`,
     owner: ownerName(input.owner),
-    service,
-    host,
+    ...spec,
     secret: input.secret.trim(),
-    ...(input.description ? { description: input.description } : {}),
-    ...(input.injection ? { injection: input.injection } : {}),
-    ...(methods.length ? { allowedMethods: methods } : {}),
-    ...(prefixes.length ? { allowedPathPrefixes: prefixes } : {}),
     createdAt: now,
     updatedAt: now,
   };

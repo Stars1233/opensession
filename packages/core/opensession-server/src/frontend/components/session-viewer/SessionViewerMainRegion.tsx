@@ -47,6 +47,7 @@ import { TranscriptView } from "../session/TranscriptView";
 import { SessionSafetyNotice } from "../SessionSafetyNotice";
 import { AskCard } from "../AskCard";
 import { LocalFilesRequestCard } from "../LocalFilesRequestCard";
+import { CredentialRegistrationCard } from "../CredentialRegistrationCard";
 import {
   ShippedChangeComposer,
   SlackSentNotice,
@@ -1080,6 +1081,8 @@ export function SessionViewerMainRegion({
               )}
 
               <LocalFilesRequestCard sessionId={session.id} />
+
+              <CredentialRegistrationCard sessionId={session.id} />
 
               {slackComposer && (
                 <ShippedChangeComposer
