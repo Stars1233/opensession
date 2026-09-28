@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fetchWorkspaces } from "../lib/api";
 import { setWorkspaceTitles } from "../lib/markdown";
+import { publishWorkspaceRecords } from "../lib/workspace-records";
 import type { Workspace } from "../lib/types";
 
 export function loadWorkspaces(
@@ -76,6 +77,7 @@ export function useWorkspaces(selectedWorkspaceId?: string): WorkspacesState {
     setWorkspaceTitles(
       workspaces.map((workspace) => [workspace.id, workspace.name] as const),
     );
+    publishWorkspaceRecords(workspaces);
   }, [workspaces]);
 
   return { workspaces, loaded, refresh };

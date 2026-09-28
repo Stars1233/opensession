@@ -685,6 +685,8 @@ export interface Workspace {
   externalRefs?: ExternalRef[];
   /** An unsent composer prompt parked here before any session exists. */
   draft?: { text: string; updatedAt: string; by?: string; autoName?: boolean };
+  /** Teammates added besides the creator; each gets it in their sidebar. */
+  collaborators?: Array<{ name: string; by: string; at: string }>;
   modelSettings?: {
     presets?: Array<{
       id: string;
