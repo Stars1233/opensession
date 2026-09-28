@@ -270,7 +270,7 @@ describe("transcript snapshots", () => {
       mode: "scratch",
       repo: "snapshot-repo",
       workspaceId: "ws-snap-switch",
-      model: "claude/anthropic/claude-sonnet-5",
+      model: "claude/anthropic/claude-sonnet-5-5",
     });
 
     const calls: FakeCall[] = [];

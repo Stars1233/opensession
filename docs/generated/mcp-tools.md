@@ -162,7 +162,7 @@ Spin up a visible Open Session session and start it on a prompt. When a PERSON a
 
 `mcp__opensession-sessions__migrate_session_engine` · input: `sessionId` (string, required), `model` (string, required)
 
-Migrate an existing session onto the Pi engine by flipping its model to a pi/* id (e.g. pi/anthropic/claude-sonnet-5). Does NOT start a run: the session's NEXT prompt builds a transcript handoff from its claude/codex history and continues on a fresh Pi session — file, workspace, branch, title and UI history all stay. Automation-owned sessions may migrate to Pi but not to a non-Pi engine; sessions with an in-flight run are refused.
+Migrate an existing session onto the Pi engine by flipping its model to a pi/* id (e.g. pi/anthropic/claude-sonnet-5-5). Does NOT start a run: the session's NEXT prompt builds a transcript handoff from its claude/codex history and continues on a fresh Pi session — file, workspace, branch, title and UI history all stay. Automation-owned sessions may migrate to Pi but not to a non-Pi engine; sessions with an in-flight run are refused.
 
 ### `spawn_task`
 

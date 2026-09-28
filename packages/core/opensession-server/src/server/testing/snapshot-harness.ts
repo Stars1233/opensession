@@ -229,7 +229,7 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
         {
           id,
           title: `Snapshot ${id}`,
-          model: "claude-sonnet-5",
+          model: "claude-sonnet-5-5",
           source: "opensession",
           createdBy: "SnapshotOwner",
           startedBy: "SnapshotOwner",

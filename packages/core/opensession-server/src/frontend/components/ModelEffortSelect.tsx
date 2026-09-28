@@ -49,7 +49,7 @@ export const EFFORTS = [
 const PRIMARY_MODEL_IDS = [
   "claude-fable-5-1",
   "claude-opus-5-5",
-  "claude-sonnet-5",
+  "claude-sonnet-5-5",
   "claude-haiku-4-5",
   "gpt-6-astra",
   "gpt-6-sol",
@@ -240,6 +240,7 @@ const MODEL_TAIL_ORDER = [
   "claude-fable-5-1",
   "claude-opus-5-5",
   "claude-opus-4-8",
+  "claude-sonnet-5-5",
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-haiku-4-5",

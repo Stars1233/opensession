@@ -41,7 +41,7 @@ function readStore(): DeskStore {
 /** Desk turns should feel instant: quick capture / list ops / delegation,
  *  not deep reasoning — so the session defaults to Sonnet on low effort
  *  rather than the interactive dial. /model in the expanded view overrides. */
-const DESK_MODEL = "pi/anthropic/claude-sonnet-5";
+const DESK_MODEL = "pi/anthropic/claude-sonnet-5-5";
 const DESK_EFFORT = "low";
 
 /** Get or create the user's repo-less Desk session. */

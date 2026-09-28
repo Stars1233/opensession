@@ -11,7 +11,7 @@
  *   MEMORY_BENCH_STRATEGIES  comma list to run (default: all)
  *   MEMORY_BENCH_FIXTURES    comma list of conversation ids (default: all)
  *   MEMORY_BENCH_MODEL       extraction/curation model (default: oneshot default, haiku)
- *   MEMORY_BENCH_JUDGE_MODEL judge model (default: claude-sonnet-5 — judge quality
+ *   MEMORY_BENCH_JUDGE_MODEL judge model (default: claude-sonnet-5-5 — judge quality
  *                            bounds the whole bench, don't skimp it)
  *   MEMORY_BENCH_OUT         path for a JSON report of rows + full notebooks
  *
@@ -69,7 +69,7 @@ if (!conversations.length) {
   process.exit(1);
 }
 
-const DEFAULT_JUDGE_MODEL = "claude-sonnet-5";
+const DEFAULT_JUDGE_MODEL = "claude-sonnet-5-5";
 
 const strategyOneShot: OneShot = (system, prompt) =>
   oneShot(prompt, {

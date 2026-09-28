@@ -3760,7 +3760,7 @@ async function* runPiAttempt(
 // ── Scripted smoke harness ───────────────────────────────────────────────────
 
 /** Cheap + widest designated-account coverage on the bridge. */
-const SMOKE_MODEL = "pi/anthropic/claude-sonnet-5";
+const SMOKE_MODEL = "pi/anthropic/claude-sonnet-5-5";
 
 export interface PiSmokeResult {
   /** True only for a real turn that reached `done` in time — or an explicit

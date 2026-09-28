@@ -13,7 +13,7 @@ import type { Repo } from "./config";
 import { hostRepoId, prHostFor } from "./pr-host";
 import { oneShot } from "./one-shot";
 
-const GUIDE_MODEL = process.env.REVIEW_GUIDE_MODEL || "claude-sonnet-5";
+const GUIDE_MODEL = process.env.REVIEW_GUIDE_MODEL || "claude-sonnet-5-5";
 /** Patch text beyond this is truncated before it reaches the model. */
 const MAX_PATCH_CHARS = 120_000;
 

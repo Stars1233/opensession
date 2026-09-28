@@ -175,7 +175,7 @@ export const DEFAULT_WORKSPACE_MODEL_SETTINGS: WorkspaceModelSettings = {
       lead: { model: "pi/anthropic/claude-fable-5-1", effort: "high" },
       supporting: [
         {
-          model: "pi/anthropic/claude-sonnet-5",
+          model: "pi/anthropic/claude-sonnet-5-5",
           effort: "medium",
           role: "Implementation worker",
         },

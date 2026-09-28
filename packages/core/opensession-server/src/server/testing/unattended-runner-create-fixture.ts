@@ -154,7 +154,7 @@ const controlWs = {
                 type: "init",
                 sessionId: "ses_runner_opening",
                 provider: "pi",
-                model: "pi/anthropic/claude-sonnet-5",
+                model: "pi/anthropic/claude-sonnet-5-5",
               },
             }),
           );
@@ -165,7 +165,7 @@ const controlWs = {
                 type: "done",
                 sessionId: "ses_runner_opening",
                 provider: "pi",
-                model: "pi/anthropic/claude-sonnet-5",
+                model: "pi/anthropic/claude-sonnet-5-5",
                 result: "Opening completed locally",
               },
             }),
@@ -236,7 +236,7 @@ try {
     agentStarted: true,
     reportBack: true,
     user: "Renderer swarm (automation)",
-    model: "pi/anthropic/claude-sonnet-5",
+    model: "pi/anthropic/claude-sonnet-5-5",
     mcpServers: [],
     runner: registered.runner.id,
     automationDescendantPolicy: {

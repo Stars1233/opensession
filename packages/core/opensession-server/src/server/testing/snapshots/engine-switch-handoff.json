@@ -39,7 +39,7 @@
       "journalKind": "prompt",
       "mcpScope": "all",
       "mode": "scratch",
-      "model": "pi/anthropic/claude-sonnet-5",
+      "model": "pi/anthropic/claude-sonnet-5-5",
       "prompt": {
         "injectedContext": [],
         "visible": "start the migration"
@@ -263,7 +263,7 @@
     },
     {
       "content": "Renamed the first two call sites.",
-      "model": "pi/anthropic/claude-sonnet-5",
+      "model": "pi/anthropic/claude-sonnet-5-5",
       "seq": 3,
       "type": "assistant"
     },

@@ -159,6 +159,8 @@ const RETIRED_CLAUDE_REROUTE: Record<string, string> = {
   "claude-fable-5": "claude-fable-5-1",
   "claude-opus-5": "claude-opus-5-5",
   "claude-opus-4-8": "claude-opus-5-5",
+  "claude-sonnet-5": "claude-sonnet-5-5",
+  "claude-sonnet-4-6": "claude-sonnet-5-5",
 };
 
 function rerouteRetiredClaudeModel(model: string): string {
@@ -173,7 +175,7 @@ function rerouteRetiredClaudeModel(model: string): string {
 export const DEFAULT_BRIDGE_PICKER_MODELS = [
   "claude-fable-5-1",
   "claude-opus-5-5",
-  "claude-sonnet-5",
+  "claude-sonnet-5-5",
   "claude-haiku-4-5",
   "gpt-6-astra",
   "gpt-6-sol",
@@ -216,10 +218,17 @@ export const KNOWN_MODELS: ModelInfo[] = [
     aliases: ["opus4.8"],
   },
   {
+    id: "claude-sonnet-5-5",
+    provider: "claude",
+    label: "Claude Sonnet 5.5",
+    aliases: ["sonnet", "sonnet5.5"],
+  },
+  // Keep retired Sonnet ids for historical labels; dispatch upgrades them.
+  {
     id: "claude-sonnet-5",
     provider: "claude",
     label: "Claude Sonnet 5",
-    aliases: ["sonnet", "sonnet5"],
+    aliases: ["sonnet5"],
   },
   {
     id: "claude-sonnet-4-6",
@@ -535,9 +544,9 @@ export const ORCHESTRATOR_WORKER_AGENTS: Record<
       "conversation. Not for design decisions or final review.",
     bridges: {
       anthropic: {
-        model: "anthropic/claude-sonnet-5",
+        model: "anthropic/claude-sonnet-5-5",
         variant: "medium",
-        label: "Sonnet 5",
+        label: "Sonnet 5.5",
       },
       // Terra medium, not 5.5/5.4: the 272k-window codex models are retired
       // (see RETIRED_CODEX_REROUTE) — the cheap codex tiers are the 5.6
@@ -856,6 +865,7 @@ const FALLBACK_TIER: Record<string, number> = {
   "gpt-6-luna": 3,
   "claude-opus-4-8": 2,
   "gpt-5.5": 2,
+  "claude-sonnet-5-5": 1,
   "claude-sonnet-5": 1,
   "gpt-5.4": 1,
   "claude-sonnet-4-6": 1,
@@ -884,8 +894,7 @@ const FALLBACK_DESTINATIONS = [
   // gpt-5.5 / gpt-5.4 / gpt-5.4-mini / spark removed 2026-07-25: retired
   // 272k-window models (RETIRED_CODEX_REROUTE) — falling back onto them would
   // land every session in the compact-every-turn loop.
-  "claude-sonnet-5",
-  "claude-sonnet-4-6",
+  "claude-sonnet-5-5",
   "claude-haiku-4-5",
 ];
 
@@ -1468,6 +1477,7 @@ const CONTEXT_WINDOWS: Record<string, number> = {
   "claude-opus-5": 1_000_000,
   "claude-opus-4-8": 1_000_000,
   "claude-opus-4-7": 1_000_000,
+  "claude-sonnet-5-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
   "claude-sonnet-4-6": 1_000_000,
   "claude-haiku-4-5": 200_000,
