@@ -81,6 +81,7 @@ import {
   IconRobot,
   IconStack,
 } from "./icons";
+import { ensureDiffLanguages } from "../lib/diff-languages";
 
 /**
  * Workspace info block at the top of the right side panel (the "Info" tab): a
@@ -488,6 +489,7 @@ function FileRow({
   theme: "light" | "dark";
   onOpenTab?: (tab: PanelTab) => void;
 }) {
+  ensureDiffLanguages();
   const slash = file.path.lastIndexOf("/");
   const dir = slash >= 0 ? file.path.slice(0, slash + 1) : "";
   const base = slash >= 0 ? file.path.slice(slash + 1) : file.path;

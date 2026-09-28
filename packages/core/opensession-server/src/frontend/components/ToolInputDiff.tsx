@@ -1,6 +1,7 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import { useResolvedTheme } from "./CodeHighlight";
+import { ensureDiffLanguages } from "../lib/diff-languages";
 
 /**
  * A compact, read-only version of the Files changed renderer for one tool
@@ -8,6 +9,7 @@ import { useResolvedTheme } from "./CodeHighlight";
  * snippets, not their real source positions.
  */
 export function ToolInputDiff({ patch }: { patch: string }) {
+  ensureDiffLanguages();
   const theme = useResolvedTheme();
   const file = (() => {
     try {

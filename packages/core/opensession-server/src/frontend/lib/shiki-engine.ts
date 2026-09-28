@@ -1,11 +1,9 @@
 import {
   createHighlighterCore,
   type HighlighterCore,
-  type LanguageRegistration,
   type ShikiTransformer,
 } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
-import { z } from "zod";
 import bash from "@shikijs/langs/bash";
 import typescript from "@shikijs/langs/typescript";
 import tsx from "@shikijs/langs/tsx";
@@ -23,42 +21,9 @@ import rust from "@shikijs/langs/rust";
 import swift from "@shikijs/langs/swift";
 import githubDark from "@shikijs/themes/github-dark-default";
 import githubLight from "@shikijs/themes/github-light-default";
-import rescriptGrammar from "./rescript.tmLanguage.json";
+import { rescript } from "./rescript-language";
 import { LANG_BY_EXT } from "./lang";
 
-type GrammarRule = LanguageRegistration["patterns"][number];
-
-const grammarRuleSchema: z.ZodType<GrammarRule> = z.lazy(() =>
-  z.looseObject({
-    include: z.string().optional(),
-    name: z.string().optional(),
-    contentName: z.string().optional(),
-    match: z.union([z.string(), z.instanceof(RegExp)]).optional(),
-    captures: z.record(z.string(), grammarRuleSchema).optional(),
-    begin: z.union([z.string(), z.instanceof(RegExp)]).optional(),
-    beginCaptures: z.record(z.string(), grammarRuleSchema).optional(),
-    end: z.union([z.string(), z.instanceof(RegExp)]).optional(),
-    endCaptures: z.record(z.string(), grammarRuleSchema).optional(),
-    while: z.union([z.string(), z.instanceof(RegExp)]).optional(),
-    whileCaptures: z.record(z.string(), grammarRuleSchema).optional(),
-    patterns: z.array(grammarRuleSchema).optional(),
-    repository: z.record(z.string(), grammarRuleSchema).optional(),
-    applyEndPatternLast: z.boolean().optional(),
-  }),
-);
-
-const languageRegistrationSchema: z.ZodType<LanguageRegistration> =
-  z.looseObject({
-    name: z.string(),
-    scopeName: z.string(),
-    patterns: z.array(grammarRuleSchema),
-    repository: z.record(z.string(), grammarRuleSchema),
-  });
-
-const rescript = languageRegistrationSchema.parse({
-  ...rescriptGrammar,
-  name: "rescript",
-});
 let highlighterPromise: Promise<HighlighterCore> | null = null;
 
 function getHighlighter(): Promise<HighlighterCore> {
