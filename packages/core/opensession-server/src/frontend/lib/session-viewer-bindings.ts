@@ -181,6 +181,14 @@ export interface SessionViewerViewTabsBinding {
    */
   terminalTabOpen?: boolean;
   /**
+   * Whether the Browser (preview) tab is present in the strip. Like the
+   * terminal, its frame stays mounted while the tab exists so switching away
+   * and back keeps the page's navigation and state.
+   */
+  stagingTabOpen?: boolean;
+  /** Whether the Portal tab is present in the strip; see `stagingTabOpen`. */
+  portalTabOpen?: boolean;
+  /**
    * Whether the Conversation pane (the workspace's Plain support-ticket
    * thread, full-width) is foregrounded — driven by the top tab strip's
    * Conversation view-tab (App state).

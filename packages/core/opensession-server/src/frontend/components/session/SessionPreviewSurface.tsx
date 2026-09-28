@@ -34,25 +34,30 @@ type PreviewSurface =
 /** The active workspace preview tab. */
 export function SessionPreviewSurface({
   surface,
+  hidden = false,
 }: {
   surface: PreviewSurface;
+  /**
+   * Kept mounted behind another tab: the frame keeps its page, scroll, and
+   * form state instead of reloading when the tab comes back.
+   */
+  hidden?: boolean;
 }) {
-  switch (surface.kind) {
-    case "portal":
-      return (
+  return (
+    <div className={hidden ? "hidden" : "contents"}>
+      {surface.kind === "portal" ? (
         <div className={VIEWER_REVIEW_MAIN}>
           <PortalPane target={surface.target} />
         </div>
-      );
-    case "staging":
-      return (
+      ) : (
         <SessionStagingPane
           deployment={surface.deployment}
           url={surface.url}
           shareLink={surface.shareLink}
         />
-      );
-  }
+      )}
+    </div>
+  );
 }
 
 /** The embedded or first-party fallback view for a PR preview deployment. */

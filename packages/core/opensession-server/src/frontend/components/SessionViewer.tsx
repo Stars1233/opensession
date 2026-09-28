@@ -475,6 +475,8 @@ export function SessionViewer({
     showTerminal = false,
     onCloseTerminal,
     terminalTabOpen = false,
+    stagingTabOpen = false,
+    portalTabOpen = false,
     showConversation = false,
     conversationThreadId = null,
     showVideo = false,
@@ -1681,7 +1683,11 @@ export function SessionViewer({
             nameSubagent,
             hasWorkspace,
             waitingForWorkspace,
-            terminalTabOpen,
+            openTabs: {
+              terminal: terminalTabOpen,
+              staging: stagingTabOpen,
+              portal: portalTabOpen,
+            },
             previewStatus,
           }}
           review={{

@@ -82,6 +82,7 @@ interface AppSessionPaneProps {
     | "currentPortalTarget"
     | "subagentActive"
     | "terminalOpen"
+    | "stagingOpen"
     | "closeStagingTab"
     | "closeAssetsTab"
     | "closeTerminalTab"
@@ -156,6 +157,7 @@ export function AppSessionPane({
     currentPortalTarget,
     subagentActive,
     terminalOpen,
+    stagingOpen,
     closeStagingTab,
     closeAssetsTab,
     closeTerminalTab,
@@ -313,6 +315,15 @@ export function AppSessionPane({
           // Presence, not foreground: the shells stay mounted behind whatever
           // else is in front, and only unmount when the tab is closed.
           terminalTabOpen: !!wsKey && terminalOpen.has(wsKey),
+          // Framed pages stay mounted behind other tabs so switching back
+          // doesn't reload them. A split pane shows one fixed surface, so
+          // only the pane that owns the tab keeps its frame.
+          stagingTabOpen: splitMode
+            ? viewTabKind(surfaceId) === "staging"
+            : !!wsKey && stagingOpen.has(wsKey),
+          portalTabOpen: splitMode
+            ? viewTabKind(surfaceId) === "portal"
+            : !!currentPortalTarget,
           showPortal: splitMode
             ? viewTabKind(surfaceId) === "portal"
             : focused && portalActive,
