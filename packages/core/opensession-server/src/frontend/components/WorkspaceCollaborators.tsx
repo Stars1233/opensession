@@ -20,24 +20,30 @@ import {
   publishWorkspaceRecord,
   useWorkspaceRecord,
 } from "../lib/workspace-records";
+import {
+  WS_SUMMARY_ACTION,
+  WS_SUMMARY_ICON,
+  WS_SUMMARY_LABEL,
+  WS_SUMMARY_RAIL,
+  WS_SUMMARY_ROW,
+  WS_SUMMARY_SECTION,
+  WS_SUMMARY_STATE,
+} from "../lib/workspace-summary-classes";
+import { cn } from "../ui/cn";
 import { Menu } from "../ui/menu";
 import { IconChevronDown, IconPeople } from "./icons";
 import { UserAvatar } from "./UserAvatar";
 import { getCurrentUser, TEAM } from "./UserPicker";
 
 /**
- * The info panel's Collaborators section: teammates added to this workspace
- * besides its creator. Each one gets the workspace in their own sidebar, and
- * the server notifies them once, when they are first added.
+ * Add/remove state for a workspace's collaborators, shared by the info
+ * panel's row and the summary card's section. Null when there is no
+ * workspace record or nobody to add.
  */
-export function WorkspaceCollaborators({
-  workspaceId,
-  sessionId,
-}: {
-  workspaceId: string | null;
-  /** The open session, where the new collaborator's notification points. */
-  sessionId?: string;
-}) {
+function useWorkspaceCollaborators(
+  workspaceId: string | null,
+  sessionId?: string,
+) {
   // The roster arrives async; TEAM below reads it.
   usePeople();
   const workspace = useWorkspaceRecord(workspaceId);
@@ -81,6 +87,49 @@ export function WorkspaceCollaborators({
     });
   }
 
+  return {
+    collaborators,
+    candidates,
+    isOn: (name: string) => names.has(name.toLowerCase()),
+    toggle,
+    error,
+  };
+}
+
+function CollaboratorMenuItems({
+  candidates,
+  isOn,
+  toggle,
+}: {
+  candidates: string[];
+  isOn: (name: string) => boolean;
+  toggle: (name: string) => void;
+}) {
+  return candidates.map((name) => (
+    <Menu.Item key={name} closeOnClick={false} onClick={() => toggle(name)}>
+      <UserAvatar name={name} size={22} />
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      <Menu.Check on={isOn(name)} size={20} className="text-dim" />
+    </Menu.Item>
+  ));
+}
+
+/**
+ * The info panel's Collaborators section: teammates added to this workspace
+ * besides its creator. Each one gets the workspace in their own sidebar, and
+ * the server notifies them once, when they are first added.
+ */
+export function WorkspaceCollaborators({
+  workspaceId,
+  sessionId,
+}: {
+  workspaceId: string | null;
+  /** The open session, where the new collaborator's notification points. */
+  sessionId?: string;
+}) {
+  const state = useWorkspaceCollaborators(workspaceId, sessionId);
+  if (!state) return null;
+  const { collaborators, error } = state;
   const shown = collaborators.slice(0, 3);
   const label = collaborators.length
     ? collaborators.map((c) => c.name).join(", ")
@@ -118,27 +167,74 @@ export function WorkspaceCollaborators({
               <IconChevronDown size={14} className={GIT_ACTION_CARET} />
             </Menu.Trigger>
             <Menu.Popup align="start" sideOffset={6} className="min-w-[200px]">
-              {candidates.map((name) => (
-                <Menu.Item
-                  key={name}
-                  closeOnClick={false}
-                  onClick={() => toggle(name)}
-                >
-                  <UserAvatar name={name} size={22} />
-                  <span className="min-w-0 flex-1 truncate">{name}</span>
-                  <Menu.Check
-                    on={names.has(name.toLowerCase())}
-                    size={20}
-                    className="text-dim"
-                  />
-                </Menu.Item>
-              ))}
+              <CollaboratorMenuItems {...state} />
             </Menu.Popup>
           </Menu.Root>
         </div>
       </div>
       {error && (
         <div className="px-3 text-meta font-medium text-red">{error}</div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The same control in the header's summary card, in that card's row grammar:
+ * one row per collaborator, then an Add row that opens the picker.
+ */
+export function WorkspaceSummaryCollaborators({
+  workspaceId,
+  sessionId,
+  groupClass,
+}: {
+  workspaceId: string | null;
+  sessionId?: string;
+  groupClass: string;
+}) {
+  const state = useWorkspaceCollaborators(workspaceId, sessionId);
+  if (!state) return null;
+  const { collaborators, error } = state;
+  return (
+    <div className={groupClass}>
+      <div className={WS_SUMMARY_SECTION}>Collaborators</div>
+      {collaborators.map((c) => (
+        <div
+          key={c.name}
+          className={cn(WS_SUMMARY_ROW, "cursor-default hover:bg-transparent")}
+          title={`${c.name}, added by ${c.by}`}
+        >
+          <span className={WS_SUMMARY_RAIL}>
+            <UserAvatar name={c.name} size={16} edge={false} />
+          </span>
+          <span className={WS_SUMMARY_LABEL}>{c.name}</span>
+          <span className={cn(WS_SUMMARY_STATE, "text-dim")}>added</span>
+        </div>
+      ))}
+      <Menu.Root>
+        <Menu.Trigger className={WS_SUMMARY_ROW} aria-label="Add collaborator">
+          <span className={WS_SUMMARY_RAIL}>
+            <IconPeople size={20} className={WS_SUMMARY_ICON} />
+          </span>
+          <span className={WS_SUMMARY_LABEL}>
+            {collaborators.length ? "Add another" : "No collaborators"}
+          </span>
+          <span
+            className={cn(
+              WS_SUMMARY_ACTION,
+              "inline-flex items-center gap-0.5",
+            )}
+          >
+            Add
+            <IconChevronDown size={14} />
+          </span>
+        </Menu.Trigger>
+        <Menu.Popup align="end" sideOffset={6} className="min-w-[200px]">
+          <CollaboratorMenuItems {...state} />
+        </Menu.Popup>
+      </Menu.Root>
+      {error && (
+        <div className="px-4 py-1 text-meta font-medium text-red">{error}</div>
       )}
     </div>
   );
