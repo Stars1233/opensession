@@ -67,9 +67,13 @@ import {
   IconMail,
   IconMoon,
   IconPencil,
+  IconPeople,
   IconPin,
   IconPullRequest,
 } from "../icons";
+import { useWorkspaceCollaborators } from "../WorkspaceCollaborators";
+import { UserAvatar } from "../UserAvatar";
+import { MenuCheck } from "../../ui/menu";
 import React, { useEffect, useState } from "react";
 
 // The session card, in the shape the workspace card already proved: what the
@@ -723,7 +727,9 @@ export function WsMobileSheet({
 }) {
   const ov = useWsOverview(row);
   const { prSession, prReady, prStatusBits } = wsPrInfo(row);
-  const [page, setPage] = useState<"actions" | "status" | "snooze">("actions");
+  const [page, setPage] = useState<
+    "actions" | "status" | "snooze" | "collaborators"
+  >("actions");
   const anyManual = row.sessions.some((session) => pinnedLane(session));
   const firstLane = pinnedLane(row.sessions[0]) ?? null;
   const currentLane: LanePickerValue = !anyManual
@@ -770,6 +776,15 @@ export function WsMobileSheet({
                 onSetStatus(status);
                 dismiss();
               }}
+            />
+          );
+        }
+        if (page === "collaborators" && row.workspace) {
+          return (
+            <CollaboratorsSheetPage
+              workspaceId={row.workspace.id}
+              sessionId={row.sessions[0]?.id}
+              onBack={() => setPage("actions")}
             />
           );
         }
@@ -924,6 +939,18 @@ export function WsMobileSheet({
                 )}
               </>
             )}
+            {row.workspace && (
+              <SheetDrillInItem
+                icon={<IconPeople size={22} />}
+                label="Collaborators"
+                value={
+                  row.workspace.collaborators?.length
+                    ? String(row.workspace.collaborators.length)
+                    : undefined
+                }
+                onClick={() => setPage("collaborators")}
+              />
+            )}
             {(row.sessions.length > 0 || onDelete) && <SheetSeparator />}
             {/* Archive stays explicit and destructive after Pin and Snooze. */}
             {row.sessions.length > 0 && (
@@ -953,5 +980,41 @@ export function WsMobileSheet({
         );
       }}
     </BottomSheet>
+  );
+}
+
+/** The phone sheet's Collaborators page: toggle teammates in place. */
+function CollaboratorsSheetPage({
+  workspaceId,
+  sessionId,
+  onBack,
+}: {
+  workspaceId: string;
+  sessionId?: string;
+  onBack: () => void;
+}) {
+  const state = useWorkspaceCollaborators(workspaceId, sessionId);
+  return (
+    <>
+      <SheetPageHeader title="Collaborators" onBack={onBack} />
+      <SheetBody>
+        {state?.candidates.length ? (
+          state.candidates.map((name) => (
+            <SheetItem key={name} onClick={() => state.toggle(name)}>
+              <UserAvatar name={name} size={22} edge={false} />
+              <span className="min-w-0 flex-1 truncate">{name}</span>
+              <MenuCheck on={state.isOn(name)} size={22} className="text-dim" />
+            </SheetItem>
+          ))
+        ) : (
+          <div className="px-4 py-3 text-meta text-faint">No teammates</div>
+        )}
+        {state?.error && (
+          <div className="px-4 py-2 text-meta font-medium text-red">
+            {state.error}
+          </div>
+        )}
+      </SheetBody>
+    </>
   );
 }

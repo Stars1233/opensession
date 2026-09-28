@@ -162,6 +162,14 @@ export function WorkspaceContextMenu({
 
   if (workspace) {
     entries.push({
+      kind: "collaborators",
+      workspaceId: workspace.id,
+      sessionId: first?.id,
+    });
+  }
+
+  if (workspace) {
+    entries.push({
       kind: "item",
       icon: <IconPencil size={20} />,
       label: "Rename",
