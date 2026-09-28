@@ -68,4 +68,19 @@ describe("validateFrontendBuild", () => {
       rmSync(missing, { recursive: true, force: true });
     }
   });
+
+  test("rejects a bundle built with development React", () => {
+    const dir = fixture({ inputsHash: "source-one", assets: ["App-a.js"] });
+    writeFileSync(
+      join(dir, "App-a.js"),
+      'console.error("Each child in a list should have a unique \\"key\\" prop.")',
+    );
+    try {
+      expect(() => validateFrontendBuild(dir, "source-one")).toThrow(
+        "development React",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

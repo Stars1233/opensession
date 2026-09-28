@@ -6,6 +6,10 @@ import {
   frontendInputsHash,
 } from "../packages/core/opensession-server/src/server/frontend-build";
 
+/** A warning only React's development build carries. Development React
+ *  records a performance.measure per component render and never clears them. */
+const REACT_DEV_MARKER = "Each child in a list should have a unique";
+
 type BundleMeta = {
   inputsHash?: unknown;
   assets?: unknown;
@@ -38,6 +42,14 @@ export function validateFrontendBuild(
     if (typeof asset !== "string" || !asset || !existsSync(join(dist, asset))) {
       throw new Error(
         `frontend bundle is incomplete: missing ${String(asset)}`,
+      );
+    }
+  }
+  for (const asset of assets as string[]) {
+    if (!asset.endsWith(".js")) continue;
+    if (readFileSync(join(dist, asset), "utf8").includes(REACT_DEV_MARKER)) {
+      throw new Error(
+        `frontend bundle contains development React in ${asset}; build with process.env.NODE_ENV defined as "production"`,
       );
     }
   }

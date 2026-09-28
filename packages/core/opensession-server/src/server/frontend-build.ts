@@ -39,6 +39,7 @@ export const IS_DEV = process.env.OPENSESSION_DEV === "1";
 const SERVER_ROOT = join(import.meta.dir, "..", "..");
 export const REPO_ROOT = resolve(SERVER_ROOT, "../../..");
 export const FRONTEND_DIST = join(REPO_ROOT, ".frontend-dist");
+const FRONTEND_BUILD_DEFINE = { "process.env.NODE_ENV": '"production"' };
 export const FRONTEND_SRC = join(SERVER_ROOT, "src", "frontend");
 const FRONTEND_REL = "packages/core/opensession-server/src/frontend";
 
@@ -344,6 +345,10 @@ export async function compileAssets(): Promise<BundleMeta> {
       asset: "[name]-[hash].[ext]",
     },
     plugins: [reactCompilerPlugin(compilerCount, transformSync)],
+    // Without this, React resolves to its development build. That build
+    // records a performance.measure entry for every component render and
+    // never clears them, so a tab streaming messages grows without bound.
+    define: FRONTEND_BUILD_DEFINE,
   });
   if (!result.success) {
     throw new AggregateError(result.logs, "frontend build failed");
@@ -828,7 +833,10 @@ function pruneFrontendDist(keep: string[]): void {
 // dist compiled elsewhere (compileAssets) and have boot accept it as current.
 
 export function frontendInputsHash(): string {
-  const parts: string[] = [`bun:${Bun.version}`];
+  const parts: string[] = [
+    `bun:${Bun.version}`,
+    `define:${JSON.stringify(FRONTEND_BUILD_DEFINE)}`,
+  ];
   try {
     parts.push(
       `lock:${Bun.hash(readFileSync(join(REPO_ROOT, "bun.lock"))).toString(36)}`,
