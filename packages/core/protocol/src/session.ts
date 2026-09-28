@@ -714,6 +714,32 @@ export type ProtocolServerMessage =
       status: "provided" | "declined" | "expired";
       files?: { name: string; size: number }[];
     }
+  | {
+      /** The agent asked the session's driver to add a keychain credential
+       *  (register_credential). Metadata only: the secret is typed into the
+       *  card and posted over HTTP (/api/keychain/registrations), never sent
+       *  on the socket. `null` retires the card. */
+      type: "credential_registration_request";
+      sessionId: string;
+      credentialRequest: {
+        id: string;
+        service: string;
+        host: string;
+        description?: string;
+        injection?: { header?: string; scheme?: string };
+        allowedMethods?: string[];
+        allowedPathPrefixes?: string[];
+        owner: string;
+        requestedAt: number;
+        expiresAt: number;
+      } | null;
+    }
+  | {
+      type: "credential_registration_resolved";
+      sessionId: string;
+      requestId: string;
+      status: "registered" | "declined" | "expired";
+    }
   | { type: "command_ack_result"; sessionId: string; requestId: string }
   | {
       type: "command_result";

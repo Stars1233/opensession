@@ -69,7 +69,7 @@ export const INTERNAL_MCP_CAPABILITIES = {
     summary:
       "Borrow a teammate's credential for a stated purpose, with their approval.",
     guidance:
-      "Borrow a teammate's credential with their approval when ambient access is insufficient. `request_mac_keychain` uses Apple's native prompt for one macOS Keychain service/account and one HTTPS call. Only HTTP status returns, never secret values or response content. This does not access 1Password vaults.",
+      "Borrow a teammate's credential with their approval; the broker returns the upstream response, secret scrubbed. `register_credential` adds one owned by the session's driver, who pastes the secret into a card. `request_mac_keychain` makes one HTTPS call with a macOS Keychain item via Apple's prompt and returns only its status. No 1Password access.",
   },
   "opensession-publish": {
     summary: "Publish a directory as a durable internal web app.",
