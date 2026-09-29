@@ -176,13 +176,21 @@ function searchText(text: string): string {
 }
 
 /** Whether an archived row matches the search box: every word must appear
- * somewhere in its title, repo, branch, owner, automation or id (so a
+ * somewhere in its workspace name, title, repo, branch, owner, automation or id (so a
  * pasted session id finds its row). Exported for tests. */
 export function archivedMatchesSearch(s: UnifiedSession, query: string) {
   const terms = searchText(query).split(" ").filter(Boolean);
   if (terms.length === 0) return true;
   const hay = searchText(
-    [s.title, sessionRepo(s), s.branch, s.startedBy, s.automation, s.id]
+    [
+      s.workspaceName,
+      s.title,
+      sessionRepo(s),
+      s.branch,
+      s.startedBy,
+      s.automation,
+      s.id,
+    ]
       .filter(Boolean)
       .join(" "),
   );
@@ -671,6 +679,13 @@ export function Archived({
                     // while looking at everyone's; why, while not filtered by
                     // reason. The repo is the tile, which carries it in a glance.
                     const meta = [
+                      // The name the sidebar showed for this work, when the
+                      // tab's own title differs from it.
+                      s.workspaceName && s.workspaceName !== s.title && (
+                        <span key="ws" className="truncate">
+                          {s.workspaceName}
+                        </span>
+                      ),
                       owner === "everyone" && s.startedBy && (
                         <span key="by" className="truncate">
                           {s.startedBy}

@@ -62,3 +62,12 @@ test("the command menu finds archived sessions by branch and conversation", () =
   expect(hits[1].metaMatch).toBe(false);
   expect(searchArchived("", pool, new Map())).toEqual([]);
 });
+
+test("archive search matches the workspace name the sidebar showed", () => {
+  const s = row({
+    title: "Debug review",
+    branch: "fix-thing",
+    workspaceName: "How many T4 GPUs do we use",
+  });
+  expect(archivedMatchesSearch(s, "t4 gpus")).toBe(true);
+});

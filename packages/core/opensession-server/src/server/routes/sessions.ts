@@ -791,6 +791,9 @@ export function archivedIndexRow(
     ...(s.repo ? { repo: s.repo } : {}),
     ...(s.repoLess ? { repoLess: true } : {}),
     ...(s.workspaceId ? { workspaceId: s.workspaceId } : {}),
+    // The name the sidebar showed, which is what a person searches the
+    // archive for; a session's own title is often a generated tab name.
+    ...(s.workspaceName ? { workspaceName: s.workspaceName } : {}),
     // sessionRepo() falls back to the first external ref's kind, so a
     // repo-less feed session files under its feed rather than the default
     // repo. Identity is cheap; the ref's `url` and `title` are not, and

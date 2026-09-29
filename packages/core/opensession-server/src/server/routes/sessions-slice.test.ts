@@ -206,6 +206,16 @@ describe("archivedIndexRow", () => {
     });
   });
 
+  test("carries the workspace name the archive search matches", () => {
+    expect(
+      archivedIndexRow(archivedSession({ workspaceName: "How many GPUs" }))
+        .workspaceName,
+    ).toBe("How many GPUs");
+    expect(archivedIndexRow(archivedSession())).not.toHaveProperty(
+      "workspaceName",
+    );
+  });
+
   test("keeps the agent-started marker the history and sidebar rows read", () => {
     expect(
       archivedIndexRow(archivedSession({ agentStarted: true })).agentStarted,
