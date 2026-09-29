@@ -53,7 +53,7 @@ export function useStickyEdges(
   }, [root, enabled]);
 }
 
-function scrollParent(element: HTMLElement): HTMLElement | null {
+export function scrollParent(element: HTMLElement): HTMLElement | null {
   for (
     let parent = element.parentElement;
     parent;

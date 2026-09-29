@@ -3,6 +3,7 @@ import {
   applyDiffDefaults,
   applyViewedCollapse,
   EMPTY_DIFF_EXPANSION,
+  pickDiffScrollAnchor,
   rememberDiffExpansion,
   rememberedDiffExpansion,
   setDiffFileOpen,
@@ -62,5 +63,23 @@ describe("diff expansion", () => {
     expect(rememberedDiffExpansion("session\0repo")).toBe(state);
     expect(rememberedDiffExpansion("other")).toBe(EMPTY_DIFF_EXPANSION);
     expect(rememberedDiffExpansion(undefined)).toBe(EMPTY_DIFF_EXPANSION);
+  });
+
+  test("anchors scroll to the file at the top edge", () => {
+    const rows = [
+      { path: "a.ts", top: -900 },
+      { path: "b.ts", top: -120 },
+      { path: "c.ts", top: 300 },
+    ];
+    expect(pickDiffScrollAnchor(rows, 50)).toEqual({
+      path: "b.ts",
+      offset: -170,
+    });
+    // Above the first file, keep the first as the anchor.
+    expect(pickDiffScrollAnchor([{ path: "a.ts", top: 200 }], 50)).toEqual({
+      path: "a.ts",
+      offset: 150,
+    });
+    expect(pickDiffScrollAnchor([], 0)).toBeNull();
   });
 });
