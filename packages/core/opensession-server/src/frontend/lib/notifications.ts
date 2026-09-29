@@ -1,7 +1,7 @@
 /**
  * Your notification inbox, on this device. The server owns it
- * (src/server/notifications.ts): one row per session, pull request or
- * workspace, with read and done state shared by every device you use.
+ * (src/server/notifications.ts): one row per session, pull request,
+ * workspace or reminder, with read and done state shared by every device you use.
  *
  * Banners come only from a `notification` socket frame, which the server
  * sends once, when an event is first recorded. Nothing here compares session

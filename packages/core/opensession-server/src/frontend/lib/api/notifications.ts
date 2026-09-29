@@ -4,12 +4,18 @@ import { request } from "./request";
 // Wire model of the server's notification inbox
 // (src/server/notification-threads.ts).
 
-export const NOTIFICATION_KINDS = ["review_requested", "collaborator"] as const;
+export const NOTIFICATION_KINDS = [
+  "review_requested",
+  "review_done",
+  "mention",
+  "collaborator",
+  "reminder",
+] as const;
 
 export const notificationThreadSchema = z.object({
   id: z.string(),
   subject: z.object({
-    type: z.enum(["session", "pr", "workspace"]),
+    type: z.enum(["session", "pr", "workspace", "reminder"]),
     id: z.string(),
     title: z.string(),
     context: z.string().optional(),
@@ -26,7 +32,9 @@ export const notificationThreadSchema = z.object({
 
 const alertsSchema = z.object({
   reviews: z.boolean(),
+  mentions: z.boolean(),
   collaborators: z.boolean(),
+  reminders: z.boolean(),
 });
 
 const inboxSchema = z.object({
@@ -40,7 +48,9 @@ export type NotificationAlerts = z.infer<typeof alertsSchema>;
 
 export const DEFAULT_NOTIFICATION_ALERTS: NotificationAlerts = {
   reviews: true,
+  mentions: true,
   collaborators: true,
+  reminders: true,
 };
 
 export async function fetchNotifications(user: string): Promise<{

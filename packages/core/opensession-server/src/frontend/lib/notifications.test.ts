@@ -55,7 +55,9 @@ Object.assign(globalThis, {
       unread: 0,
       alerts: {
         reviews: true,
+        mentions: true,
         collaborators: true,
+        reminders: true,
       },
     });
   },
