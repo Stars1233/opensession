@@ -169,6 +169,21 @@ function sessionRepo(s: UnifiedSession): string {
   return sessionRepoOr(s, FALLBACK_REPO);
 }
 
+/** Whether an archived row matches the search box. The id is included so a
+ * pasted session id finds its row. Exported for tests. */
+export function archivedMatchesSearch(s: UnifiedSession, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [
+    s.title,
+    sessionRepo(s),
+    s.branch,
+    s.startedBy,
+    s.automation,
+    s.id,
+  ].some((field) => (field || "").toLowerCase().includes(q));
+}
+
 // The repo the sidebar is currently filtered to ("all" when unset), read fresh
 // so we inherit it as the archived page's starting repo.
 function sidebarRepo(): string {
@@ -290,19 +305,35 @@ export function Archived({
       list = list.filter((s) =>
         reason === "auto" ? isAutoReason(s) : !isAutoReason(s),
       );
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (s) =>
-          s.title.toLowerCase().includes(q) ||
-          sessionRepo(s).toLowerCase().includes(q) ||
-          (s.branch || "").toLowerCase().includes(q) ||
-          (s.startedBy || "").toLowerCase().includes(q) ||
-          (s.automation || "").toLowerCase().includes(q),
-      );
-    }
+    if (search.trim())
+      list = list.filter((s) => archivedMatchesSearch(s, search));
     return list;
   })();
+  // The page opens scoped to your sessions and the sidebar's repo, so a
+  // search can come back empty while the match sits one filter away. Count
+  // those so the list can say so instead of reading as "not archived".
+  const filtered = owner !== "everyone" || repo !== "all" || reason !== "all";
+  const hiddenMatches =
+    search.trim() && filtered
+      ? allArchived.filter((s) => archivedMatchesSearch(s, search)).length -
+        archived.length
+      : 0;
+  const clearFilters = () => {
+    setOwner("everyone");
+    setRepo("all");
+    setReason("all");
+  };
+  const hiddenMatchesNote =
+    hiddenMatches > 0 ? (
+      <p className="m-0 flex flex-wrap items-center gap-2 px-3 pt-4 text-meta text-faint">
+        {hiddenMatches === 1
+          ? "1 more match outside these filters."
+          : `${hiddenMatches} more matches outside these filters.`}
+        <Button size="sm" variant="soft" onClick={clearFilters}>
+          Show all
+        </Button>
+      </p>
+    ) : null;
   const visibleArchived = archived.slice(0, PAGE_SIZE);
   const sections = archiveSections(visibleArchived);
 
@@ -607,15 +638,18 @@ export function Archived({
             rowClassName="px-3"
           />
         ) : archived.length === 0 ? (
-          <Card>
-            <EmptyState>
-              Nothing archived
-              {search || owner !== "everyone" || repo !== "all"
-                ? " matches"
-                : " yet"}
-              .
-            </EmptyState>
-          </Card>
+          <>
+            <Card>
+              <EmptyState>
+                Nothing archived
+                {search || owner !== "everyone" || repo !== "all"
+                  ? " matches"
+                  : " yet"}
+                .
+              </EmptyState>
+            </Card>
+            {hiddenMatchesNote}
+          </>
         ) : (
           <div className={ARCHIVED_LIST}>
             {sections.map((section, sectionIndex) => (
@@ -777,6 +811,7 @@ export function Archived({
                 reach the older ones.
               </p>
             )}
+            {hiddenMatchesNote}
           </div>
         )}
       </div>

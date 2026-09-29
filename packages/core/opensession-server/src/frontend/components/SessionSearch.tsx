@@ -259,6 +259,41 @@ export function sortByMatch(
   );
 }
 
+/** How many archived matches the palette lists under its own heading. */
+const ARCHIVED_LIMIT = 20;
+
+/**
+ * Archived sessions matching `query`, best match first and most recent
+ * activity breaking ties. A conversation-only hit ranks below any match on
+ * what the row shows, as it does for live sessions.
+ */
+export function searchArchived(
+  query: string,
+  pool: UnifiedSession[],
+  snippets: ReadonlyMap<string, string>,
+): Array<{ session: UnifiedSession; metaMatch: boolean }> {
+  const terms = query.split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return [];
+  const index = sessionSearchIndex(pool);
+  const scores = new Map<UnifiedSession, number>();
+  const hits = pool.filter((s) => {
+    const hay = index.hay.get(s)!;
+    const score = sessionUsesPrLink(s, query)
+      ? 100
+      : matchScore(query, [s.title], hay) || (snippets.has(s.id) ? 10 : 0);
+    scores.set(s, score);
+    return score > 0;
+  });
+  return sortByMatch(hits, scores, index)
+    .slice(0, ARCHIVED_LIMIT)
+    .map((session) => ({
+      session,
+      metaMatch:
+        terms.every((t) => index.hay.get(session)!.includes(t)) ||
+        sessionUsesPrLink(session, query),
+    }));
+}
+
 /**
  * Stacks result groups by their best match, so a query naming a session puts
  * it above a list of loosely matching commands. Groups that tie keep their
@@ -454,8 +489,10 @@ export function SessionSearch({
     };
   }, [query]);
 
-  // Only live sessions are searchable.
+  // Live sessions make up the list and its filter options. Archived ones are
+  // searched only once there is a query, in their own group below.
   const pool = sessions.filter((s) => !s.archived);
+  const archivedPool = sessions.filter((s) => s.archived);
 
   const searchIndex = sessionSearchIndex(pool);
 
@@ -582,14 +619,15 @@ export function SessionSearch({
     // Falls back to deriving the text for a session the index hasn't seen, so
     // a pool and an index that are momentarily out of step still search.
     const hayOf = (s: UnifiedSession) => searchIndex.hay.get(s) ?? haystack(s);
+    const passesFilters = (s: UnifiedSession) => {
+      if (person !== "all" && !sessionHasOwner(s, person, canonical))
+        return false;
+      if (repo !== "all" && sessionRepo(s) !== repo) return false;
+      if (status !== "all" && sessionStatus(s) !== status) return false;
+      return true;
+    };
     const filtered = sortByRecentActivity(
-      pool.filter((s) => {
-        if (person !== "all" && !sessionHasOwner(s, person, canonical))
-          return false;
-        if (repo !== "all" && sessionRepo(s) !== repo) return false;
-        if (status !== "all" && sessionStatus(s) !== status) return false;
-        return true;
-      }),
+      pool.filter(passesFilters),
       searchIndex,
     );
     // Workspaces come first: a workspace is what the sidebar names, so its
@@ -648,9 +686,22 @@ export function SessionSearch({
           score: scores.get(s) ?? 1,
         };
       });
+    // Archived matches come last whatever they score: live work is what the
+    // palette is for, and the archive is where a person looks when it isn't.
+    const archivedRows: PaletteResult[] = hasQuery
+      ? searchArchived(q, archivedPool.filter(passesFilters), snippets).map(
+          ({ session, metaMatch }) => ({
+            type: "session",
+            category: "Archived",
+            session,
+            snippet: metaMatch ? undefined : snippets.get(session.id),
+          }),
+        )
+      : [];
     return [
       ...workspaceRows,
       ...orderGroupsByScore([actionResults, prResults, sessionRows]),
+      ...archivedRows,
     ];
   })();
   const keyedActive = results.findIndex(

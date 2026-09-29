@@ -6,6 +6,7 @@ import {
   knownToolAccounts,
   type OpenPr,
 } from "../lib/api";
+import { ARCHIVED_QUERY } from "../lib/session-list-state";
 import type { UnifiedSession } from "../lib/types";
 import { IconTile } from "./BrandTile";
 import { SessionSearch, type CommandPaletteAction } from "./SessionSearch";
@@ -54,6 +55,10 @@ export const CommandMenuHost = React.forwardRef<CommandMenuHandle, Props>(
     // ETag each time the palette opens.
     const [everyone, setEveryone] = useState<UnifiedSession[]>([]);
     const everyoneEtag = useRef<string | null>(null);
+    // The archived index, so a query also finds what was archived. Same
+    // slim, ETagged snapshot the Archived page reads.
+    const [archived, setArchived] = useState<UnifiedSession[]>([]);
+    const archivedEtag = useRef<string | null>(null);
 
     useImperativeHandle(ref, () => ({
       open: () => setOpen(true),
@@ -89,6 +94,17 @@ export const CommandMenuHost = React.forwardRef<CommandMenuHandle, Props>(
           setEveryone(JSON.parse(snapshot.text));
         })
         .catch(() => {});
+      fetchSessionsSnapshot({
+        etag: archivedEtag.current,
+        signal: ctrl.signal,
+        query: ARCHIVED_QUERY,
+      })
+        .then((snapshot) => {
+          if (snapshot.notModified || snapshot.text === null) return;
+          archivedEtag.current = snapshot.etag;
+          setArchived(JSON.parse(snapshot.text));
+        })
+        .catch(() => {});
       return () => ctrl.abort();
     }, [open]);
 
@@ -111,7 +127,10 @@ export const CommandMenuHost = React.forwardRef<CommandMenuHandle, Props>(
 
     return (
       <SessionSearch
-        sessions={mergeSessionPools(sessions, everyone)}
+        sessions={mergeSessionPools(
+          mergeSessionPools(sessions, everyone),
+          archived,
+        )}
         actions={[...actions, ...mcpActions]}
         onSelectSession={onSelectSession}
         onSelectPr={onSelectPr}
