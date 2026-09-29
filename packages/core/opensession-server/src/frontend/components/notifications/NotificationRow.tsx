@@ -43,7 +43,6 @@ const KIND_ICON: Record<
 > = {
   needs_input: { icon: <IconMessageQuestion />, ink: "text-yellow" },
   run_failed: { icon: <IconWarningTriangle />, ink: "text-red" },
-  run_finished: { icon: <IconCheckCircle />, ink: "text-green" },
   review_requested: { icon: <IconEye />, ink: "text-blue" },
   review_done: { icon: <IconCheckCircle />, ink: "text-blue" },
   mention: { icon: <IconAtSign />, ink: "text-accent" },

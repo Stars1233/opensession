@@ -102,7 +102,6 @@ const ALERT_ROWS: {
     desc: "Someone tags you or adds you to a workspace",
   },
   { group: "reminders", title: "Reminders", desc: "Desk task reminders" },
-  { group: "done", title: "Finished runs", desc: "A session finished working" },
 ];
 
 export function NotificationsPanel() {

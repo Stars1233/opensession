@@ -55,7 +55,6 @@ Object.assign(globalThis, {
       unread: 0,
       alerts: {
         needsInput: true,
-        done: false,
         reviews: true,
         mentions: true,
         reminders: true,
@@ -133,11 +132,11 @@ describe("notification inbox on this device", () => {
     expect(banners).toEqual([]);
   });
 
-  test("quiet kinds land in the list without a banner", async () => {
+  test("switched-off kinds land in the list without a banner", async () => {
     focused = false;
     store.receiveNotification(
       "Ada",
-      thread("os-3", { kind: "run_finished", reason: "Finished" }),
+      thread("os-3", { kind: "review_done", reason: "Sam reviewed it" }),
       false,
     );
     expect(store.unreadNotificationCount()).toBe(1);

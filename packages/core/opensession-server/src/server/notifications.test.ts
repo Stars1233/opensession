@@ -88,14 +88,16 @@ describe("notification inbox", () => {
     expect(inbox.threads[0].subject.context).toBe("acme");
   });
 
-  test("finished runs are recorded but only push when switched on", async () => {
+  test("a clean finish notifies nobody; a failure notifies once", async () => {
     const session = { id: "os-2", title: "Ship it", startedBy: "Ada" };
     await notifyRunOutcome(session, null, "outcome:run-1");
-    await notifyRunOutcome(session, null, "outcome:run-1");
     expect(pushes).toHaveLength(0);
-    expect((await getNotificationInbox("Ada")).threads).toHaveLength(1);
-    await setAlertPrefs("Ada", { done: true });
-    await notifyRunOutcome(session, null, "outcome:run-2");
+    expect((await getNotificationInbox("Ada")).threads).toHaveLength(0);
+    await notifyRunOutcome(session, "boom", "outcome:run-2");
+    await notifyRunOutcome(session, "boom", "outcome:run-2");
+    expect(pushes).toHaveLength(1);
+    await setAlertPrefs("Ada", { needsInput: false });
+    await notifyRunOutcome(session, "boom", "outcome:run-3");
     expect(pushes).toHaveLength(1);
   });
 

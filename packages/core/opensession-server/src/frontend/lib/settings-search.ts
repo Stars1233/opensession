@@ -84,8 +84,6 @@ export const SETTINGS_KEYWORDS = {
     "sound",
     "alerts",
     "needs input",
-    "run complete",
-    "finished runs",
     "reviews",
     "mentions",
     "reminders",

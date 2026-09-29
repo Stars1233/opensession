@@ -142,8 +142,6 @@ async function migrateLegacyAlerts(current: NotificationAlerts): Promise<void> {
       legacy.needsInput !== current.needsInput
     )
       patch.needsInput = legacy.needsInput;
-    if (legacy.done !== undefined && legacy.done !== current.done)
-      patch.done = legacy.done;
     if (Object.keys(patch).length) await setNotificationAlerts(patch);
   } catch {}
 }

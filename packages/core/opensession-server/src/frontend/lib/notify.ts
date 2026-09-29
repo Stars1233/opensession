@@ -53,7 +53,6 @@ const storedSettingsSchema = z.object({
   when: z.enum(["always", "unfocused", "off"]).optional().catch(undefined),
   // The event switches from before they moved to the server.
   needsInput: z.boolean().optional().catch(undefined),
-  done: z.boolean().optional().catch(undefined),
 });
 type StoredSettings = z.infer<typeof storedSettingsSchema>;
 
@@ -70,7 +69,6 @@ function storedSettings(): StoredSettings | null {
 
 export interface LegacyEventSettings {
   needsInput?: boolean;
-  done?: boolean;
 }
 
 /**
@@ -83,7 +81,6 @@ export function legacyEventSettings(): LegacyEventSettings | null {
   if (!stored) return null;
   const out: LegacyEventSettings = {};
   if (stored.needsInput === false) out.needsInput = false;
-  if (stored.done === true) out.done = true;
   return Object.keys(out).length ? out : null;
 }
 

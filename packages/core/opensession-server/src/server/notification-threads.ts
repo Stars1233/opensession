@@ -17,7 +17,6 @@
 export const NOTIFICATION_KINDS = [
   "needs_input",
   "run_failed",
-  "run_finished",
   "review_requested",
   "review_done",
   "mention",
@@ -29,7 +28,6 @@ export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 /** What a person switches on or off in Settings. Each covers one or more kinds. */
 export const ALERT_GROUPS = {
   needsInput: ["needs_input", "run_failed"],
-  done: ["run_finished"],
   reviews: ["review_requested", "review_done"],
   mentions: ["mention", "collaborator"],
   reminders: ["reminder"],
@@ -37,10 +35,10 @@ export const ALERT_GROUPS = {
 export type AlertGroup = keyof typeof ALERT_GROUPS;
 export type AlertPrefs = Record<AlertGroup, boolean>;
 
-/** Finished runs land in the inbox but stay quiet unless asked for. */
+/** Everything alerts by default. A run that finishes cleanly is not a
+ *  notification at all: the sidebar already shows it. */
 export const DEFAULT_ALERT_PREFS: AlertPrefs = {
   needsInput: true,
-  done: false,
   reviews: true,
   mentions: true,
   reminders: true,

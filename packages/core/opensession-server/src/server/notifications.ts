@@ -169,9 +169,10 @@ export interface RunOutcomeSession {
 }
 
 /**
- * A run ended. The person who started the session hears about it, unless the
+ * A run failed. The person who started the session hears about it, unless the
  * session is not really theirs to watch: automations, the Desk, and worker
- * sessions whose parent agent already receives the outcome.
+ * sessions whose parent agent already receives the outcome. A clean finish
+ * notifies nobody.
  *
  * `runKey` names the run (its projection id) so a replayed projection after
  * a restart is recognized. Without one there is no replay path to guard.
@@ -182,15 +183,14 @@ export async function notifyRunOutcome(
   runKey: string | undefined,
   noticeLabel?: string,
 ): Promise<void> {
-  if (!session?.startedBy) return;
+  if (!errorMessage || !session?.startedBy) return;
   if (session.automation || session.desk) return;
   if (session.parentSessionId || session.spawnedBy) return;
-  const failed = !!errorMessage;
   await notifyUser(session.startedBy, {
-    kind: failed ? "run_failed" : "run_finished",
+    kind: "run_failed",
     subject: sessionSubject(session.id, session),
-    reason: failed ? noticeLabel || "Run failed" : "Finished",
-    body: errorMessage ?? "",
+    reason: noticeLabel || "Run failed",
+    body: errorMessage,
     url: sessionUrl(session.id),
     ...(runKey ? { eventKey: `run:${runKey}` } : {}),
   });

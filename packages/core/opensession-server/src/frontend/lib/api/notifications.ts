@@ -7,7 +7,6 @@ import { request } from "./request";
 export const NOTIFICATION_KINDS = [
   "needs_input",
   "run_failed",
-  "run_finished",
   "review_requested",
   "review_done",
   "mention",
@@ -35,7 +34,6 @@ export const notificationThreadSchema = z.object({
 
 const alertsSchema = z.object({
   needsInput: z.boolean(),
-  done: z.boolean(),
   reviews: z.boolean(),
   mentions: z.boolean(),
   reminders: z.boolean(),
@@ -52,7 +50,6 @@ export type NotificationAlerts = z.infer<typeof alertsSchema>;
 
 export const DEFAULT_NOTIFICATION_ALERTS: NotificationAlerts = {
   needsInput: true,
-  done: false,
   reviews: true,
   mentions: true,
   reminders: true,

@@ -73,14 +73,14 @@ describe("notification threads", () => {
     doc = markNotificationThreads(doc, { all: true, done: true }).doc;
     const bumped = applyNotificationEvent(
       doc,
-      event({ kind: "run_finished", reason: "Finished", at: T0 + 2 }),
+      event({ kind: "run_failed", reason: "Run failed", at: T0 + 2 }),
     );
     expect(bumped.doc.threads.map((t) => t.id)).toEqual([
       "session:os-1",
       "session:os-2",
     ]);
     expect(bumped.thread).toMatchObject({
-      kind: "run_finished",
+      kind: "run_failed",
       unread: true,
       done: false,
     });
@@ -121,15 +121,25 @@ describe("notification threads", () => {
     expect(doc.threads).toHaveLength(MAX_THREADS);
   });
 
-  test("alerts follow the person's settings, finished runs quiet by default", () => {
+  test("alerts follow the person's settings", () => {
     expect(shouldAlert(null, "needs_input")).toBe(true);
-    expect(shouldAlert(null, "run_finished")).toBe(false);
-    expect(
-      shouldAlert({ threads: [], alerts: { done: true } }, "run_finished"),
-    ).toBe(true);
+    expect(shouldAlert(null, "run_failed")).toBe(true);
     expect(
       shouldAlert({ threads: [], alerts: { reviews: false } }, "review_done"),
     ).toBe(false);
+  });
+
+  test("finished-run rows stored before they were removed are dropped", () => {
+    const { doc } = applyNotificationEvent(empty, event());
+    const stored = JSON.parse(JSON.stringify(doc));
+    stored.threads.push({
+      ...stored.threads[0],
+      id: "session:old",
+      kind: "run_finished",
+      subject: { ...stored.threads[0].subject, id: "old" },
+    });
+    stored.alerts = { done: true };
+    expect(cleanDocument(stored)).toEqual({ threads: doc.threads });
   });
 
   test("stored documents are cleaned and the wire form hides event keys", () => {
