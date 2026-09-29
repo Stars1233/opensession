@@ -50,6 +50,11 @@ import type {
 export type { PrHostCapabilities } from "./pr-contract";
 import { fetchWithTimeout } from "./shared/fetch-with-timeout";
 import { noteGithubGraphqlCall } from "./github-budget";
+import {
+  summarizeRollupCounts,
+  type PrChecksSummary,
+  type RollupContextCounts,
+} from "./pr-check-summary";
 
 /** One row of the bulk `gh pr list` refresh (sessions.ts). `latestReviews`
  *  and `body` are only populated by listOpenPrs — see the field comments. */
@@ -165,6 +170,96 @@ export interface PrHost {
     repo: string,
     cursor?: string,
   ): Promise<{ changed: boolean; cursor?: string }>;
+  /** CI check counts for these open PRs, keyed by number, with the head SHA
+   *  they describe. Absent on hosts without CI. null = the query failed. */
+  checkSummaries?(
+    repo: string,
+    numbers: number[],
+  ): Promise<Map<
+    number,
+    { headRefOid: string; checks: PrChecksSummary }
+  > | null>;
+}
+
+// Per-state counts only: no check contexts are paged, which is what made the
+// bulk statusCheckRollup unaffordable. ~3 GraphQL points per 100 PRs.
+const CHECK_SUMMARY_FRAGMENT = `fragment CheckSummary on PullRequest {
+  number
+  commits(last: 1) { nodes { commit { oid statusCheckRollup {
+    contexts(first: 1) {
+      totalCount
+      checkRunCountsByState { state count }
+      statusContextCountsByState { state count }
+    }
+  } } } }
+}`;
+export const CHECK_SUMMARY_BATCH = 100;
+
+interface CheckSummaryNode {
+  number: number;
+  commits?: {
+    nodes?: Array<{
+      commit?: {
+        oid?: string;
+        statusCheckRollup?: { contexts?: RollupContextCounts } | null;
+      };
+    }>;
+  };
+}
+
+async function githubCheckSummaries(
+  repo: string,
+  numbers: number[],
+): Promise<Map<
+  number,
+  { headRefOid: string; checks: PrChecksSummary }
+> | null> {
+  const [owner, name] = repo.split("/");
+  if (!owner || !name) return null;
+  const out = new Map<
+    number,
+    { headRefOid: string; checks: PrChecksSummary }
+  >();
+  const unique = [...new Set(numbers)].filter((n) => Number.isInteger(n));
+  for (let i = 0; i < unique.length; i += CHECK_SUMMARY_BATCH) {
+    const batch = unique.slice(i, i + CHECK_SUMMARY_BATCH);
+    const fields = batch
+      .map((n) => `pr${n}: pullRequest(number: ${n}) { ...CheckSummary }`)
+      .join("\n");
+    const query = `query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+${fields}
+  }
+}
+${CHECK_SUMMARY_FRAGMENT}`;
+    const res = await ghJson<{
+      data?: { repository?: Record<string, CheckSummaryNode | null> };
+    }>(
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-f",
+        `owner=${owner}`,
+        "-f",
+        `name=${name}`,
+      ],
+      "pr-cache:check-summaries",
+      repo,
+    );
+    const nodes = res?.data?.repository;
+    if (!nodes) return null;
+    for (const node of Object.values(nodes)) {
+      const commit = node?.commits?.nodes?.[0]?.commit;
+      if (!node || !commit?.oid) continue;
+      out.set(node.number, {
+        headRefOid: commit.oid,
+        checks: summarizeRollupCounts(commit.statusCheckRollup?.contexts),
+      });
+    }
+  }
+  return out;
 }
 
 /** Run `gh` and parse its JSON output; null on any failure (also flags shared
@@ -172,13 +267,15 @@ export interface PrHost {
 export async function ghJson<T>(
   args: string[],
   consumer = "gh-json",
+  credentialRepo?: string,
 ): Promise<T | null> {
   const started = Date.now();
   let ok = false;
   try {
     // `--repo owner/name` selects the installation that serves the call.
+    // `gh api` takes no --repo flag, so its callers name the repo directly.
     const repoFlag = args.indexOf("--repo");
-    const repo = repoFlag >= 0 ? args[repoFlag + 1] : undefined;
+    const repo = repoFlag >= 0 ? args[repoFlag + 1] : credentialRepo;
     const credential = await resolveGithubCredential(
       serviceGithubCredential,
       repo ? { repo } : {},
@@ -289,6 +386,8 @@ export const githubPrHost: PrHost = {
       ],
       "pr-cache:list-recent",
     ),
+
+  checkSummaries: (repo, numbers) => githubCheckSummaries(repo, numbers),
 
   // Conditional GET (If-None-Match) on the most recently updated PR: 304 =
   // the repo's PR set is untouched, and GitHub documents that 304s on

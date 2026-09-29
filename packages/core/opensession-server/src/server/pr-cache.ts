@@ -35,20 +35,21 @@ import {
   type ReviewRequestRef,
 } from "./github-review-requests";
 import type { UnifiedSession, OsReviewSummary } from "./types";
+import {
+  checksNeedRefresh,
+  EMPTY_CHECKS,
+  type PrChecksSummary,
+} from "./pr-check-summary";
 
 // PR cache: branch → rich PR info, refreshed every 60s. A single batched
 // `gh pr list` carries everything the Reviews table renders as columns
 // (diffstat, review decision, author), so the list never has to N+1 fetch per
-// PR — only the detail pane does. The bulk cache carries NO CI checks: the
+// PR — only the detail pane does. The bulk list carries NO CI checks: the
 // statusCheckRollup bulk query cost ~111 GraphQL points per refresh (rollup
-// cost scales with check runs) and alone exhausted the 5000/hr GraphQL quota
-// — real checks come from the cheap per-PR detail query (pr-info.ts).
-interface PrChecksSummary {
-  total: number;
-  passed: number;
-  failed: number;
-  pending: number;
-}
+// cost scales with check runs) and alone exhausted the 5000/hr GraphQL quota.
+// Check COUNTS come from a separate per-state query (pr-check-summary.ts) that
+// only asks about PRs whose CI is running or unknown; the check list itself
+// comes from the per-PR detail query (pr-info.ts).
 export interface PrInfo {
   url: string;
   state: "OPEN" | "MERGED" | "CLOSED";
@@ -63,6 +64,8 @@ export interface PrInfo {
   createdAt: string;
   updatedAt: string;
   checks: PrChecksSummary;
+  /** The head SHA `checks` describes. Absent until counts were fetched. */
+  checksHead?: string;
   /** Current head SHA, so a stored review verdict can be told apart from one
    *  the branch has since moved past. Absent on rows from an older snapshot. */
   headRefOid?: string;
@@ -654,7 +657,12 @@ export function applyPrWebhookToBulkCache(
     author: pr.user?.login || prev?.author || "",
     createdAt: pr.created_at || prev?.createdAt || "",
     updatedAt: pr.updated_at || new Date().toISOString(),
-    checks: prev?.checks || { total: 0, passed: 0, failed: 0, pending: 0 },
+    // A push moves the head, and the counts describe the old one.
+    headRefOid: pr.head?.sha || prev?.headRefOid,
+    ...(prev?.checksHead &&
+    prev.checksHead === (pr.head?.sha || prev.headRefOid)
+      ? { checks: prev.checks, checksHead: prev.checksHead }
+      : { checks: { ...EMPTY_CHECKS } }),
     // REST payloads carry mergeable as true/false/null (computed async).
     mergeable:
       pr.mergeable === true
@@ -802,6 +810,80 @@ export function footerPrsFor(
   return out;
 }
 
+// ghRepo \0 branch → a CI webhook reported activity since the last counts.
+const staleCheckBranches = new Set<string>();
+
+/** A CI delivery for this branch: re-ask its check counts on the next sweep,
+ *  even if they looked settled (a re-run keeps the same head). */
+export function markPrChecksStale(ghRepo: string, branch: string): void {
+  staleCheckBranches.add(`${ghRepo.toLowerCase()}\u0000${branch}`);
+}
+
+/**
+ * Fill in CI check counts for open PRs whose CI is running, unknown, or
+ * poked by a webhook. Runs every sweep, including the ones the change probe
+ * short-circuits: a check finishing does not bump the PR's updatedAt, so the
+ * probe cannot see it. Settled PRs cost nothing, so this stays a few points.
+ */
+async function refreshCheckSummaries(
+  next: Map<string, Map<string, PrInfo>>,
+): Promise<void> {
+  const now = Date.now();
+  const changedBranches: string[] = [];
+  for (const repo of prRepos()) {
+    const byBranch = next.get(repo.id);
+    const checkSummaries = repo.host.checkSummaries;
+    if (!byBranch || !checkSummaries) continue;
+    if (
+      repo.ghBacked &&
+      (await ghRateLimited("graphql", { repo: repo.ghRepo }))
+    )
+      continue;
+    const keyPrefix = `${repo.ghRepo.toLowerCase()}\u0000`;
+    const wanted = new Map<number, string>();
+    const consumed: string[] = [];
+    for (const [branch, pr] of byBranch) {
+      const key = keyPrefix + branch;
+      const stale = staleCheckBranches.has(key);
+      if (!checksNeedRefresh(pr, { stale, now })) continue;
+      wanted.set(pr.number, branch);
+      if (stale) consumed.push(key);
+    }
+    if (wanted.size === 0) continue;
+    const summaries = await checkSummaries(repo.ghRepo, [...wanted.keys()]);
+    if (!summaries) continue;
+    for (const key of consumed) staleCheckBranches.delete(key);
+    for (const [number, branch] of wanted) {
+      const summary = summaries.get(number);
+      const pr = byBranch.get(branch);
+      if (!summary || !pr || pr.number !== number) continue;
+      const same =
+        pr.checksHead === summary.headRefOid &&
+        pr.checks.total === summary.checks.total &&
+        pr.checks.passed === summary.checks.passed &&
+        pr.checks.failed === summary.checks.failed &&
+        pr.checks.pending === summary.checks.pending;
+      // Always record the head: a PR with no CI must stop being asked about.
+      byBranch.set(branch, {
+        ...pr,
+        checks: summary.checks,
+        checksHead: summary.headRefOid,
+        headRefOid: summary.headRefOid,
+      });
+      if (!same) changedBranches.push(branch);
+    }
+  }
+  if (changedBranches.length === 0) return;
+  schedulePrCachePersist();
+  // Session rows carry these counts; republish the ones on changed branches.
+  void import("./session-cache")
+    .then(({ publishSessionRowsForBranch }) => {
+      for (const branch of new Set(changedBranches))
+        void publishSessionRowsForBranch(branch);
+    })
+    .catch((e) => console.error("[pr-cache] check row publish failed:", e));
+}
+
 export function refreshPrCache(): Promise<Set<string>> {
   if (prRefreshPromise) return prRefreshPromise;
   prRefreshPromise = refreshPrCacheInner().finally(() => {
@@ -935,6 +1017,17 @@ async function refreshPrCacheInner(): Promise<Set<string>> {
         if (people.size) reviewedByNumber.set(r.number, [...people]);
       }
 
+      const staleByNumber = new Map<number, PrInfo>();
+      for (const prev of stale?.values() || [])
+        staleByNumber.set(prev.number, prev);
+      // Counts for the same head carry over; the check-summary pass after the
+      // sweep fills or updates the rest.
+      const carriedChecks = (pr: BulkPr) => {
+        const prev = staleByNumber.get(pr.number);
+        return prev?.checksHead && prev.checksHead === pr.headRefOid
+          ? { checks: prev.checks, checksHead: prev.checksHead }
+          : { checks: { ...EMPTY_CHECKS } };
+      };
       const toInfo = (pr: BulkPr): PrInfo => ({
         url: pr.url,
         state: pr.state as PrInfo["state"],
@@ -949,10 +1042,7 @@ async function refreshPrCacheInner(): Promise<Set<string>> {
         author: pr.author?.login || pr.author?.name || "",
         createdAt: pr.createdAt || "",
         updatedAt: pr.updatedAt || "",
-        // Always empty in the bulk cache (see PR_REPO_LIMITS comment) — the UI
-        // treats zero checks as "no known CI blocker"; the detail pane has the
-        // real rollup.
-        checks: { total: 0, passed: 0, failed: 0, pending: 0 },
+        ...carriedChecks(pr),
         headRefOid: pr.headRefOid || undefined,
         mergeable: pr.mergeable || "UNKNOWN",
         reviewRequested: reviewRequestPersonKeys(
@@ -1010,6 +1100,7 @@ async function refreshPrCacheInner(): Promise<Set<string>> {
       }
       next.set(repo.id, map);
     }
+    await refreshCheckSummaries(next);
     // A close can land while this slow GitHub sweep is in flight. Preserve the
     // mutation over any pre-close OPEN row the sweep already fetched.
     applyPrCloseTombstones(next, refreshGeneration, reviewAuthoritativeRepos);

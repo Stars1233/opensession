@@ -20,7 +20,7 @@
  * Kill switch: OPENSESSION_PR_WEBHOOKS=0 reverts to pure polling.
  */
 import { configuredRepos, type Repo } from "./config";
-import { sessionRefFromPrBody } from "./pr-cache";
+import { markPrChecksStale, sessionRefFromPrBody } from "./pr-cache";
 import { invalidatePrInfo } from "./pr-info";
 import { getReviewRequest, setReviewRequest } from "./review-requests";
 import { executeSessionProjection } from "./session-projection-executor";
@@ -121,6 +121,9 @@ export function isCiWebhookEvent(event: string): boolean {
 
 function scheduleCiRefresh(repoId: string, ghRepo: string, branch: string) {
   const key = `${ghRepo}\u0000${branch}`;
+  // Re-ask the sidebar's check counts on the next sweep: a finished or re-run
+  // check does not move the PR's head, so the counts would otherwise stand.
+  markPrChecksStale(ghRepo, branch);
   if (pendingCiRefresh.has(key)) return;
   pendingCiRefresh.set(
     key,
