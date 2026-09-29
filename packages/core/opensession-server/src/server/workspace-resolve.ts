@@ -28,6 +28,24 @@ import { workspaceOwningWorktree } from "./session-repos";
 import { getRepo, listWorktrees } from "./worktree";
 import { prKey } from "../agents/github/constants";
 import type { ExternalRef, UnifiedSession } from "./types";
+
+/** What a PR number resolves to on GitHub: its head branch and title. */
+type PrLookup = (
+  ghRepo: string,
+  number: number,
+) => Promise<{ branch: string; title: string } | null>;
+
+// Loaded lazily so resolving a known PR never pulls the GitHub client in.
+const githubPrLookup: PrLookup = async (ghRepo, number) => {
+  const { getPrAutomationDetails } = await import("./pr-info");
+  const pr = await getPrAutomationDetails(String(number), ghRepo);
+  return pr?.headRefName ? { branch: pr.headRefName, title: pr.title } : null;
+};
+let lookupPr: PrLookup = githubPrLookup;
+
+export function __setPrLookupForTest(lookup: PrLookup | undefined): void {
+  lookupPr = lookup ?? githubPrLookup;
+}
 import { isNativeSessionId } from "./paths";
 
 /** Does this session carry the PR (primary branch, attached repo, or link)? */
@@ -187,6 +205,21 @@ export async function resolvePrWorkspace(input: {
           number = pr.number;
           branch = pr.branch;
           title = title || pr.title;
+        }
+      }
+      // A number the caches have never seen (an older PR, or one named in
+      // prose) still needs its branch: without it the workspace has no Review
+      // to show and opens on an empty composer. Ask GitHub; a PR it does not
+      // know is not one to mint a workspace for.
+      if (number !== undefined && !branch) {
+        const ghRepo = getRepo(repoId).ghRepo;
+        const found = ghRepo
+          ? await lookupPr(ghRepo, number).catch(() => undefined)
+          : undefined;
+        if (found === null) return null;
+        if (found) {
+          branch = found.branch;
+          title = title || found.title;
         }
       }
       if (number === undefined && !branch) return null;

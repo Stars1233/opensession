@@ -41,7 +41,7 @@ const { SessionKernelStore, __setSessionKernelStoreForTest } =
   await import("./session-kernel");
 const { __resetWorkspaceProjectionForTest, createWorkspace, getWorkspace } =
   await import("./workspaces");
-const { resolvePrWorkspace, workspaceBacksOpenPr } =
+const { __setPrLookupForTest, resolvePrWorkspace, workspaceBacksOpenPr } =
   await import("./workspace-resolve");
 
 // Workspaces live in the kernel catalog: a fresh in-memory store per test.
@@ -66,6 +66,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  __setPrLookupForTest(undefined);
   __setSessionListStoreForTest(previousIndex);
   index.close();
   invalidateSessionsCache();
@@ -173,5 +174,67 @@ describe("resolvePrWorkspace", () => {
     expect((await getWorkspace(workspace.id))?.name).toBe(
       "Native fallback cleanup",
     );
+  });
+
+  test("looks up the branch of a PR number the caches do not know", async () => {
+    const number = 9130;
+    const asked: Array<[string, number]> = [];
+    __setPrLookupForTest(async (repo, n) => {
+      asked.push([repo, n]);
+      return { branch: "older-change", title: "An older change" };
+    });
+
+    const resolved = await resolvePrWorkspace({
+      repoId,
+      number,
+      createdBy: "Kent",
+    });
+
+    expect(asked).toEqual([[ghRepo, number]]);
+    expect(resolved?.created).toBe(true);
+    expect(resolved?.pr).toEqual({
+      repo: repoId,
+      number,
+      branch: "older-change",
+    });
+    expect(resolved?.workspace.branch).toBe("older-change");
+    expect(resolved?.workspace.name).toBe(`#${number} An older change`);
+  });
+
+  test("repairs a number-only workspace minted before the branch was known", async () => {
+    const number = 9131;
+    const workspace = await createWorkspace({
+      name: `#${number}`,
+      repo: repoId,
+      key: `ghpr-${prKey(number, ghRepo)}`,
+      prNumber: number,
+      createdBy: "Kent",
+    });
+    __setPrLookupForTest(async () => ({
+      branch: "late-branch",
+      title: "Late title",
+    }));
+
+    const resolved = await resolvePrWorkspace({
+      repoId,
+      number,
+      createdBy: "Kent",
+    });
+
+    expect(resolved?.workspace.id).toBe(workspace.id);
+    expect(resolved?.workspace.branch).toBe("late-branch");
+    expect(resolved?.workspace.name).toBe(`#${number} Late title`);
+  });
+
+  test("mints nothing for a PR number GitHub does not know", async () => {
+    __setPrLookupForTest(async () => null);
+
+    const resolved = await resolvePrWorkspace({
+      repoId,
+      number: 9132,
+      createdBy: "Kent",
+    });
+
+    expect(resolved).toBeNull();
   });
 });
