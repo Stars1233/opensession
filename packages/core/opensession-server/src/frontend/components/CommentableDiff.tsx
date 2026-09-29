@@ -63,6 +63,7 @@ import { Menu, MENU_ICON } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { errorMessage } from "../lib/error-message";
 import { useStickyEdges } from "../hooks/useStickyEdges";
+import { useDiffScrollMemory } from "../hooks/useDiffScrollMemory";
 import { UserAvatar } from "./UserAvatar";
 import { ExtBadge, fileExt } from "./lang-marks";
 import { cn } from "../ui/cn";
@@ -383,6 +384,7 @@ export function CommentableDiff({ patch, options }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const [stickyRoot, setStickyRoot] = useState<HTMLDivElement | null>(null);
   useStickyEdges(stickyRoot, stickyFileHeaders);
+  useDiffScrollMemory(stickyRoot, expansionKey);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );

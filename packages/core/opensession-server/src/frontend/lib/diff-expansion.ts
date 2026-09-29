@@ -108,3 +108,42 @@ export function rememberDiffExpansion(
     if (oldest !== undefined) remembered.delete(oldest);
   }
 }
+
+/** Where the reader was: the file at the top of the scrollport and how far
+ *  its row sits from that edge (negative once scrolled into it). Anchoring to
+ *  a file rather than a raw offset keeps the spot while the files above it
+ *  mount and grow. */
+export interface DiffScrollAnchor {
+  path: string;
+  offset: number;
+}
+
+export function pickDiffScrollAnchor(
+  rows: readonly { path: string; top: number }[],
+  edgeTop: number,
+): DiffScrollAnchor | null {
+  let anchor: { path: string; top: number } | null = null;
+  for (const row of rows) {
+    if (anchor && row.top > edgeTop + 1) break;
+    anchor = row;
+  }
+  return anchor ? { path: anchor.path, offset: anchor.top - edgeTop } : null;
+}
+
+const rememberedScroll = new Map<string, DiffScrollAnchor | null>();
+
+export function rememberedDiffScroll(key: string) {
+  return rememberedScroll.get(key) ?? null;
+}
+
+export function rememberDiffScroll(
+  key: string,
+  anchor: DiffScrollAnchor | null,
+) {
+  rememberedScroll.delete(key);
+  rememberedScroll.set(key, anchor);
+  if (rememberedScroll.size > MAX_REMEMBERED) {
+    const oldest = rememberedScroll.keys().next().value;
+    if (oldest !== undefined) rememberedScroll.delete(oldest);
+  }
+}
