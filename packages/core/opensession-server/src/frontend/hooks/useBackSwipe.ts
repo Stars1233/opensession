@@ -187,12 +187,13 @@ function armStall() {
 
 // A start inside something already panned to the right: a rightward drag
 // there scrolls it back, so the touch is the scroller's. An unscrolled element
-// has nowhere to go rightward and is no reason to decline.
-function insideScrolledRow(target: EventTarget | null): boolean {
-  let el = target instanceof Element ? target : null;
-  while (el && el !== document.body) {
-    if (el.scrollLeft > 0) return true;
-    el = el.parentElement;
+// has nowhere to go rightward and is no reason to decline. Walks the composed
+// path because a diff's code scroller lives inside the renderer's shadow root,
+// where `parentElement` from the retargeted host never reaches it.
+function insideScrolledRow(e: TouchEvent): boolean {
+  for (const target of e.composedPath()) {
+    if (target === document.body) return false;
+    if (target instanceof Element && target.scrollLeft > 0) return true;
   }
   return false;
 }
@@ -267,7 +268,7 @@ function onStart(e: TouchEvent) {
   vx = 0;
   dragging = false;
   zone = edgeZoneAt(startX);
-  if (zone === "soft" && insideScrolledRow(e.target)) zone = null;
+  if (zone === "soft" && insideScrolledRow(e)) zone = null;
   startTarget = zone ? e.target : null;
   // The bezel edge is app-owned gesture territory: preventDefault here is
   // what stops the browser's native back-swipe (iOS Safari) from starting a
