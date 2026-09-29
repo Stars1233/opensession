@@ -134,8 +134,11 @@ repository and never a person's: the code permission set for unattended
 code runs and for machine senders into an interactive session (a review
 handoff, a worker report, an automation), the read set for every ask run,
 whoever started it, because the review workflows process untrusted PR
-content and can print their environment. Ask runs also ignore any
-launcher-supplied token. The gateway still uses a person's token for the UI
+content and can print their environment. The token also covers the
+session's attached repositories under the same owner, with the same
+permission set, so a machine-started turn reaches every repository the
+session spans. If the App cannot see one of them, the run gets its own
+repository alone. Ask runs also ignore any launcher-supplied token. The gateway still uses a person's token for the UI
 buttons (merge, close, review, comment). Agents use `gh` directly, without
 dedicated PR MCP tools. A run never inherits the host operator's `gh` login:
 its `GH_CONFIG_DIR` is run-scoped, so a missing token fails with "not logged in".

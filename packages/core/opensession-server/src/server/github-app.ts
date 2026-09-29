@@ -569,9 +569,39 @@ export function githubRepositoryMatchesInstallation(
   );
 }
 
+/** The repository names (no owner) one run's token covers: `ghRepo` first,
+ * then each of `alsoRepos` under the same owner, deduplicated. An
+ * installation token belongs to one installation, so a repository under a
+ * different owner can never ride along; it is dropped with a warning. */
+export function githubRunTokenRepositories(
+  ghRepo: string,
+  alsoRepos: readonly string[] = [],
+): string[] {
+  const owner = githubRepoOwner(ghRepo)?.toLowerCase();
+  const names = [ghRepo.split("/")[1]];
+  for (const other of alsoRepos) {
+    const [otherOwner, name, ...rest] = other.split("/");
+    if (!name || rest.length || otherOwner?.toLowerCase() !== owner) {
+      console.warn(
+        `[github-app] ${other} left out of the ${ghRepo} run token: not under the same owner`,
+      );
+      continue;
+    }
+    if (!names.some((n) => n.toLowerCase() === name.toLowerCase()))
+      names.push(name);
+  }
+  return names;
+}
+
 export async function githubAppRepositoryToken(
   ghRepo: string,
-  opts: { readOnly?: boolean } = {},
+  opts: {
+    readOnly?: boolean;
+    /** More `owner/name` repositories the same token should reach: a
+     *  session's attached repositories. Same owner only
+     *  (githubRunTokenRepositories). */
+    alsoRepos?: readonly string[];
+  } = {},
 ): Promise<string | null> {
   if (!githubConfiguredCredential()) return null;
   const owner = githubRepoOwner(ghRepo);
@@ -579,6 +609,7 @@ export async function githubAppRepositoryToken(
   if (!owner || !repo) return null;
   const headers = await appAuthHeaders().catch(() => null);
   if (!headers) return null;
+  const repositories = githubRunTokenRepositories(ghRepo, opts.alsoRepos);
   try {
     // The installation is the one for this repository's owner. An owner the
     // App is not installed on fails closed here, and GitHub refuses the mint
@@ -591,11 +622,27 @@ export async function githubAppRepositoryToken(
     // and Actions logs they are expected to repair. Read-only callers
     // (ask-mode runs) get the read set: the same visibility with no write
     // capability behind it.
-    const token = await mintInstallationToken(installation.id, headers, {
-      repositories: [repo],
-      permissions: opts.readOnly ? READ_PERMISSIONS : CODE_PERMISSIONS,
-    });
-    return token.token;
+    const permissions = opts.readOnly ? READ_PERMISSIONS : CODE_PERMISSIONS;
+    try {
+      const token = await mintInstallationToken(installation.id, headers, {
+        repositories,
+        permissions,
+      });
+      return token.token;
+    } catch (error) {
+      // GitHub refuses the whole mint when the installation cannot see one
+      // of the attached repositories. The run still gets its own repository
+      // rather than nothing.
+      if (repositories.length === 1) throw error;
+      console.warn(
+        `[github-app] token for ${owner}/${repositories.join(",")} refused (is the App installed on every one of them?); minting ${ghRepo} alone: ${String(error).slice(0, 160)}`,
+      );
+      const token = await mintInstallationToken(installation.id, headers, {
+        repositories: [repo],
+        permissions,
+      });
+      return token.token;
+    }
   } catch (error) {
     console.warn(
       `[github-app] repository token unavailable for ${owner}/${repo}: ${String(error).slice(0, 160)}`,
@@ -620,9 +667,10 @@ export async function githubAppEnv(
  * run journal. */
 export async function githubServiceCredentialEnv(
   ghRepo?: string,
+  alsoRepos?: readonly string[],
 ): Promise<Record<string, string>> {
   const token = ghRepo
-    ? await githubAppRepositoryToken(ghRepo)
+    ? await githubAppRepositoryToken(ghRepo, { alsoRepos })
     : await githubToken({ write: true });
   // Even a failed mint carries the process-local SSH-to-HTTPS rewrite. That
   // turns an existing git@github.com origin into a non-interactive HTTPS
@@ -637,9 +685,10 @@ export async function githubServiceCredentialEnv(
  * write. */
 export async function githubServiceReadOnlyEnv(
   ghRepo?: string,
+  alsoRepos?: readonly string[],
 ): Promise<Record<string, string>> {
   const token = ghRepo
-    ? await githubAppRepositoryToken(ghRepo, { readOnly: true })
+    ? await githubAppRepositoryToken(ghRepo, { readOnly: true, alsoRepos })
     : await githubToken();
   return githubGitCredentialEnv(token || "");
 }

@@ -10,6 +10,7 @@ import {
   githubAppInstallationToken,
   githubAppRepositoryToken,
   githubRepositoryMatchesInstallation,
+  githubServiceCredentialEnv,
   githubServiceReadOnlyEnv,
   githubServiceReadReposEnv,
   githubToken,
@@ -380,6 +381,75 @@ describe("repository-scoped App installation identity", () => {
     const env = await githubServiceReadOnlyEnv("owner-a/tool");
     expect(env.GH_TOKEN).toBe("ghs_1_repo:tool");
     expect(Object.keys(env).some((k) => /PUSH_TOKEN/.test(k))).toBe(false);
+  });
+
+  test("a run token also covers the session's attached repositories", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opensession-github-attached-"));
+    dirs.push(dir);
+    const config = join(dir, "config.json");
+    const keyPath = join(dir, "github-app.pem");
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    writeFileSync(keyPath, privateKey.export({ format: "pem", type: "pkcs8" }));
+    writeOwnerConfig(config, "owner-a");
+    process.env.OPENSESSION_CONFIG = config;
+    await getConfigAsync();
+    delete process.env.OPENSESSION_GITHUB_CLIENT_ID;
+    __setGithubAppKeyPathForTest(keyPath);
+    const bodies: Array<{
+      repositories?: string[];
+      permissions: Record<string, string>;
+    }> = [];
+    let refuseWide = false;
+    const base = twoInstallationFetch([]);
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      if (/access_tokens$/.test(String(input))) {
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        // GitHub refuses the whole mint when the installation cannot see
+        // one of the listed repositories.
+        if (refuseWide && body.repositories.length > 1)
+          return Response.json(
+            { message: "Resource not accessible by integration" },
+            { status: 422 },
+          );
+      }
+      return base(input as string, init);
+    }) as typeof fetch;
+
+    // Code token: own repository first, then the attached ones, deduplicated,
+    // with the same code permission set. A foreign owner is left out.
+    const env = await githubServiceCredentialEnv("owner-a/tool", [
+      "owner-a/gitops",
+      "OWNER-A/tool",
+      "owner-b/app",
+    ]);
+    expect(env.GH_TOKEN).toBe("ghs_1_repo:tool,gitops");
+    expect(bodies[0].repositories).toEqual(["tool", "gitops"]);
+    expect(bodies[0].permissions.contents).toBe("write");
+
+    // Read token: same coverage, read set only.
+    const readEnv = await githubServiceReadOnlyEnv("owner-a/tool", [
+      "owner-a/gitops",
+    ]);
+    expect(readEnv.GH_TOKEN).toBe("ghs_1_repo:tool,gitops");
+    expect(bodies[1].repositories).toEqual(["tool", "gitops"]);
+    expect(
+      Object.values(bodies[1].permissions).every((v) => v === "read"),
+    ).toBe(true);
+
+    // The App is not installed on an attached repository: the run still
+    // holds its own repository rather than nothing.
+    refuseWide = true;
+    const narrowed = await githubServiceCredentialEnv("owner-a/tool", [
+      "owner-a/private",
+    ]);
+    expect(narrowed.GH_TOKEN).toBe("ghs_1_repo:tool");
+    const retried = bodies.slice(2).map((b) => b.repositories);
+    expect(retried[0]).toEqual(["tool", "private"]);
+    expect(retried.at(-1)).toEqual(["tool"]);
   });
 
   test("a sibling-repository read token is a second, read-only mint", async () => {

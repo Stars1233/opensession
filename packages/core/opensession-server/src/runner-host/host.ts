@@ -608,6 +608,7 @@ try {
     usageCredits: spec.usageCredits,
     prReviewer: spec.prReviewer,
     readRepos: spec.readRepos,
+    attachedRepos: spec.attachedRepos,
     journal: {
       ...(spec.lifecycle === "auxiliary"
         ? {}

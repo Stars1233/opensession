@@ -160,6 +160,9 @@ export interface RunHostSpec {
    *  second read-only token, GH_READ_TOKEN (an automation's readRepos). Names
    *  only: the launcher mints the token into the private run auth file. */
   readRepos?: string[];
+  /** The session's attached repositories (`owner/name`). An App token the
+   *  run holds covers them beside its own repository. Names only. */
+  attachedRepos?: string[];
   journalKind?: string;
   /** Durable restart-recovery lineage (see server/run-journal.ts). */
   firstJournaledAt?: string;

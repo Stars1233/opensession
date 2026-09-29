@@ -105,6 +105,9 @@ export interface ActiveRunRecord {
    *  config), preserved across resume for the same reason as prReviewer.
    *  Names only; the token itself is minted fresh per turn, never journaled. */
   readRepos?: string[];
+  /** The session's attached repositories (`owner/name`) the run's App token
+   *  covers, preserved across resume. Names only, never the token. */
+  attachedRepos?: string[];
   /** Legacy pool key retained while decoding old run records — lets resume-after-
    *  restart REATTACH to a detached server that survived (adoption via the
    *  pi-detach registry) instead of re-prompting a fresh one. */
@@ -197,6 +200,7 @@ export function buildRunJournalRecord(
     usageCredits?: boolean;
     prReviewer?: string;
     readRepos?: string[];
+    attachedRepos?: string[];
     remoteWorkspace?: RemoteWorkspaceSpec & { rpcToken?: string };
     journal?: {
       firstJournaledAt?: string;
@@ -230,6 +234,7 @@ export function buildRunJournalRecord(
     usageCredits: site.usageCredits ?? opts.usageCredits,
     prReviewer: site.prReviewer ?? opts.prReviewer,
     readRepos: site.readRepos ?? opts.readRepos,
+    attachedRepos: site.attachedRepos ?? opts.attachedRepos,
     // A Sandbox run's recovery must act on the same Sandbox (never on this
     // machine). The bearer is per process and is not journaled.
     remoteWorkspace: site.remoteWorkspace ?? withoutToken(opts.remoteWorkspace),
