@@ -8,14 +8,9 @@ import { PulseDot } from "../../ui/status";
 import { cn } from "../../ui/cn";
 import { TextShimmer } from "../../ui/text-shimmer";
 import { busyActivityStatus } from "../../lib/busy-activity";
-import {
-  msgActivityShimmer,
-  msgRow,
-  msgSystemRow,
-} from "../../lib/msg-classes";
+import { msgActivityShimmer, msgRow } from "../../lib/msg-classes";
 import { TRANSCRIPT_SYNC_SPOT } from "../../lib/session-viewer-classes";
 import type { LiveTurnStore } from "../../lib/live-turn-store";
-import { TranscriptLoadingStatus } from "../TranscriptLoadingStatus";
 
 /** The chat canvas while a new session's worktree is being prepared. The
  * opening message stays visible in the composer queue until it can move into
@@ -78,10 +73,7 @@ export function ConversationLoading() {
       animate={{ opacity: 1 }}
       transition={{ type: "tween", duration: duration.base, ease }}
     >
-      <div className={msgSystemRow}>
-        <TranscriptLoadingStatus />
-      </div>
-      <TranscriptSkeleton aria-hidden="true" />
+      <TranscriptSkeleton label="Loading transcript" />
     </motion.div>
   );
 }
