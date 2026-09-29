@@ -24,4 +24,14 @@ describe("peopleMentionMatches", () => {
       },
     ]);
   });
+
+  test("an exact name outranks a longer name it prefixes", () => {
+    const johns: Person[] = [
+      { name: "Johnny", fullName: "Johnny Lin" },
+      { name: "John", fullName: "John Soutar" },
+    ];
+    expect(
+      peopleMentionMatches("john", johns, "Johnny").map((row) => row.insert),
+    ).toEqual(["John", "Johnny"]);
+  });
 });

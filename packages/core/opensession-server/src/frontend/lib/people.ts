@@ -146,8 +146,9 @@ export function personNameForKey(key: string): string {
 
 /**
  * People rows for the composer's @ palette. A bare "@" offers the complete
- * directory; typing filters by first or full name. The current person sorts
- * first, then the directory keeps its configured order. Inserting yields
+ * directory; typing filters by first or full name. Better matches sort first,
+ * so "@john" puts John ahead of Johnny; ties put the current person first,
+ * then keep the directory's configured order. Inserting yields
  * `@Name`, which the server's mention scan turns into a push when sent.
  */
 export function peopleMentionMatches(
@@ -157,13 +158,16 @@ export function peopleMentionMatches(
 ): FileMention[] {
   const current = currentUser.trim().toLowerCase();
   return roster
-    .filter((p) => fuzzyMatch(query, [p.name, p.fullName]) > 0)
-    .sort((a, b) => {
-      const aIsCurrent = a.name.toLowerCase() === current;
-      const bIsCurrent = b.name.toLowerCase() === current;
-      return Number(bIsCurrent) - Number(aIsCurrent);
-    })
-    .map((p) => ({
+    .map((person) => ({
+      person,
+      score: fuzzyMatch(query, [person.name, person.fullName]),
+      isCurrent: person.name.toLowerCase() === current,
+    }))
+    .filter((row) => row.score > 0)
+    .sort(
+      (a, b) => b.score - a.score || Number(b.isCurrent) - Number(a.isCurrent),
+    )
+    .map(({ person: p }) => ({
       display: p.name,
       insert: p.name,
       kind: "person" as const,
