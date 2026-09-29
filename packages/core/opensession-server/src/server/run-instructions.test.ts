@@ -90,8 +90,9 @@ describe("buildRunInstructions", () => {
       buildRunInstructions({ isAsk: false, hasSession: true }),
     ).not.toContain("GH_READ_TOKEN");
 
-    // Only automations carry the list; an interactive turn never mints a
-    // second token.
+    // Only automations carry the list. The one interactive path that may
+    // mint it is a turn resuming an automation-owned session (a Slack thread
+    // reply), and only with that automation's own list.
     const automationSource = await Bun.file(
       new URL("./automations.ts", import.meta.url),
     ).text();
@@ -99,7 +100,11 @@ describe("buildRunInstructions", () => {
       new URL("./run-session.ts", import.meta.url),
     ).text();
     expect(automationSource).toContain("readRepos: automation.readRepos");
-    expect(interactiveSource).not.toContain("readRepos:");
+    expect(interactiveSource.match(/readRepos:/g)).toEqual(["readRepos:"]);
+    expect(interactiveSource).toContain("readRepos: automationReadRepos");
+    expect(interactiveSource).toContain(
+      "(await getAutomation(session.automationId))?.readRepos",
+    );
   });
 
   test("names the model worker sessions must use", () => {

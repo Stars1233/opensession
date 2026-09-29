@@ -3162,6 +3162,15 @@ async function runSessionPromptInner(
         })
       : {};
   const automationProxyMcpServers = Object.keys(automationMcp);
+  // A thread reply that resumes an automation-owned session keeps the
+  // automation's sibling-repository read token (Automation.readRepos), so a
+  // follow-up can still read the repos its unattended run could.
+  const automationReadRepos =
+    isAutomationSession &&
+    !session.automationDescendantPolicy &&
+    session.automationId
+      ? (await getAutomation(session.automationId))?.readRepos
+      : undefined;
   const runnerRun = await maybeLaunchRunnerRun(session, {
     prompt,
     hostId: startToken,
@@ -3312,6 +3321,7 @@ async function runSessionPromptInner(
           aws:
             (!isAutomationSession && !session.plainDiscussionId) ||
             agentAwsCredsForUntrustedRuns(),
+          readRepos: automationReadRepos,
           author: commitAuthorFor(user, sessionPrincipal(session)),
           user: runInputs.user,
           accountUser: runInputs.accountUser,
