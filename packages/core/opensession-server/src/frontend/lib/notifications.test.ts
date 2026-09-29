@@ -54,10 +54,8 @@ Object.assign(globalThis, {
       threads: serverThreads,
       unread: 0,
       alerts: {
-        needsInput: true,
         reviews: true,
-        mentions: true,
-        reminders: true,
+        collaborators: true,
       },
     });
   },
@@ -73,9 +71,9 @@ function thread(
   return {
     id: `session:${id}`,
     subject: { type: "session", id, title: `Session ${id}` },
-    kind: "needs_input",
-    reason: "Needs input",
-    body: "Which branch?",
+    kind: "review_requested",
+    reason: "Sam asked for your review",
+    body: "",
     url: `/session/${id}`,
     updatedAt: Date.now(),
     unread: true,
@@ -119,7 +117,7 @@ describe("notification inbox on this device", () => {
     await settle();
     expect(store.unreadNotificationCount()).toBe(1);
     expect(marks).toEqual([]);
-    expect(banners).toEqual(["Needs input"]);
+    expect(banners).toEqual(["Sam asked for your review"]);
     stop();
   });
 
@@ -136,7 +134,7 @@ describe("notification inbox on this device", () => {
     focused = false;
     store.receiveNotification(
       "Ada",
-      thread("os-3", { kind: "review_done", reason: "Sam reviewed it" }),
+      thread("os-3", { kind: "collaborator", reason: "Sam added you" }),
       false,
     );
     expect(store.unreadNotificationCount()).toBe(1);

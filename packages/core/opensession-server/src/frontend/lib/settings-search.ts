@@ -83,10 +83,9 @@ export const SETTINGS_KEYWORDS = {
     "desktop notifications",
     "sound",
     "alerts",
-    "needs input",
     "reviews",
-    "mentions",
-    "reminders",
+    "review requests",
+    "collaborators",
     "inbox",
   ],
   shortcuts: [

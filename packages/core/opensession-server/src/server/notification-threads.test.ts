@@ -17,10 +17,10 @@ const T0 = 1_800_000_000_000;
 
 function event(overrides: Partial<NotificationEvent> = {}): NotificationEvent {
   return {
-    kind: "needs_input",
+    kind: "review_requested",
     subject: { type: "session", id: "os-1", title: "Fix the login bug" },
-    reason: "Needs input",
-    body: "Which branch?",
+    reason: "Sam asked for your review",
+    body: "",
     url: "/session/os-1",
     at: T0,
     ...overrides,
@@ -38,14 +38,17 @@ describe("notification threads", () => {
   });
 
   test("a replayed event key changes nothing, so a restart cannot notify twice", () => {
-    const first = applyNotificationEvent(empty, event({ eventKey: "ask:abc" }));
+    const first = applyNotificationEvent(
+      empty,
+      event({ eventKey: "review:abc" }),
+    );
     const read = markNotificationThreads(first.doc, {
       ids: ["session:os-1"],
       unread: false,
     }).doc;
     const replay = applyNotificationEvent(
       read,
-      event({ eventKey: "ask:abc", at: T0 + 60_000 }),
+      event({ eventKey: "review:abc", at: T0 + 60_000 }),
     );
     expect(replay.thread).toBeNull();
     expect(replay.doc).toBe(read);
@@ -53,10 +56,13 @@ describe("notification threads", () => {
   });
 
   test("the same key notifies again once the dedupe window has passed", () => {
-    const first = applyNotificationEvent(empty, event({ eventKey: "ask:abc" }));
+    const first = applyNotificationEvent(
+      empty,
+      event({ eventKey: "review:abc" }),
+    );
     const later = applyNotificationEvent(
       first.doc,
-      event({ eventKey: "ask:abc", at: T0 + EVENT_DEDUPE_MS + 1 }),
+      event({ eventKey: "review:abc", at: T0 + EVENT_DEDUPE_MS + 1 }),
     );
     expect(later.thread).not.toBeNull();
   });
@@ -73,14 +79,14 @@ describe("notification threads", () => {
     doc = markNotificationThreads(doc, { all: true, done: true }).doc;
     const bumped = applyNotificationEvent(
       doc,
-      event({ kind: "run_failed", reason: "Run failed", at: T0 + 2 }),
+      event({ reason: "Alex asked for your review", at: T0 + 2 }),
     );
     expect(bumped.doc.threads.map((t) => t.id)).toEqual([
       "session:os-1",
       "session:os-2",
     ]);
     expect(bumped.thread).toMatchObject({
-      kind: "run_failed",
+      reason: "Alex asked for your review",
       unread: true,
       done: false,
     });
@@ -122,23 +128,27 @@ describe("notification threads", () => {
   });
 
   test("alerts follow the person's settings", () => {
-    expect(shouldAlert(null, "needs_input")).toBe(true);
-    expect(shouldAlert(null, "run_failed")).toBe(true);
+    expect(shouldAlert(null, "review_requested")).toBe(true);
+    expect(shouldAlert(null, "collaborator")).toBe(true);
     expect(
-      shouldAlert({ threads: [], alerts: { reviews: false } }, "review_done"),
+      shouldAlert(
+        { threads: [], alerts: { collaborators: false } },
+        "collaborator",
+      ),
     ).toBe(false);
   });
 
-  test("finished-run rows stored before they were removed are dropped", () => {
+  test("agent and mention rows stored before they were removed are dropped", () => {
     const { doc } = applyNotificationEvent(empty, event());
     const stored = JSON.parse(JSON.stringify(doc));
-    stored.threads.push({
-      ...stored.threads[0],
-      id: "session:old",
-      kind: "run_finished",
-      subject: { ...stored.threads[0].subject, id: "old" },
-    });
-    stored.alerts = { done: true };
+    for (const kind of ["needs_input", "run_failed", "mention", "reminder"])
+      stored.threads.push({
+        ...stored.threads[0],
+        id: `session:${kind}`,
+        kind,
+        subject: { ...stored.threads[0].subject, id: kind },
+      });
+    stored.alerts = { needsInput: false, mentions: false };
     expect(cleanDocument(stored)).toEqual({ threads: doc.threads });
   });
 

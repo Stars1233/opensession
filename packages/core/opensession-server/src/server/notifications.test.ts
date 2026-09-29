@@ -35,7 +35,6 @@ allClients.add(socket as unknown as Parameters<typeof allClients.add>[0]);
 const {
   getNotificationInbox,
   markNotifications,
-  notifyRunOutcome,
   notifyUser,
   sessionSubject,
   setAlertPrefs,
@@ -60,12 +59,12 @@ afterAll(() => {
 });
 
 const ask = {
-  kind: "needs_input" as const,
+  kind: "review_requested" as const,
   subject: sessionSubject("os-1", { title: "Fix login", repo: "acme" }),
-  reason: "Needs input",
-  body: "Which branch?",
+  reason: "Sam asked for your review",
+  body: "Please look today",
   url: "/session/os-1",
-  eventKey: "ask:q1",
+  eventKey: "review:1",
 };
 
 describe("notification inbox", () => {
@@ -74,12 +73,12 @@ describe("notification inbox", () => {
       id: "session:os-1",
       unread: true,
     });
-    // The restart case: the same question raised again is not news.
+    // The restart case: the same request raised again is not news.
     expect(await notifyUser("Ada", ask)).toBeNull();
     expect(pushes).toHaveLength(1);
     expect(pushes[0].payload).toMatchObject({
-      title: "Needs input",
-      body: "Fix login: Which branch?",
+      title: "Sam asked for your review",
+      body: "Fix login: Please look today",
       tag: "os-notification-session:os-1",
     });
     expect(frames.filter((f) => f.msg.type === "notification")).toHaveLength(1);
@@ -88,32 +87,16 @@ describe("notification inbox", () => {
     expect(inbox.threads[0].subject.context).toBe("acme");
   });
 
-  test("a clean finish notifies nobody; a failure notifies once", async () => {
-    const session = { id: "os-2", title: "Ship it", startedBy: "Ada" };
-    await notifyRunOutcome(session, null, "outcome:run-1");
+  test("switched-off kinds are recorded without a push", async () => {
+    await setAlertPrefs("Ada", { collaborators: false });
+    await notifyUser("Ada", {
+      kind: "collaborator",
+      subject: { type: "workspace", id: "ws-1", title: "Shared work" },
+      reason: "Sam added you to Shared work",
+      url: "/workspace/ws-1",
+    });
     expect(pushes).toHaveLength(0);
-    expect((await getNotificationInbox("Ada")).threads).toHaveLength(0);
-    await notifyRunOutcome(session, "boom", "outcome:run-2");
-    await notifyRunOutcome(session, "boom", "outcome:run-2");
-    expect(pushes).toHaveLength(1);
-    await setAlertPrefs("Ada", { needsInput: false });
-    await notifyRunOutcome(session, "boom", "outcome:run-3");
-    expect(pushes).toHaveLength(1);
-  });
-
-  test("automation, Desk and worker sessions do not notify", async () => {
-    for (const extra of [
-      { automation: "nightly" },
-      { desk: true },
-      { parentSessionId: "os-parent" },
-      { spawnedBy: "os-parent" },
-    ])
-      await notifyRunOutcome(
-        { id: "os-3", title: "x", startedBy: "Ada", ...extra },
-        "boom",
-        undefined,
-      );
-    expect((await getNotificationInbox("Ada")).threads).toHaveLength(0);
+    expect((await getNotificationInbox("Ada")).threads).toHaveLength(1);
   });
 
   test("marking read reaches the person's other devices", async () => {

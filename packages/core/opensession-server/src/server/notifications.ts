@@ -156,46 +156,6 @@ export async function notifyUser(
   return thread;
 }
 
-/** The session fields the run-outcome policy reads. */
-export interface RunOutcomeSession {
-  id: string;
-  title?: string | null;
-  repo?: string | null;
-  startedBy?: string | null;
-  automation?: string;
-  desk?: boolean;
-  parentSessionId?: string;
-  spawnedBy?: string;
-}
-
-/**
- * A run failed. The person who started the session hears about it, unless the
- * session is not really theirs to watch: automations, the Desk, and worker
- * sessions whose parent agent already receives the outcome. A clean finish
- * notifies nobody.
- *
- * `runKey` names the run (its projection id) so a replayed projection after
- * a restart is recognized. Without one there is no replay path to guard.
- */
-export async function notifyRunOutcome(
-  session: RunOutcomeSession | null | undefined,
-  errorMessage: string | null,
-  runKey: string | undefined,
-  noticeLabel?: string,
-): Promise<void> {
-  if (!errorMessage || !session?.startedBy) return;
-  if (session.automation || session.desk) return;
-  if (session.parentSessionId || session.spawnedBy) return;
-  await notifyUser(session.startedBy, {
-    kind: "run_failed",
-    subject: sessionSubject(session.id, session),
-    reason: noticeLabel || "Run failed",
-    body: errorMessage,
-    url: sessionUrl(session.id),
-    ...(runKey ? { eventKey: `run:${runKey}` } : {}),
-  });
-}
-
 /** Mark threads read, unread, done or not done, and tell the person's devices. */
 export async function markNotifications(
   user: string,

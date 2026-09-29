@@ -91,17 +91,15 @@ const ALERT_ROWS: {
   desc: string;
 }[] = [
   {
-    group: "needsInput",
-    title: "Needs input",
-    desc: "A question is waiting, or a run failed",
+    group: "reviews",
+    title: "Review requests",
+    desc: "Someone asks you to review a session or pull request",
   },
-  { group: "reviews", title: "Reviews", desc: "Review requests and results" },
   {
-    group: "mentions",
-    title: "Mentions",
-    desc: "Someone tags you or adds you to a workspace",
+    group: "collaborators",
+    title: "Added to a workspace",
+    desc: "Someone adds you as a collaborator",
   },
-  { group: "reminders", title: "Reminders", desc: "Desk task reminders" },
 ];
 
 export function NotificationsPanel() {
@@ -183,7 +181,7 @@ export function NotificationsPanel() {
         />
       </SettingCard>
 
-      <SettingsGroupLabel>Notify me about</SettingsGroupLabel>
+      <SettingsGroupLabel>Notify me when</SettingsGroupLabel>
       <SettingCard>
         {ALERT_ROWS.map((row) => (
           <SettingRow
@@ -210,7 +208,7 @@ export function NotificationsPanel() {
       </SettingCard>
       <SettingsHint className={alertError ? "text-red" : undefined}>
         {alertError ||
-          "Everything still lands in your inbox. These choose what also sends a banner, a sound, and a push. They follow you to every device."}
+          "Everything still lands in your inbox. These choose what also sends a banner, a sound and a push, on every device."}
       </SettingsHint>
     </SettingsPanel>
   );

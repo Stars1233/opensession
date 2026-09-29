@@ -926,32 +926,6 @@ export function makeAskHandler(sessionId: string) {
           at: Date.now(),
         });
       }
-      // Tell the session owner (inbox row, open clients, Web Push). Keyed on
-      // the question text: a restart resumes ask-blocked runs, which re-ask
-      // the same question, and that re-ask must not notify again.
-      // Best-effort: a notification hiccup never affects the ask flow.
-      if (!adopted && !ask.answerReceived)
-        void (async () => {
-          try {
-            const s = findSession(sessionId);
-            if (!s?.startedBy) return;
-            const { notifyUser, sessionSubject, sessionUrl } =
-              await import("./notifications");
-            const { createHash } = await import("node:crypto");
-            const qHash = createHash("sha256")
-              .update(questions.map((q) => q.question).join("\n"))
-              .digest("hex")
-              .slice(0, 16);
-            await notifyUser(s.startedBy, {
-              kind: "needs_input",
-              subject: sessionSubject(sessionId, s),
-              reason: `${personaName()} needs input`,
-              body: questions[0]?.question || "A question is waiting",
-              url: sessionUrl(sessionId),
-              eventKey: `ask:${qHash}`,
-            });
-          } catch {}
-        })();
     } catch (error) {
       rejectAnswers(error);
     }

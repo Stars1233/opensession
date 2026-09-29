@@ -1,7 +1,7 @@
 /**
  * Your notification inbox, on this device. The server owns it
- * (src/server/notifications.ts): one row per session, pull request, workspace
- * or reminder, with read and done state shared by every device you use.
+ * (src/server/notifications.ts): one row per session, pull request or
+ * workspace, with read and done state shared by every device you use.
  *
  * Banners come only from a `notification` socket frame, which the server
  * sends once, when an event is first recorded. Nothing here compares session
@@ -23,19 +23,13 @@ import {
 } from "./api/notifications";
 import { getCurrentUser } from "../components/UserPicker";
 import { whenCurrentUserReady } from "./auth-ready";
-import {
-  appFocused,
-  closeAlert,
-  legacyEventSettings,
-  showAlert,
-} from "./notify";
+import { appFocused, closeAlert, showAlert } from "./notify";
 import { os1Shell } from "./os1-shell";
 import { getPushState } from "./push";
 
 export type { NotificationThread, NotificationAlerts };
 
 const USER_CHANGE_EVENT = "opensession-user-changed";
-const MIGRATED_KEY = "opensession-notif-alerts-migrated";
 
 export interface NotificationState {
   threads: NotificationThread[];
@@ -122,28 +116,9 @@ async function load(user: string): Promise<void> {
     const inbox = await fetchNotifications(user);
     if (loadedFor !== user) return;
     set({ ...inbox, loaded: true });
-    void migrateLegacyAlerts(inbox.alerts);
   } catch {
     // Keep what we had. The next reconnect or change frame retries.
   }
-}
-
-// The event switches used to be per device. Carry a non-default choice to
-// the server once, so nobody silently gets alerts they had turned off.
-async function migrateLegacyAlerts(current: NotificationAlerts): Promise<void> {
-  try {
-    if (localStorage.getItem(MIGRATED_KEY)) return;
-    localStorage.setItem(MIGRATED_KEY, "1");
-    const legacy = legacyEventSettings();
-    if (!legacy) return;
-    const patch: Partial<NotificationAlerts> = {};
-    if (
-      legacy.needsInput !== undefined &&
-      legacy.needsInput !== current.needsInput
-    )
-      patch.needsInput = legacy.needsInput;
-    if (Object.keys(patch).length) await setNotificationAlerts(patch);
-  } catch {}
 }
 
 let started = false;

@@ -51,8 +51,6 @@ const storedSettingsSchema = z.object({
   desktop: z.boolean().optional().catch(undefined),
   sound: z.enum(["chime", "ping", "bell", "none"]).optional().catch(undefined),
   when: z.enum(["always", "unfocused", "off"]).optional().catch(undefined),
-  // The event switches from before they moved to the server.
-  needsInput: z.boolean().optional().catch(undefined),
 });
 type StoredSettings = z.infer<typeof storedSettingsSchema>;
 
@@ -65,23 +63,6 @@ function storedSettings(): StoredSettings | null {
   } catch {
     return null;
   }
-}
-
-export interface LegacyEventSettings {
-  needsInput?: boolean;
-}
-
-/**
- * The event switches this device used to keep before they moved to the
- * server, when they differ from the defaults. Read once to carry a person's
- * choice over (lib/notifications.ts), never written.
- */
-export function legacyEventSettings(): LegacyEventSettings | null {
-  const stored = storedSettings();
-  if (!stored) return null;
-  const out: LegacyEventSettings = {};
-  if (stored.needsInput === false) out.needsInput = false;
-  return Object.keys(out).length ? out : null;
 }
 
 export function getNotifSettings(): NotifSettings {
@@ -105,9 +86,7 @@ export function getNotifSettings(): NotifSettings {
 
 export function setNotifSettings(patch: Partial<NotifSettings>): NotifSettings {
   const next = { ...getNotifSettings(), ...patch };
-  // Keep keys this version no longer owns (the legacy event switches), so
-  // the one-time carry-over still sees them.
-  localStorage.setItem(KEY, JSON.stringify({ ...storedSettings(), ...next }));
+  localStorage.setItem(KEY, JSON.stringify(next));
   // Any settings edit is a user gesture — a good moment to arm audio and ask for
   // notification permission if we'll want them.
   armAudio();

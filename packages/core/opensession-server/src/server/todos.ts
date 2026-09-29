@@ -14,7 +14,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { randomUUIDv7 } from "bun";
 import { audit } from "./audit";
-import { notifyUser } from "./notifications";
 import { stateDir } from "./paths";
 import { writeJsonAtomic } from "./shared/atomic-write";
 import { resolveTeammate } from "./shared/user-mappings";
@@ -199,8 +198,7 @@ export function updateTodo(
 }
 
 // ── Reminders ────────────────────────────────────────────────────────────────
-// A 30s sweep fires each open todo's remindAt exactly once: an inbox
-// notification (which also pushes) + a Slack DM (prefixed with the agent's name, per the messaging rule).
+// A 30s sweep fires each open todo's remindAt exactly once: a Slack DM (prefixed with the agent's name, per the messaging rule).
 // Started once from opensession.ts's __opensessionBooted block.
 
 const SWEEP_MS = 30_000;
@@ -217,17 +215,6 @@ async function sweepReminders(): Promise<void> {
   writeStore(store);
   for (const t of due) {
     audit({ kind: "todo_reminder", user: t.user, message: t.text });
-    try {
-      await notifyUser(t.user, {
-        kind: "reminder",
-        subject: { type: "reminder", id: t.id, title: t.text },
-        reason: "Reminder",
-        url: "/",
-        eventKey: `todo-reminder:${t.remindAt}`,
-      });
-    } catch (e) {
-      console.error("[todos] reminder push failed:", e);
-    }
     try {
       const teammate = resolveTeammate(t.user);
       if (teammate) {

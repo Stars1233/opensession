@@ -1886,26 +1886,6 @@ export async function handleSessionsRoutes(
         reviewAliases,
       );
       await publishSessionChange(session.id);
-      // Buzz whoever asked for the review that it landed (not on self-review).
-      if (
-        body.accept &&
-        existing.by &&
-        existing.by.toLowerCase() !== (by || "").toLowerCase()
-      ) {
-        void (async () => {
-          try {
-            const { notifyUser, sessionSubject, sessionUrl } =
-              await import("../../server/notifications");
-            await notifyUser(existing.by, {
-              kind: "review_done",
-              subject: sessionSubject(sessionId, session),
-              reason: `${by || "Someone"} reviewed it`,
-              actor: by || undefined,
-              url: sessionUrl(sessionId),
-            });
-          } catch {}
-        })();
-      }
       return Response.json({ ok: true });
     }
 

@@ -1730,18 +1730,4 @@ export async function applyRunOutcomeProjection(
       else await touchNativeSession(id, { lastRunError: undefined });
     }
   }
-  // Tell the owner the run ended. Detached so a notification can never hold
-  // up or fail the durable projection. A replayed projection carries the same
-  // id, which the inbox recognizes, so a restart cannot notify twice.
-  if (process.env.NODE_ENV !== "test")
-    void import("./notifications")
-      .then(({ notifyRunOutcome }) =>
-        notifyRunOutcome(
-          session,
-          errorMessage,
-          opts?.projectionId ?? opts?.runId,
-          opts?.noticeLabel,
-        ),
-      )
-      .catch(() => {});
 }

@@ -24,30 +24,14 @@ import {
 import { Button } from "../../ui/button";
 import { cn } from "../../ui/cn";
 import { Tooltip } from "../../ui/tooltip";
-import {
-  IconAtSign,
-  IconCheck,
-  IconCheckCircle,
-  IconClock,
-  IconEye,
-  IconMail,
-  IconMessageQuestion,
-  IconPeople,
-  IconUndo,
-  IconWarningTriangle,
-} from "../icons";
+import { IconCheck, IconEye, IconMail, IconPeople, IconUndo } from "../icons";
 
 const KIND_ICON: Record<
   NotificationKind,
   { icon: React.ReactNode; ink: string }
 > = {
-  needs_input: { icon: <IconMessageQuestion />, ink: "text-yellow" },
-  run_failed: { icon: <IconWarningTriangle />, ink: "text-red" },
   review_requested: { icon: <IconEye />, ink: "text-blue" },
-  review_done: { icon: <IconCheckCircle />, ink: "text-blue" },
-  mention: { icon: <IconAtSign />, ink: "text-accent" },
   collaborator: { icon: <IconPeople />, ink: "text-accent" },
-  reminder: { icon: <IconClock />, ink: "text-dim" },
 };
 
 const SWIPE_PX = 88;
