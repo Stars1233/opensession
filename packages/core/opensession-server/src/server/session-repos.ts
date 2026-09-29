@@ -295,6 +295,28 @@ export function sessionRepoIds(session: UnifiedSession): string[] {
   return [primary, ...(session.attachedRepos || []).map((r) => r.repo)];
 }
 
+/** `owner/name` of each attached repository hosted on GitHub. A run's App
+ * token covers these beside its own repository, so a turn nobody typed (a
+ * review handoff, a worker report) reaches them as an owner turn does. */
+export function attachedGithubRepos(session: UnifiedSession): string[] {
+  const out: string[] = [];
+  for (const att of session.attachedRepos || []) {
+    let repo: ReturnType<typeof getRepo>;
+    try {
+      repo = getRepo(att.repo);
+    } catch {
+      continue;
+    }
+    if (
+      repo.host !== "codestorage" &&
+      repo.ghRepo &&
+      !out.includes(repo.ghRepo)
+    )
+      out.push(repo.ghRepo);
+  }
+  return out;
+}
+
 /**
  * The full per-session system-prompt note for an interactive run: repos/branch
  * discipline (buildReposNote) + the session's repo/user/team memory. Memory

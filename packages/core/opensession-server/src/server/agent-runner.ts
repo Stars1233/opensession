@@ -184,6 +184,12 @@ export interface RunAgentOpts {
    * Non-secret names only, so they journal and resume like prReviewer.
    */
   readRepos?: string[];
+  /**
+   * `owner/name` of the session's attached repositories. The run's App token
+   * covers them beside its own repository (pi-runner runGithubEnv), so a
+   * machine-started turn reaches them too. Names only; journals and resumes.
+   */
+  attachedRepos?: string[];
   /** Images attached to the opening message. */
   images?: ImageInput[];
   /** Non-image attachments shipped inline to a host on another machine; the
@@ -2241,6 +2247,7 @@ export async function resumeInterruptedRuns(
                 usageCredits: run.usageCredits,
                 prReviewer: run.prReviewer,
                 readRepos: run.readRepos,
+                attachedRepos: run.attachedRepos,
                 journal: {
                   osSessionId: run.osSessionId,
                   kind: recoveryKind(run.kind, "rerun"),
@@ -2345,6 +2352,7 @@ export async function resumeInterruptedRuns(
               usageCredits: run.usageCredits,
               prReviewer: run.prReviewer,
               readRepos: run.readRepos,
+              attachedRepos: run.attachedRepos,
               journal: {
                 osSessionId: run.osSessionId,
                 kind: recoveryKind(run.kind, "resume"),

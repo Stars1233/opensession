@@ -270,6 +270,8 @@ export interface HostedRunOpts {
   /** Sibling repositories the run may read (Automation.readRepos). Names
    *  only: the launcher mints the read token into the private auth file. */
   readRepos?: string[];
+  /** The session's attached repositories (`owner/name`) its App token covers. */
+  attachedRepos?: string[];
   /** Trust boundary stamped on the spec + journal record: "automation" for
    *  automation-owned sessions, defaults to interactive. */
   trustProfile?: "interactive" | "automation";
@@ -511,6 +513,7 @@ async function* runAgentInProcess(
       usageCredits: opts.usageCredits,
       prReviewer: opts.prReviewer,
       readRepos: opts.readRepos,
+      attachedRepos: opts.attachedRepos,
       journal: {
         ...(lifecycle === "auxiliary" ? {} : { osSessionId: opts.osSessionId }),
         kind: opts.journalKind || "prompt",
@@ -650,6 +653,7 @@ function hostedRunRecord(spec: RunHostSpec): ActiveRunRecord {
     usageCredits: spec.usageCredits,
     prReviewer: spec.prReviewer,
     readRepos: spec.readRepos,
+    attachedRepos: spec.attachedRepos,
     trustProfile: spec.trustProfile,
     fallbackModel: spec.fallbackModel,
     kind: spec.journalKind || "prompt",
@@ -725,6 +729,7 @@ async function spawnHostRun(
     usageCredits: opts.usageCredits,
     prReviewer: opts.prReviewer,
     readRepos: opts.readRepos,
+    attachedRepos: opts.attachedRepos,
     trustProfile: opts.trustProfile,
     journalKind: opts.journalKind,
     firstJournaledAt: opts.firstJournaledAt || new Date().toISOString(),

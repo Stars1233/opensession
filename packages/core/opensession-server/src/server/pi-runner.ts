@@ -199,13 +199,14 @@ export const PI_MODEL_PREFIX = "pi/";
  * consume only the private run-scoped file projected by their launcher. */
 export async function githubCodeRunEnv(
   cwd: string,
+  attachedRepos?: readonly string[],
 ): Promise<Record<string, string>> {
   if (process.env[GITHUB_RUN_AUTH_FILE_ENV]) return projectedGithubRunEnv();
   const { repoForPathOrNull } = await import("./worktree");
   const repo = repoForPathOrNull(cwd);
   if (!repo || repo.host === "codestorage" || !repo.ghRepo) return {};
   const { githubServiceCredentialEnv } = await import("./github-app");
-  return githubServiceCredentialEnv(repo.ghRepo);
+  return githubServiceCredentialEnv(repo.ghRepo, attachedRepos);
 }
 
 /** Read-only authority for an unattended GitHub ask run (the review
@@ -215,13 +216,14 @@ export async function githubCodeRunEnv(
  * fail-closed resolution as githubCodeRunEnv. */
 export async function githubReadRunEnv(
   cwd: string,
+  attachedRepos?: readonly string[],
 ): Promise<Record<string, string>> {
   if (process.env[GITHUB_RUN_AUTH_FILE_ENV]) return projectedGithubRunEnv();
   const { repoForPathOrNull } = await import("./worktree");
   const repo = repoForPathOrNull(cwd);
   if (!repo || repo.host === "codestorage" || !repo.ghRepo) return {};
   const { githubServiceReadOnlyEnv } = await import("./github-app");
-  return githubServiceReadOnlyEnv(repo.ghRepo);
+  return githubServiceReadOnlyEnv(repo.ghRepo, attachedRepos);
 }
 
 /** The read-only sibling-repository token an automation run holds beside
@@ -259,6 +261,11 @@ export async function githubReadReposRunEnv(
  * A remote host never consults the person store: its launcher already
  * projected the run's credential (githubUserRunEnv is empty there).
  *
+ * An App token covers the session's attached repositories (`attachedRepos`)
+ * beside the checkout's own, with the same permission set: a machine-started
+ * turn can work in every repository the session spans, exactly as an owner
+ * turn can with the person's token.
+ *
  * An automation that lists sibling repositories to read (`readRepos`) also
  * gets `GH_READ_TOKEN` (githubReadReposRunEnv) beside whichever primary
  * credential the rules above selected; the primary is never widened. */
@@ -272,6 +279,9 @@ export async function runGithubEnv(input: {
   cwd: string;
   /** Automation.readRepos; only automation runs carry it. */
   readRepos?: string[];
+  /** `owner/name` of the session's attached repositories: the App token
+   *  reaches them too (githubAppRepositoryToken). */
+  attachedRepos?: string[];
   /** No GitHub App is configured and the run shares the host's HOME (see
    *  usesHostGithubLogin): inject no credential so gh and git use the
    *  host's own login. */
@@ -292,15 +302,19 @@ async function runPrimaryGithubEnv(input: {
   githubKindRun: boolean;
   launcherEnv?: Record<string, string>;
   cwd: string;
+  attachedRepos?: string[];
   hostLogin?: boolean;
 }): Promise<Record<string, string>> {
-  if (!input.isCode) return input.hostLogin ? {} : githubReadRunEnv(input.cwd);
+  if (!input.isCode)
+    return input.hostLogin
+      ? {}
+      : githubReadRunEnv(input.cwd, input.attachedRepos);
   const person = input.ownerTurn ? githubUserRunEnv(input.user) : {};
   if (person.GH_TOKEN) return person;
   if (input.githubKindRun && input.launcherEnv?.GH_TOKEN)
     return input.launcherEnv;
   if (input.hostLogin) return {};
-  return githubCodeRunEnv(input.cwd);
+  return githubCodeRunEnv(input.cwd, input.attachedRepos);
 }
 
 /** Whether a run's `gh` and git use the host's own GitHub login instead of
@@ -2408,6 +2422,7 @@ async function* runPiAttempt(
       // found through its registered checkout on this machine.
       cwd: remote ? cwdRepo?.repo || "" : cwd,
       readRepos: opts.readRepos,
+      attachedRepos: opts.attachedRepos,
       hostLogin: hostGithubLogin,
     });
     const agentGitEnv = await agentGitIdentityEnv(author);

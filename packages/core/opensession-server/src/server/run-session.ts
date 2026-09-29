@@ -217,6 +217,7 @@ import {
   withUploadsNote,
 } from "./uploads";
 import {
+  attachedGithubRepos,
   buildSessionNote,
   retrievedMemoryNoteFor,
   sessionRepoIds,
@@ -3171,6 +3172,9 @@ async function runSessionPromptInner(
     session.automationId
       ? (await getAutomation(session.automationId))?.readRepos
       : undefined;
+  const attachedGhRepos = session.automationDescendantPolicy
+    ? undefined
+    : attachedGithubRepos(session);
   const runnerRun = await maybeLaunchRunnerRun(session, {
     prompt,
     hostId: startToken,
@@ -3322,6 +3326,7 @@ async function runSessionPromptInner(
             (!isAutomationSession && !session.plainDiscussionId) ||
             agentAwsCredsForUntrustedRuns(),
           readRepos: automationReadRepos,
+          attachedRepos: attachedGhRepos,
           author: commitAuthorFor(user, sessionPrincipal(session)),
           user: runInputs.user,
           accountUser: runInputs.accountUser,
