@@ -104,6 +104,31 @@ describe("SubagentRows", () => {
     expect(html).toContain('aria-label="Archive Worker nested"');
   });
 
+  test("swaps the row being renamed for an inline editor", () => {
+    const worker = session("rename");
+    const html = renderToStaticMarkup(
+      <SubagentRows
+        items={[
+          { session: worker, depth: 1, inline: false, sharesRootPr: false },
+        ]}
+        selectedId={null}
+        onSelect={() => {}}
+        onArchive={() => {}}
+        rename={{
+          sessionId: "rename",
+          value: "New name",
+          onChange: () => {},
+          onCommit: () => {},
+          onCancel: () => {},
+        }}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Rename Worker rename"');
+    expect(html).toContain('value="New name"');
+    expect(html).not.toContain('aria-label="Archive Worker rename"');
+  });
+
   test("shows PR status after an idle worker merges", () => {
     const worker = session("pr", {
       isRunning: false,

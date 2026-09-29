@@ -307,12 +307,14 @@ describe("subagentsForWorkspace", () => {
         createdAt: "2026-08-18T10:00:01Z",
       }),
       session("own-worktree", {
+        isRunning: true,
         workspaceId: "ws-root",
         worktreeDir: "/worktrees/isolated",
         parentSessionId: "root",
         createdAt: "2026-08-18T10:00:02Z",
       }),
       session("own-workspace", {
+        isRunning: true,
         workspaceId: "ws-worker",
         worktreeDir: null,
         parentSessionId: "root",
@@ -414,6 +416,36 @@ describe("subagentsForWorkspace", () => {
         ({ session }) => session.id,
       ),
     ).toEqual(["merged", "closed"]);
+  });
+
+  test("lists only active workers, plus the one that is open", () => {
+    const item = (id: string, overrides: Partial<UnifiedSession> = {}) => ({
+      session: session(id, { parentSessionId: "parent", ...overrides }),
+      depth: 1,
+      inline: false,
+      sharesRootPr: false,
+    });
+    const groups = new Map([
+      [
+        "ws-parent",
+        [
+          item("running", { isRunning: true }),
+          item("waiting", { waitingForInput: true }),
+          item("queued", { queuedCount: 1 }),
+          item("idle"),
+          item("open"),
+        ],
+      ],
+    ]);
+
+    expect(
+      subagentsForSelectedWorkspace(
+        groups,
+        "ws-parent",
+        "ws-parent",
+        "open",
+      ).map(({ session }) => session.id),
+    ).toEqual(["running", "waiting", "queued", "open"]);
   });
 
   test("expands child rows only for the selected root workspace", () => {

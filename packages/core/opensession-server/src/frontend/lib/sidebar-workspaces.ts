@@ -333,18 +333,33 @@ export function subagentsForWorkspace(
   return subagentsByWorkspace(sessions).get(workspaceId) ?? [];
 }
 
+function subagentIsActive(session: UnifiedSession): boolean {
+  return (
+    session.isRunning ||
+    !!session.waitingForInput ||
+    (session.queuedCount ?? 0) > 0
+  );
+}
+
 /**
  * Child rows to draw beneath the workspace that is currently selected: only
- * workers with a worktree or workspace of their own. Inline workers stay in
- * the group (so they never surface as top-level rows) but are not listed.
+ * active workers (running, queued, or waiting for input) with a worktree or
+ * workspace of their own. Inline workers stay in the group (so they never
+ * surface as top-level rows) but are not listed. Idle workers are hidden,
+ * except the one that is open, so selecting it never removes its row.
  */
 export function subagentsForSelectedWorkspace(
   groups: ReadonlyMap<string, WorkspaceSubagent[]>,
   workspaceId: string | null | undefined,
   selectedWorkspaceId: string | null | undefined,
+  selectedSessionId: string | null = null,
 ): WorkspaceSubagent[] {
   if (!workspaceId || workspaceId !== selectedWorkspaceId) return [];
-  return (groups.get(workspaceId) ?? []).filter((item) => !item.inline);
+  return (groups.get(workspaceId) ?? []).filter(
+    (item) =>
+      !item.inline &&
+      (subagentIsActive(item.session) || item.session.id === selectedSessionId),
+  );
 }
 
 /** The root session a workspace row should open, never one of its subagents. */
