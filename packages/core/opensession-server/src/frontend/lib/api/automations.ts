@@ -211,6 +211,7 @@ export interface Automation {
   createdAt: string;
   webhookSecret?: string;
   webhookEnabled?: boolean;
+  webhookMaxConcurrent?: number;
   eventKey?: string;
   mcpServers?: string[];
   slackWatch?: { channel: string };
