@@ -54,6 +54,7 @@ import { Tooltip } from "../../ui/tooltip";
 import { RowCardPopup, useRowHoverCard } from "../SidebarRowCards";
 import { AutoCreatedMark } from "./AutoCreatedMark";
 import { KeepInSidebarMark } from "./KeepInSidebarMark";
+import { mentionLabel } from "../../lib/mentions";
 import {
   LanePickerPage,
   LaneStatusMark,
@@ -603,8 +604,8 @@ export function SidebarItem({
                 // signal — and it names who asked, which a dot cannot.
                 <span
                   className="relative ml-1 flex shrink-0 items-center"
-                  title={`${mention} mentioned you`}
-                  aria-label={`${mention} mentioned you`}
+                  title={mentionLabel(mention, session.id)}
+                  aria-label={mentionLabel(mention, session.id)}
                 >
                   <UserAvatar name={mention} size={16} className="shrink-0" />
                   <span

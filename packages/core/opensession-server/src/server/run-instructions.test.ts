@@ -90,8 +90,9 @@ describe("buildRunInstructions", () => {
       buildRunInstructions({ isAsk: false, hasSession: true }),
     ).not.toContain("GH_READ_TOKEN");
 
-    // Only automations carry the list; an interactive turn never mints a
-    // second token.
+    // Only automations carry the list. The one interactive path that may
+    // mint it is a turn resuming an automation-owned session (a Slack thread
+    // reply), and only with that automation's own list.
     const automationSource = await Bun.file(
       new URL("./automations.ts", import.meta.url),
     ).text();
@@ -99,7 +100,11 @@ describe("buildRunInstructions", () => {
       new URL("./run-session.ts", import.meta.url),
     ).text();
     expect(automationSource).toContain("readRepos: automation.readRepos");
-    expect(interactiveSource).not.toContain("readRepos:");
+    expect(interactiveSource.match(/readRepos:/g)).toEqual(["readRepos:"]);
+    expect(interactiveSource).toContain("readRepos: automationReadRepos");
+    expect(interactiveSource).toContain(
+      "(await getAutomation(session.automationId))?.readRepos",
+    );
   });
 
   test("names the model worker sessions must use", () => {
@@ -140,6 +145,7 @@ describe("buildRunInstructions", () => {
       "## References",
       "## Working directory",
       "## Pull requests",
+      "## Waiting",
       "## Tools",
       "## Portals",
       "## Media",
@@ -172,8 +178,29 @@ describe("buildRunInstructions", () => {
     // and Tools names what each mounted server is for: the two things a run
     // cannot learn from a skill or from mcp_search without already knowing
     // they exist. Two servers mounted here; a full interactive mount adds
-    // roughly 150 chars per server on top.
-    expect(prompt.length).toBeLessThan(3_000);
+    // roughly 150 chars per server on top. Waiting adds ~250: the one
+    // behavioral rule every run needs that no tool description can carry.
+    expect(prompt.length).toBeLessThan(3_250);
+  });
+
+  // `sleep 240; check` blocks the turn and misses a job that finished early
+  // or died. The rule reaches every run, not one repository's AGENTS.md, and
+  // points at schedule_prompt only where that tool is mounted.
+  test("bans fixed sleeps and names the check-back tool only when mounted", () => {
+    const interactive = buildRunInstructions({
+      isAsk: false,
+      hasSession: true,
+      inProcessMcp: { "opensession-schedule": {} },
+    });
+    expect(interactive).toContain("Never wait with a fixed `sleep N`.");
+    expect(interactive).toContain("timeout 300 bash -c 'until");
+    expect(interactive).toContain(
+      "For longer, call `schedule_prompt` with `in_minutes` and end your turn.",
+    );
+
+    const automation = buildRunInstructions({ isAsk: false });
+    expect(automation).toContain("Never wait with a fixed `sleep N`.");
+    expect(automation).not.toContain("schedule_prompt");
   });
 
   test("tells a sandboxed run where it is, in one shared paragraph", () => {

@@ -69,7 +69,7 @@ export const INTERNAL_MCP_CAPABILITIES = {
     summary:
       "Borrow a teammate's credential for a stated purpose, with their approval.",
     guidance:
-      "Borrow a teammate's credential with their approval when ambient access is insufficient. `request_mac_keychain` uses Apple's native prompt for one macOS Keychain service/account and one HTTPS call. Only HTTP status returns, never secret values or response content. This does not access 1Password vaults.",
+      "Borrow a teammate's credential with their approval; the broker returns the upstream response, secret scrubbed. `register_credential` adds one owned by the session's driver, who pastes the secret into a card. `request_mac_keychain` makes one HTTPS call with a macOS Keychain item via Apple's prompt and returns only its status. No 1Password access.",
   },
   "opensession-publish": {
     summary: "Publish a directory as a durable internal web app.",
@@ -157,7 +157,7 @@ export const INTERNAL_MCP_CAPABILITIES = {
   "opensession-schedule": {
     summary: "Schedule a prompt for this session at a future time.",
     guidance:
-      "Check back on slow external work (a release workflow, CI, a deploy) by scheduling a prompt to this session and ending the turn, instead of polling, sleeping, or reaching for harness cron tools. For another session's reply, use `wait_for` kind `session_turn` instead.",
+      "Check back on any long wait (a job you started, a release workflow, CI, a deploy) with the direct `schedule_prompt` tool and end the turn, instead of sleeping or reaching for harness cron tools. For another session's reply, use `wait_for` kind `session_turn` instead.",
   },
   "opensession-papercuts": {
     summary: "Append-only friction log.",

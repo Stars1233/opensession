@@ -49,6 +49,12 @@ export function mentionFor(sessionId: string): MentionRecord | undefined {
   return cache.get(sessionId);
 }
 
+/** The badge's words: an @-mention, or being added as a collaborator. */
+export function mentionLabel(by: string, sessionId?: string): string {
+  const added = sessionId && cache.get(sessionId)?.source === "collaborator";
+  return added ? `${by} added you` : `${by} mentioned you`;
+}
+
 export function mentionCount(): number {
   return cache.size;
 }

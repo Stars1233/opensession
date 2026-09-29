@@ -19,6 +19,7 @@ const APP_ROUTE_ROOTS = new Set([
   "connections",
   "feed",
   "goals",
+  "inbox",
   "new",
   "people",
   "plain",

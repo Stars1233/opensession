@@ -915,6 +915,18 @@ describe("buildPiAnthropicModels", () => {
     expect(buildPiAnthropicModels([opus!], "claude-opus-5-5")).toHaveLength(1);
   });
 
+  test("registers Sonnet 5.5 with its published limits and pricing", () => {
+    const [sonnet] = buildPiAnthropicModels([], "claude-sonnet-5-5");
+    expect(sonnet).toMatchObject({
+      id: "claude-sonnet-5-5",
+      name: "Claude Sonnet 5.5",
+      reasoning: true,
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+      cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+    });
+  });
+
   test("does not duplicate a model the catalog already has", () => {
     expect(buildPiAnthropicModels([model], "claude-sonnet-5")).toHaveLength(1);
   });

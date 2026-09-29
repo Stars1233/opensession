@@ -1,6 +1,7 @@
 import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import type { ComponentProps, ReactNode } from "react";
+import { ensureDiffLanguages } from "../lib/diff-languages";
 
 type DiffOptions = ComponentProps<typeof FileDiff>["options"];
 
@@ -33,6 +34,7 @@ export function PatchFileDiff({
   path: string;
   options: DiffOptions;
 }) {
+  ensureDiffLanguages();
   const file = patchFiles(patch).find((candidate) => candidate.name === path);
   if (!file) return null;
   return <FileDiff fileDiff={file} options={options} disableWorkerPool />;
@@ -50,6 +52,7 @@ export function PatchDiffs({
   className: string;
   header: ReactNode;
 }) {
+  ensureDiffLanguages();
   const files = patchFiles(patch);
   if (files.length === 0) return null;
   return (

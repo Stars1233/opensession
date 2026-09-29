@@ -685,6 +685,8 @@ export interface Workspace {
   externalRefs?: ExternalRef[];
   /** An unsent composer prompt parked here before any session exists. */
   draft?: { text: string; updatedAt: string; by?: string; autoName?: boolean };
+  /** Teammates added besides the creator; each gets it in their sidebar. */
+  collaborators?: Array<{ name: string; by: string; at: string }>;
   modelSettings?: {
     presets?: Array<{
       id: string;
@@ -878,8 +880,14 @@ export interface PrDetails {
   /** CLEAN | BEHIND | BLOCKED | DIRTY | UNSTABLE | … — merge-box state. */
   mergeStateStatus?: string;
   /** The PR's webapp preview environment (Vercel preview), when one exists.
-   * `embeddable` is true once the deploy's CSP lets this app frame it. */
-  staging?: { url: string; status: string; embeddable?: boolean } | null;
+   * `embeddable` is true once the deploy's CSP lets this app frame it;
+   * `live` is true once the URL serves a deploy, even mid-rebuild. */
+  staging?: {
+    url: string;
+    status: string;
+    embeddable?: boolean;
+    live?: boolean;
+  } | null;
   /** The GitHub stack this PR is a layer of. Null/absent covers both "not
    *  stacked" and "the stack read failed" — the UI treats them the same. */
   stack?: PrStack | null;
@@ -1090,7 +1098,18 @@ export type WSServerMessage =
   | { type: "mention"; user: string; mention: MentionRecord }
   // The mention was seen: one session when `sessionId` is set, otherwise all
   // of them. Keeps a person's other devices in step.
-  | { type: "mentions_cleared"; user: string; sessionId?: string };
+  | { type: "mentions_cleared"; user: string; sessionId?: string }
+  // A new inbox notification for `user` (lib/notifications.ts). Sent once,
+  // when the server first records the event; `alert` says whether the
+  // person's settings want a banner and sound for it.
+  | {
+      type: "notification";
+      user: string;
+      notification: unknown;
+      alert: boolean;
+    }
+  // `user`'s inbox changed on another device (read, done, settings).
+  | { type: "notifications_changed"; user: string };
 
 // ── Analytics (sidebar → Analytics; GET /api/analytics) ──
 

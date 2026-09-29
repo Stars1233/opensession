@@ -1,6 +1,7 @@
-import RFB from "@novnc/novnc";
+import type RFB from "@novnc/novnc";
 import { useEffect, useRef, useState } from "react";
 import { getWebSocketUrl } from "../lib/api/request";
+import { loadNoVnc } from "../lib/novnc-loader";
 import { Button } from "../ui/button";
 import { PageLoader } from "../ui/page-loader";
 
@@ -43,40 +44,51 @@ export function VncDesktop({
       onPhase?.(next);
     };
     report({ phase: "connecting" });
-    const rfb = new RFB(target, vncStreamUrl(streamPath), {
-      credentials: { password },
-      shared: true,
-    });
-    rfb.scaleViewport = true;
-    rfb.resizeSession = false;
-    rfb.showDotCursor = true;
-    rfb.background = "transparent";
-    rfb.addEventListener("connect", () => report({ phase: "connected" }));
-    rfb.addEventListener("credentialsrequired", () =>
-      rfb.sendCredentials({ password }),
+    let rfb: RFB | null = null;
+    void loadNoVnc().then(
+      ({ default: RFBClient }) => {
+        if (!live) return;
+        const client = new RFBClient(target, vncStreamUrl(streamPath), {
+          credentials: { password },
+          shared: true,
+        });
+        rfb = client;
+        client.scaleViewport = true;
+        client.resizeSession = false;
+        client.showDotCursor = true;
+        client.background = "transparent";
+        client.addEventListener("connect", () =>
+          report({ phase: "connected" }),
+        );
+        client.addEventListener("credentialsrequired", () =>
+          client.sendCredentials({ password }),
+        );
+        client.addEventListener("securityfailure", (event) => {
+          report({
+            phase: "closed",
+            reason: event.detail.reason || "The display refused the connection",
+          });
+        });
+        client.addEventListener("disconnect", (event) => {
+          setState((current) =>
+            current.phase === "closed"
+              ? current
+              : {
+                  phase: "closed",
+                  reason: event.detail.clean
+                    ? "The display closed"
+                    : "Lost the connection to the display",
+                },
+          );
+        });
+      },
+      () =>
+        report({ phase: "closed", reason: "Couldn't load the desktop viewer" }),
     );
-    rfb.addEventListener("securityfailure", (event) => {
-      report({
-        phase: "closed",
-        reason: event.detail.reason || "The display refused the connection",
-      });
-    });
-    rfb.addEventListener("disconnect", (event) => {
-      setState((current) =>
-        current.phase === "closed"
-          ? current
-          : {
-              phase: "closed",
-              reason: event.detail.clean
-                ? "The display closed"
-                : "Lost the connection to the display",
-            },
-      );
-    });
     return () => {
       live = false;
       try {
-        rfb.disconnect();
+        rfb?.disconnect();
       } catch {}
     };
   }, [streamPath, password, onPhase]);

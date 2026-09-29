@@ -181,6 +181,11 @@ export interface SessionViewerViewTabsBinding {
    */
   terminalTabOpen?: boolean;
   /**
+   * Names this pane's Browser and Portal pages in the app-wide kept-frame
+   * layer, so switching away and back finds them still loaded.
+   */
+  frameScope?: string;
+  /**
    * Whether the Conversation pane (the workspace's Plain support-ticket
    * thread, full-width) is foregrounded — driven by the top tab strip's
    * Conversation view-tab (App state).

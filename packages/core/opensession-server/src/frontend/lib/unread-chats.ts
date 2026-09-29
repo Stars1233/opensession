@@ -10,12 +10,16 @@ export interface UnreadChat {
 }
 
 /** Work from the sidebar inventory, not its mounted rows: collapsed groups and
- * sibling tabs still count, but personal hides, filters and snoozes still apply. */
+ * sibling tabs still count, but personal hides, filters and snoozes still apply.
+ * The sidebar also shows other people's work (review requests, teammates'
+ * sessions in a shared workspace, a person filter), so only sessions `isMine`
+ * accepts become destinations. */
 export function unreadChatsInOrder(
   rows: readonly Pick<WsRow, "key" | "sessions" | "workspace">[],
   selectedId: string | null,
   reads: Record<string, string>,
   snoozedKeys: ReadonlySet<string>,
+  isMine: (session: WsRow["sessions"][number]) => boolean,
 ): UnreadChat[] {
   const selected = rows.findIndex((row) =>
     row.sessions.some((session) => session.id === selectedId),
@@ -32,6 +36,7 @@ export function unreadChatsInOrder(
           !session.archived &&
           !session.desk &&
           !session.parentSessionId &&
+          isMine(session) &&
           isUnread(session, reads),
       )
       .sort(

@@ -1419,7 +1419,6 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
             String(user || ""),
             sessionId,
             "prompt",
-            session.title || "a session",
           );
 
           // An explicit send is the user's next action after a Stop, so it lifts the

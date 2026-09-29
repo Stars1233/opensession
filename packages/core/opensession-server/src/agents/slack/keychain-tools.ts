@@ -12,18 +12,28 @@
  * ticket text reach it would turn the agent into a social-engineering proxy
  * against our own team ("I need the Stripe key to process this refund").
  *
- * Registration is deliberately not a tool: a secret pasted into a session
- * prompt is a secret in the transcript. Credentials are added over HTTP.
+ * A secret pasted into a session prompt is a secret in the transcript, so
+ * register_credential never takes one: the agent names the service and host,
+ * the session's driver pastes the secret into a card that posts over HTTP
+ * (credential-registrations.ts), and the tool gets metadata back.
  */
 
 import { createSdkMcpServer, tool } from "../../server/inprocess-mcp";
 import { z } from "zod";
-import { githubLoginFor } from "../../server/shared/user-mappings";
+import {
+  githubLoginFor,
+  resolveTeammate,
+} from "../../server/shared/user-mappings";
+import { findSession } from "../../server/session-cache";
+import type { UnifiedSession } from "../../server/types";
+import { requestCredentialRegistration } from "../../server/credential-registrations";
 import {
   macKeychainRequestSchema,
   macKeychainRequests,
 } from "../../server/mac-keychain-requests";
 import {
+  cancelCredentialAsk,
+  ensureKeychainLoaded,
   listCredentials,
   listGrants,
   listKeychainAsks,
@@ -34,6 +44,34 @@ export interface KeychainToolContext {
   sessionId: string;
   /** Who is driving — recorded on the ask so the owner sees who is asking. */
   user: string;
+  /** Test seam; defaults to the session cache. */
+  session?: (
+    sessionId: string,
+  ) =>
+    | Pick<
+        UnifiedSession,
+        "automation" | "automationId" | "automationDescendantPolicy"
+      >
+    | undefined;
+}
+
+/**
+ * Why this run cannot register a credential, or null when it can. The
+ * keychain server is already withheld from automation runs; this is the
+ * second, explicit check so a misrouted automation gets a clear refusal
+ * rather than a card nobody is watching.
+ */
+function registrationRefusal(ctx: KeychainToolContext): string | null {
+  const session = (ctx.session ?? findSession)(ctx.sessionId);
+  if (
+    session?.automation ||
+    session?.automationId ||
+    session?.automationDescendantPolicy
+  )
+    return "Credentials can't be registered from an automation run. Ask a teammate to add it in Settings → Account.";
+  if (!githubLoginFor(ctx.user) || !resolveTeammate(ctx.user))
+    return "Only a signed-in teammate driving this session can register a credential. Ask them to add it in Settings → Account.";
+  return null;
 }
 
 function text(s: string) {
@@ -97,7 +135,7 @@ export function createKeychainMcpServer(ctx: KeychainToolContext) {
         const creds = listCredentials();
         if (!creds.length) {
           return text(
-            "The keychain is empty. Credentials are registered by their owner in the Open Session UI (Settings → Account) — never paste a secret into a session.",
+            "The keychain is empty. Credentials are added by their owner in Settings → Account, or with register_credential, where the person driving this session pastes the secret into a card. Never paste a secret into a session.",
           );
         }
         const lines = creds.map((c) => {
@@ -122,7 +160,7 @@ export function createKeychainMcpServer(ctx: KeychainToolContext) {
     ),
     tool(
       "request_credential",
-      "Ask a credential's owner to lend it to THIS session for a stated purpose. They get a DM (or a card, if they're driving a session) with Approve once / Approve standing / Decline, and this call blocks until they answer. On approval you receive broker instructions — a URL that injects the credential server-side; you never see the secret itself. Ask only when you actually need the access now, state the real purpose (the owner is approving that sentence, and every call is audited against it), and prefer 'once' unless the task genuinely needs repeated calls. If they decline, don't re-ask.",
+      "Ask a credential's owner to lend it to THIS session for a stated purpose. They get a DM (or a card, if they're driving a session) with Approve once / Approve standing / Decline, and this call blocks until they answer. On approval you receive broker instructions — a URL that injects the credential server-side; you never see the secret itself. Ask only when you actually need the access now, state the real purpose (the owner is approving that sentence, and every call is audited against it), and prefer 'once' unless the task genuinely needs repeated calls. If they decline, don't re-ask. Calling again with the same purpose while your ask is pending reminds the owner and waits on that same ask; if they already approved it, you get the live grant back.",
       {
         credential: z
           .string()
@@ -139,11 +177,14 @@ export function createKeychainMcpServer(ctx: KeychainToolContext) {
             "'once' (default) = a single broker call, expires in an hour. 'standing' = repeated calls for up to 7 days; the owner can approve either regardless of what you request.",
           ),
       },
-      async (args: {
-        credential: string;
-        purpose: string;
-        mode?: "once" | "standing";
-      }) => {
+      async (
+        args: {
+          credential: string;
+          purpose: string;
+          mode?: "once" | "standing";
+        },
+        extra: any,
+      ) => {
         const result = requestCredential({
           credential: args.credential,
           sessionId: ctx.sessionId,
@@ -152,17 +193,174 @@ export function createKeychainMcpServer(ctx: KeychainToolContext) {
           ...(args.mode ? { mode: args.mode } : {}),
         });
         if ("error" in result) return text(`Couldn't ask: ${result.error}`);
+        if ("grant" in result)
+          return text(
+            `This session already holds a live grant for this credential.\n\n${result.instructions}`,
+          );
         // The human-asks transport owns the wait; the keychain domain handler
         // swaps the owner's button label for grant instructions, so whatever
         // comes back here is already the text the model should act on.
-        const { awaitBlockingAnswer } = await import("../../server/human-asks");
-        const answer = await awaitBlockingAnswer(result.transport.id);
+        const { awaitBlockingAnswer, remindAsk } =
+          await import("../../server/human-asks");
+        // Stop holding the answer if the caller gives up, so a late approval
+        // steers into the session instead of into this dead call. Wait
+        // before reminding, so an answer during the reminder isn't missed.
+        const waiting = awaitBlockingAnswer(result.transport.id, extra?.signal);
+        if (result.resurfaced) await remindAsk(result.transport.id);
+        const answer = await waiting;
         if (answer === null) {
           return text(
-            `${result.ask.owner} hasn't answered yet — the ask stays open (${result.ask.id}) and their reply will arrive in this session as a message. Carry on with what doesn't need this credential, or stop and say what you're blocked on.`,
+            `${result.ask.owner} hasn't answered yet — the ask stays open (${result.ask.id}) and their reply will arrive in this session as a message. Carry on with what doesn't need this credential, or stop and say what you're blocked on. Call request_credential again to remind them, or cancel_credential_ask to withdraw it.`,
           );
         }
         return text(answer);
+      },
+    ),
+    tool(
+      "cancel_credential_ask",
+      "Withdraw one of this session's pending keychain asks (ids from list_grants). The owner is told it no longer needs an answer, and their buttons stop approving anything. Use it when the access is no longer needed or the ask should be replaced by a different one.",
+      {
+        askId: z.string().describe("The pending ask's id, e.g. 'ka-…'."),
+      },
+      async ({ askId }: { askId: string }) => {
+        const result = cancelCredentialAsk(askId, ctx.sessionId);
+        if ("error" in result)
+          return text(`Couldn't withdraw ${askId}: ${result.error}.`);
+        return text(`Withdrew keychain ask ${askId}.`);
+      },
+    ),
+    tool(
+      "register_credential",
+      "Add a credential to the keychain, owned by the person driving this session, so this and later sessions can borrow it through request_credential. You supply only metadata. A card appears in the session where THEY paste the secret; it goes straight to the keychain and you never see it. This call waits until they save or decline (15 minutes at most) and returns the credential's id, service, host and owner. Never ask anyone to paste a secret in chat; if they already did, tell them to rotate it. Check list_credentials first: service slugs are unique. Set allowedMethods / allowedPathPrefixes when the task needs less than full access. Interactive sessions with a signed-in teammate only.",
+      {
+        service: z
+          .string()
+          .min(1)
+          .max(64)
+          .describe(
+            "Unique lowercase slug, e.g. 'acme-prod'. Use separate slugs for separate keys (prod vs sandbox).",
+          ),
+        host: z
+          .string()
+          .min(1)
+          .max(253)
+          .describe(
+            "API host the broker will call over HTTPS, e.g. 'api.example.test'. No scheme, port or path.",
+          ),
+        description: z
+          .string()
+          .max(240)
+          .optional()
+          .describe(
+            "What the credential is, shown to teammates who borrow it.",
+          ),
+        allowedMethods: z
+          .array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]))
+          .optional()
+          .describe("Limit broker calls to these methods. Omit for all."),
+        allowedPathPrefixes: z
+          .array(z.string().min(1).max(200))
+          .max(20)
+          .optional()
+          .describe(
+            "Limit broker calls to paths starting with these, e.g. ['/v1/customers']. Omit for all.",
+          ),
+        header: z
+          .string()
+          .max(64)
+          .optional()
+          .describe(
+            "Header that carries the secret. Default 'Authorization' with the Bearer scheme.",
+          ),
+        scheme: z
+          .string()
+          .max(32)
+          .optional()
+          .describe(
+            "Prefix before the secret in that header, e.g. 'Bearer' or 'Token'. Empty string for none.",
+          ),
+      },
+      async (
+        args: {
+          service: string;
+          host: string;
+          description?: string;
+          allowedMethods?: string[];
+          allowedPathPrefixes?: string[];
+          header?: string;
+          scheme?: string;
+        },
+        extra: any,
+      ) => {
+        const refusal = registrationRefusal(ctx);
+        if (refusal) return text(refusal);
+        const owner = resolveTeammate(ctx.user)!.name;
+        const login = githubLoginFor(ctx.user)!;
+        // Load the store off-thread; the spec check below reads it.
+        await ensureKeychainLoaded();
+        let waiting;
+        try {
+          waiting = requestCredentialRegistration(
+            ctx.sessionId,
+            {
+              owner,
+              login,
+              spec: {
+                service: args.service,
+                host: args.host,
+                ...(args.description ? { description: args.description } : {}),
+                ...(args.allowedMethods
+                  ? { allowedMethods: args.allowedMethods }
+                  : {}),
+                ...(args.allowedPathPrefixes
+                  ? { allowedPathPrefixes: args.allowedPathPrefixes }
+                  : {}),
+                ...(args.header !== undefined || args.scheme !== undefined
+                  ? {
+                      injection: {
+                        ...(args.header !== undefined
+                          ? { header: args.header }
+                          : {}),
+                        ...(args.scheme !== undefined
+                          ? { scheme: args.scheme }
+                          : {}),
+                      },
+                    }
+                  : {}),
+              },
+            },
+            extra?.signal,
+          );
+        } catch (error: any) {
+          return text(
+            `Couldn't ask: ${error?.message || String(error)}. Nothing was registered.`,
+          );
+        }
+        const result = await waiting;
+        if (result.status === "declined")
+          return text(
+            `${owner} declined to add the credential. Don't ask again without their go-ahead.`,
+          );
+        if (result.status === "expired")
+          return text(
+            "Nobody saved the credential within 15 minutes, so the request closed. Nothing was registered.",
+          );
+        const c = result.credential;
+        return text(
+          JSON.stringify({
+            registered: {
+              id: c.id,
+              service: c.service,
+              host: c.host,
+              owner: c.owner,
+              ...(c.allowedMethods ? { allowedMethods: c.allowedMethods } : {}),
+              ...(c.allowedPathPrefixes
+                ? { allowedPathPrefixes: c.allowedPathPrefixes }
+                : {}),
+            },
+            next: `Borrow it with request_credential({ credential: "${c.service}", purpose }). The secret is never available to you directly.`,
+          }),
+        );
       },
     ),
     tool(
@@ -190,6 +388,10 @@ export function createKeychainMcpServer(ctx: KeychainToolContext) {
           (a) =>
             `- ${a.id}: awaiting ${a.owner}'s answer — purpose: ${a.purpose}`,
         );
+        if (pendingLines.length)
+          pendingLines.push(
+            "Call request_credential again to remind the owner, or cancel_credential_ask to withdraw one.",
+          );
         return text(
           [
             grants.length ? `Grants:\n${lines.join("\n")}` : "",

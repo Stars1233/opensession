@@ -45,6 +45,15 @@ describe("model picker groups", () => {
     ).toEqual(["pi/anthropic/claude-opus-5-5", "pi/anthropic/claude-sonnet-5"]);
   });
 
+  test("shows Sonnet 5.5 as the current Sonnet", () => {
+    const { primary, legacy } = splitModelOptions([
+      model("claude-sonnet-5", "claude"),
+      model("claude-sonnet-5-5", "claude"),
+    ]);
+    expect(primary.map((entry) => entry.id)).toEqual(["claude-sonnet-5-5"]);
+    expect(legacy.map((entry) => entry.id)).toEqual(["claude-sonnet-5"]);
+  });
+
   test("puts Astra first among OpenAI models", () => {
     const { primary } = splitModelOptions([
       model("pi/openai/gpt-6-luna", "pi"),

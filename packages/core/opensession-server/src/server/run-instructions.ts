@@ -198,8 +198,21 @@ export function buildRunInstructions(input: {
   }
 
   const inproc = (input.inProcessMcp || {}) as Record<string, unknown>;
-  // One guidance line per mounted internal server. Every MCP tool hides
-  // behind mcp_search, so this is how a run learns which tools exist before
+  // Models default to `sleep 240; check`: one call, blind to a job that
+  // finished early or died. The rule used to live in one repository's
+  // AGENTS.md and in schedule guidance scoped to "external work", so a run
+  // polling its own benchmark in another repository never saw it. Frame it
+  // by wait length, which is how the choice actually presents itself.
+  parts.push(
+    "## Waiting\nNever wait with a fixed `sleep N`. For a short wait, poll until done or " +
+      "failed under a hard cap, e.g. " +
+      "`timeout 300 bash -c 'until grep -q DONE out.log; do sleep 10; done'`. " +
+      (inproc["opensession-schedule"]
+        ? "For longer, call `schedule_prompt` with `in_minutes` and end your turn."
+        : "For longer, report where things stand and end your turn."),
+  );
+  // One guidance line per mounted internal server. MCP tools hide
+  // behind mcp_search (bar DIRECT_MCP_TOOLS), so this is how a run learns which tools exist before
   // it knows to search for them. The sections below add the standing rules
   // (Portals, Attachments, Media) that a one-line intention cannot carry.
   const tools = renderInternalMcpCapabilities(inproc);

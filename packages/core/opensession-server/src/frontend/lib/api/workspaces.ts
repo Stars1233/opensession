@@ -137,6 +137,36 @@ export async function updateWorkspaceApi(
   return body.workspace;
 }
 
+/** Add a teammate to a workspace. The server notifies them on the first add. */
+export async function addWorkspaceCollaboratorApi(
+  id: string,
+  name: string,
+  user: string,
+  sessionId?: string,
+): Promise<Workspace> {
+  const body = await request<{ workspace: Workspace }>(
+    `/workspaces/${encodeURIComponent(id)}/collaborators`,
+    {
+      method: "POST",
+      // JSON drops an undefined sessionId, which the server reads as absent.
+      body: { name, user, sessionId },
+      label: "Failed to add collaborator",
+    },
+  );
+  return body.workspace;
+}
+
+export async function removeWorkspaceCollaboratorApi(
+  id: string,
+  name: string,
+): Promise<Workspace> {
+  const body = await request<{ workspace: Workspace }>(
+    `/workspaces/${encodeURIComponent(id)}/collaborators/${encodeURIComponent(name)}`,
+    { method: "DELETE", label: "Failed to remove collaborator" },
+  );
+  return body.workspace;
+}
+
 export async function deleteWorkspaceApi(id: string): Promise<void> {
   await request<void>(`/workspaces/${encodeURIComponent(id)}`, {
     method: "DELETE",

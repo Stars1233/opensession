@@ -41,6 +41,7 @@ import { PrStatusBar } from "./PrStatusBar";
 import { reviewerStateMeta } from "./pr/PrRows";
 import { StagingLink } from "./StagingLink";
 import { UserAvatar } from "./UserAvatar";
+import { WorkspaceSummaryCollaborators } from "./WorkspaceCollaborators";
 import {
   personNameForGithubLogin,
   personNameForKey,
@@ -1673,6 +1674,12 @@ export function WorkspaceSummaryBody({
           </div>
         )}
       </div>
+
+      <WorkspaceSummaryCollaborators
+        workspaceId={session.workspaceId || null}
+        sessionId={session.id}
+        groupClass={groupClass}
+      />
 
       {hasCommitDetails && (
         <div className={groupClass}>

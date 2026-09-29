@@ -42,6 +42,7 @@ import { useSessionDatabases } from "../components/SessionDatabasesPanel";
 import { fetchSessionNotesApi } from "../lib/api";
 import { markNotesRead } from "../lib/note-reads";
 import { clearMention, onMentionsChanged } from "../lib/mentions";
+import { watchSessionNotifications } from "../lib/notifications";
 import { useCopy } from "../ui/copy";
 import { useSessionHeaderLayout } from "./useSessionViewerActionsController";
 import {
@@ -420,6 +421,7 @@ export function useSessionViewStateController({
     clearMention(session.id);
     return onMentionsChanged(() => clearMention(session.id));
   }, [session.id]);
+  useEffect(() => watchSessionNotifications(session.id), [session.id]);
 
   return {
     composer: {

@@ -67,4 +67,23 @@ test("SessionViewer keeps preview selection and state ownership", async () => {
   expect(branch).toContain("deployment: staging");
   expect(branch).toContain("url: stagingUrl");
   expect(branch).toContain("shareLink,");
+  // Both surfaces keep their page in the app-wide frame layer.
+  expect(branch.split("frameScope={frameScope}")).toHaveLength(3);
+});
+
+test("a kept preview leaves its frame to the app-wide layer", () => {
+  const html = renderToStaticMarkup(
+    <SessionPreviewSurface
+      surface={{
+        kind: "staging",
+        deployment: { status: "Ready", embeddable: true },
+        url: STAGING_URL,
+        shareLink,
+      }}
+      frameScope="ws-1"
+    />,
+  );
+
+  expect(html).toContain(`value="${STAGING_URL.replace("&", "&amp;")}"`);
+  expect(html).not.toContain("<iframe");
 });

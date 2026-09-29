@@ -47,6 +47,7 @@ import { TranscriptView } from "../session/TranscriptView";
 import { SessionSafetyNotice } from "../SessionSafetyNotice";
 import { AskCard } from "../AskCard";
 import { LocalFilesRequestCard } from "../LocalFilesRequestCard";
+import { CredentialRegistrationCard } from "../CredentialRegistrationCard";
 import {
   ShippedChangeComposer,
   SlackSentNotice,
@@ -157,6 +158,7 @@ interface SurfaceRegion {
   showVideo: boolean;
   subagentOpen: boolean;
   conversationThreadId?: string | null;
+  frameScope?: string;
 }
 
 interface PaneRegion {
@@ -444,6 +446,7 @@ export function SessionViewerMainRegion({
     showVideo,
     subagentOpen,
     conversationThreadId,
+    frameScope,
   } = surfaces;
   const {
     assetFiles,
@@ -677,6 +680,7 @@ export function SessionViewerMainRegion({
       {showPortal && portalTarget ? (
         <SessionPreviewSurface
           surface={{ kind: "portal", target: portalTarget }}
+          frameScope={frameScope}
         />
       ) : showDesktop ? (
         // The Sandbox desktop, full-width like a Portal. Mounted only while
@@ -692,6 +696,7 @@ export function SessionViewerMainRegion({
             url: stagingUrl,
             shareLink,
           }}
+          frameScope={frameScope}
         />
       ) : showAssets ? (
         // The session's scratch assets, full-width (same component
@@ -1082,6 +1087,8 @@ export function SessionViewerMainRegion({
               )}
 
               <LocalFilesRequestCard sessionId={session.id} />
+
+              <CredentialRegistrationCard sessionId={session.id} />
 
               {slackComposer && (
                 <ShippedChangeComposer

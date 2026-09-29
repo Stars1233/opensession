@@ -10,6 +10,7 @@ import type { UnifiedSession } from "../lib/types";
 import type { CommandPaletteAction } from "./SessionSearch";
 import {
   IconArchive,
+  IconBell,
   IconBook,
   IconChart,
   IconChevronRight,
@@ -385,6 +386,15 @@ export function buildAppCommandActions({
       category: "Navigate",
       icon: <IconBook size={18} />,
       run: () => navigate({ view: "security" }),
+    },
+    {
+      id: "inbox",
+      label: "Notifications",
+      description: "Your inbox of questions, reviews and mentions",
+      category: "Navigate",
+      keywords: ["inbox", "notifications", "unread", "alerts"],
+      icon: <IconBell size={18} />,
+      run: () => navigate({ view: "inbox" }),
     },
     {
       id: "archived",

@@ -63,15 +63,15 @@ export async function handlePrefsRoutes(
   // ── Web Push (phone/desktop notifications, app closed) ──
   if (path === "/api/push/vapid-key" && req.method === "GET") {
     const { getVapidPublicKey } = await import("../../server/push");
-    return Response.json({ publicKey: getVapidPublicKey() });
+    return Response.json({ publicKey: await getVapidPublicKey() });
   }
 
   if (path === "/api/push/subscribe" && req.method === "POST") {
     const body = await req.json().catch(() => null);
     if (!body) return Response.json({ error: "Invalid JSON" }, { status: 400 });
     const { addPushSubscription } = await import("../../server/push");
-    const result = addPushSubscription({
-      user: body.user,
+    const result = await addPushSubscription({
+      user: requestUser(ctx, body.user),
       subscription: body.subscription,
       userAgent: req.headers.get("user-agent") || undefined,
     });
@@ -84,7 +84,7 @@ export async function handlePrefsRoutes(
     if (!body || typeof body.endpoint !== "string")
       return Response.json({ error: "endpoint required" }, { status: 400 });
     const { removePushSubscription } = await import("../../server/push");
-    removePushSubscription(body.endpoint);
+    await removePushSubscription(body.endpoint);
     return Response.json({ ok: true });
   }
 

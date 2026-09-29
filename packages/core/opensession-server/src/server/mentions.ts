@@ -1,7 +1,7 @@
 /**
  * @-mentions of a teammate, kept per person so their sidebar can show which
  * sessions are waiting on them. A mention already pushed to their devices
- * (src/server/push.ts); this is the part that survives a closed notification:
+ * (src/server/notifications.ts); this is the part that survives a closed notification:
  * a durable "you were tagged here" flag that clears when they open the session.
  *
  * One record per (person, session) — the badge is per row, so a second mention
@@ -28,8 +28,9 @@ export interface Mention {
   sessionId: string;
   /** Display name of whoever wrote the mention. */
   by: string;
-  /** Where it was written: a prompt in the transcript, or a team note. */
-  source: "prompt" | "note";
+  /** Where it came from: a prompt in the transcript, a team note, or being
+   *  added as a workspace collaborator. */
+  source: "prompt" | "note" | "collaborator";
   /** First line or so of the text, for a hover card or a mentions list. */
   preview: string;
   /** ms epoch */
@@ -57,7 +58,9 @@ function cleanMentions(value: unknown): Mention[] {
       "preview" in value &&
       typeof value.preview === "string" &&
       "source" in value &&
-      (value.source === "prompt" || value.source === "note"),
+      (value.source === "prompt" ||
+        value.source === "note" ||
+        value.source === "collaborator"),
   );
 }
 
@@ -133,20 +136,16 @@ export async function recordMentions(
 
 /**
  * Record a mention and announce it: the durable badge, the live socket frame
- * that marks the row on every device the person has open, and the web push
- * that reaches them with the app closed. Every surface that can carry a
+ * that marks the row on every device the person has open, and the inbox
+ * notification (src/server/notifications.ts), which also pushes. Every surface that can carry a
  * mention calls this rather than assembling the three itself, so a new
  * surface cannot ship two of them and forget the third.
- *
- * `where` is the tail of the push title ("… mentioned you in <where>") — the
- * session's title for a message, "a session note" for a note.
  */
 export async function notifyMentions(
   text: string,
   sender: string,
   sessionId: string,
   source: Mention["source"],
-  where: string,
 ): Promise<string[]> {
   const { broadcastToAll } = await import("./ws-hub");
   const mentioned = await recordMentions(
@@ -158,17 +157,19 @@ export async function notifyMentions(
       broadcastToAll({ type: "mention", user: person, mention }),
   );
   if (!mentioned.length) return mentioned;
-  const { sendPushToUser } = await import("./push");
+  const { notifyUser, sessionSubject, sessionUrl } =
+    await import("./notifications");
+  const { findSession } = await import("./session-cache");
+  const session = findSession(sessionId);
   const body = mentionPreview(text);
   for (const name of mentioned)
-    void sendPushToUser(name, {
-      title: `${sender || "Someone"} mentioned you in ${where}`,
+    void notifyUser(name, {
+      kind: "mention",
+      subject: sessionSubject(sessionId, session),
+      reason: `${sender || "Someone"} mentioned you${source === "note" ? " in a note" : ""}`,
       body,
-      url: `/session/${encodeURIComponent(sessionId)}`,
-      // One tag per session per kind: a second mention replaces the
-      // notification instead of stacking, and a note never collapses a
-      // message (or the other way round).
-      tag: `opensession-${source === "note" ? "note" : "mention"}-${sessionId}`,
+      actor: sender || undefined,
+      url: sessionUrl(sessionId),
     });
   return mentioned;
 }

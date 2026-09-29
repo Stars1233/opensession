@@ -23,6 +23,7 @@ import { handleSessionContextRoutes } from "./session-context";
 import { handleSessionVoiceRoutes } from "./session-voice";
 import { handleEffectiveConfigRoutes } from "./effective-config";
 import { handleMentionsRoutes } from "./mentions";
+import { handleNotificationsRoutes } from "./notifications";
 import { handleMentionPaletteRoutes } from "./mention-palette";
 import { handleSandboxRoutes } from "./sandbox";
 import { handleSandboxesRoutes } from "./sandboxes";
@@ -34,6 +35,7 @@ import { handleSessionGitRoutes } from "./session-git";
 import { handleSessionBranchRoutes } from "./session-branch";
 import { handlePreviewRoutes } from "./preview";
 import { handleWorkspaceRoutes } from "./workspace";
+import { handleWorkspaceCollaboratorRoutes } from "./workspace-collaborators";
 import { handleAutomationsRoutes } from "./automations";
 import { handleHumanAsksRoutes } from "./human-asks";
 import { handleKeychainRoutes } from "./keychain";
@@ -92,6 +94,7 @@ export const routeHandlers: RouteHandler[] = [
   handleSessionVoiceRoutes,
   handleEffectiveConfigRoutes,
   handleMentionsRoutes,
+  handleNotificationsRoutes,
   handleMentionPaletteRoutes,
   handleSandboxesRoutes,
   handleSandboxRoutes,
@@ -102,6 +105,8 @@ export const routeHandlers: RouteHandler[] = [
   handleSessionGitRoutes,
   handleSessionBranchRoutes,
   handlePreviewRoutes,
+  // Before the generic /api/workspaces/:id PATCH/DELETE.
+  handleWorkspaceCollaboratorRoutes,
   handleWorkspaceRoutes,
   handleAutomationsRoutes,
   handleHumanAsksRoutes,

@@ -32,6 +32,7 @@ import {
   getRecentPrsForPerson,
   markCachedPrClosed,
   markCachedPrMerged,
+  markCachedPrReady,
   markCachedPrReviewed,
 } from "../sessions";
 import { githubLoginToPersonKey } from "../shared/user-mappings";
@@ -675,6 +676,24 @@ export async function handlePrRoutes(
       return Response.json({ error: e.message || String(e) }, { status: 502 });
     }
   }
+  if (path === "/api/pr-preview-ready" && req.method === "POST") {
+    const credential = githubMutationCredential(ctx);
+    if (!credential) return githubCredentialRequiredResponse();
+    const body = await req.json().catch(() => ({}));
+    const branch = body?.branch?.trim();
+    if (!branch)
+      return Response.json({ error: "branch required" }, { status: 400 });
+    const repo = getRepo(body?.repo || undefined);
+    const result = await prHostFor(repo).markPrReady(
+      branch,
+      hostRepoId(repo),
+      credential,
+    );
+    if ("error" in result) return Response.json(result, { status: 502 });
+    markCachedPrReady(hostRepoId(repo), branch);
+    publishSessionRowsForBranch(branch);
+    return Response.json(result);
+  }
   if (path === "/api/pr-preview-close" && req.method === "POST") {
     const credential = githubMutationCredential(ctx);
     if (!credential) return githubCredentialRequiredResponse();
@@ -1006,6 +1025,38 @@ export async function handlePrRoutes(
     } catch (e: any) {
       return Response.json({ error: e.message || String(e) }, { status: 502 });
     }
+  }
+
+  // Take the session's draft PR out of draft — human-triggered from Reviews.
+  if (
+    path.match(/^\/api\/sessions\/(.+)\/pr-ready$/) &&
+    req.method === "POST"
+  ) {
+    const credential = githubMutationCredential(ctx);
+    if (!credential) return githubCredentialRequiredResponse();
+    const sessionId = decodeURIComponent(
+      path.match(/^\/api\/sessions\/(.+)\/pr-ready$/)![1],
+    );
+    const session = await findPrSessionAsync(sessionId);
+    if (!session)
+      return Response.json({ error: "Session not found" }, { status: 404 });
+
+    const body = await req.json().catch(() => ({}));
+    const target = resolvePrTarget(session, body.repo, body.branch);
+    if (!target)
+      return Response.json(
+        { error: "No branch/PR for that repo" },
+        { status: 400 },
+      );
+    const result = await prHostFor(getRepo(target.repoId)).markPrReady(
+      target.branch,
+      target.ghRepo,
+      credential,
+    );
+    if ("error" in result) return Response.json(result, { status: 502 });
+    markCachedPrReady(target.ghRepo, target.branch);
+    publishSessionRowsForBranch(target.branch);
+    return Response.json(result);
   }
 
   // Close the session's PR without merging it — human-triggered from Reviews.

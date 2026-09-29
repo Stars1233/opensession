@@ -56,16 +56,25 @@ describe("workspaceCarriesPr", () => {
 describe("findPrWorkspaceId", () => {
   it("matches a workspace minted for the PR number", () => {
     const workspaces = [
-      ws({ id: "w1", repo: "opensession", prNumber: 7 }),
-      ws({ id: "w2", repo: "opensession", prNumber: 8 }),
+      ws({ id: "w1", repo: "opensession", prNumber: 7, branch: "a" }),
+      ws({ id: "w2", repo: "opensession", prNumber: 8, branch: "b" }),
     ];
     expect(
       findPrWorkspaceId(workspaces, [], { repo: "opensession", number: 8 }),
     ).toBe("w2");
   });
 
+  it("leaves a number-only workspace for the server to resolve", () => {
+    const workspaces = [ws({ id: "w1", repo: "opensession", prNumber: 8 })];
+    expect(
+      findPrWorkspaceId(workspaces, [], { repo: "opensession", number: 8 }),
+    ).toBeNull();
+  });
+
   it("does not match the same number in another repo", () => {
-    const workspaces = [ws({ id: "w1", repo: "tella-fusion", prNumber: 8 })];
+    const workspaces = [
+      ws({ id: "w1", repo: "acme", prNumber: 8, branch: "b" }),
+    ];
     expect(
       findPrWorkspaceId(workspaces, [], { repo: "opensession", number: 8 }),
     ).toBeNull();

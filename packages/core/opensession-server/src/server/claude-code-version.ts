@@ -16,8 +16,8 @@
 import { audit } from "./audit";
 import { configuredPaths } from "./config";
 
-/** Oldest Claude Code CLI this release supports (Claude Opus 5.5 needs it). */
-export const MIN_CLAUDE_CODE_VERSION = "2.1.280";
+/** Oldest Claude Code CLI this release supports (Claude Sonnet 5.5 needs it). */
+export const MIN_CLAUDE_CODE_VERSION = "2.1.284";
 
 const VERSION_TIMEOUT_MS = 15_000;
 const UPDATE_TIMEOUT_MS = 5 * 60_000;

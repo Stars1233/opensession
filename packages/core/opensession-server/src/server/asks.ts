@@ -926,37 +926,6 @@ export function makeAskHandler(sessionId: string) {
           at: Date.now(),
         });
       }
-      // Phone buzz: Web Push to the session owner's registered devices
-      // (opt-in per device in Settings → Notifications). Best-effort —
-      // never lets a push hiccup affect the ask flow. Deduped on the
-      // question text: a restart resumes ask-blocked runs, which re-ask
-      // the same question — that re-ask must not buzz again.
-      if (!adopted && !ask.answerReceived)
-        void (async () => {
-          try {
-            const s = findSession(sessionId);
-            if (!s?.startedBy) return;
-            const { sendPushToUser } = await import("./push");
-            const { createHash } = await import("node:crypto");
-            const qHash = createHash("sha256")
-              .update(questions.map((q) => q.question).join("\n"))
-              .digest("hex")
-              .slice(0, 16);
-            await sendPushToUser(
-              s.startedBy,
-              {
-                title: `${personaName()} needs input`,
-                body: `${s.title || sessionId} — ${questions[0]?.question || "a question is waiting"}`.slice(
-                  0,
-                  180,
-                ),
-                url: `/session/${encodeURIComponent(sessionId)}`,
-                tag: `ask-${sessionId}`,
-              },
-              { dedupeKey: `ask:${sessionId}:${qHash}` },
-            );
-          } catch {}
-        })();
     } catch (error) {
       rejectAnswers(error);
     }

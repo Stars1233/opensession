@@ -28,6 +28,7 @@ export type Route =
   | { view: "goals"; id?: string }
   | { view: "settings"; section?: SettingsSectionKey }
   | { view: "archived" }
+  | { view: "inbox" }
   | { view: "catchup" };
 
 const TOOL_VIEWS = new Set(["automations", "security", "goals"]);
@@ -192,6 +193,7 @@ export function parseRoute(pathname: string): Route {
   }
 
   if (path === "/archived") return { view: "archived" };
+  if (path === "/inbox") return { view: "inbox" };
   if (path === "/catchup") return { view: "catchup" };
   if (path === "/support-tinder") return { view: "supporttinder" };
   const reviews = path.match(/^\/reviews(?:\/(.+))?$/);
@@ -257,6 +259,8 @@ export function routePath(route: Route): string {
         : `${BASE_PATH}/settings`;
     case "archived":
       return `${BASE_PATH}/archived`;
+    case "inbox":
+      return `${BASE_PATH}/inbox`;
     case "catchup":
       return `${BASE_PATH}/catchup`;
     case "supporttinder":

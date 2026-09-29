@@ -116,6 +116,25 @@ describe("scopeSessionsForSidebar", () => {
     ).toEqual(["mine", "teammate-tab"]);
   });
 
+  test("keeps a workspace for a collaborator the creator added", () => {
+    const rows = [
+      session("shared", { workspaceId: "ws-shared", startedBy: "Grace" }),
+      session("private", { workspaceId: "ws-private", startedBy: "Grace" }),
+    ];
+    const workspaces = new Map([
+      [
+        "ws-shared",
+        { createdBy: "Grace", repo: "opensession", collaborators: ["ada"] },
+      ],
+      ["ws-private", { createdBy: "Grace", repo: "opensession" }],
+    ]);
+    expect(
+      scopeSessionsForSidebar(rows, scope(), context({ workspaces })).map(
+        (row) => row.id,
+      ),
+    ).toEqual(["shared"]);
+  });
+
   test("adds every person's active window outside the current lens and repo", () => {
     const now = Date.parse("2026-08-27T12:00:00.000Z");
     const rows = [

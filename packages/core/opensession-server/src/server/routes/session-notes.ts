@@ -92,7 +92,7 @@ export async function handleSessionNotesRoutes(
     // @-mentions ping the tagged teammate's devices (works app-closed) and
     // leave a durable badge on their sidebar row, which survives a
     // notification they never saw.
-    await notifyMentions(note.text, user, sessionId, "note", "a session note");
+    await notifyMentions(note.text, user, sessionId, "note");
     return Response.json({ note });
   }
 

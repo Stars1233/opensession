@@ -3,6 +3,7 @@ import { VIEWER_REVIEW_MAIN } from "../../lib/session-viewer-classes";
 import { IconArrowUpRight, IconCopy, IconGlobe } from "../icons";
 import { Button } from "../../ui/button";
 import { BrowserPane } from "../BrowserPane";
+import { keptFrameKey } from "../../lib/kept-frames";
 import { PortalPane } from "../PortalPane";
 
 interface StagingDeployment {
@@ -34,14 +35,20 @@ type PreviewSurface =
 /** The active workspace preview tab. */
 export function SessionPreviewSurface({
   surface,
+  frameScope,
 }: {
   surface: PreviewSurface;
+  /** Keeps the page loaded across tab and session switches; see BrowserPane. */
+  frameScope?: string;
 }) {
   switch (surface.kind) {
     case "portal":
       return (
         <div className={VIEWER_REVIEW_MAIN}>
-          <PortalPane target={surface.target} />
+          <PortalPane
+            target={surface.target}
+            keepAliveKey={frameScope && keptFrameKey("portal", frameScope)}
+          />
         </div>
       );
     case "staging":
@@ -50,6 +57,7 @@ export function SessionPreviewSurface({
           deployment={surface.deployment}
           url={surface.url}
           shareLink={surface.shareLink}
+          keepAliveKey={frameScope && keptFrameKey("staging", frameScope)}
         />
       );
   }
@@ -60,7 +68,8 @@ function SessionStagingPane({
   deployment,
   url,
   shareLink,
-}: SessionStagingPaneProps) {
+  keepAliveKey,
+}: SessionStagingPaneProps & { keepAliveKey?: string }) {
   if (deployment?.embeddable) {
     // This deploy opts into being framed by this app (its CSP frame-ancestors
     // names our origin), so we embed it inline. When the deploy's session
@@ -75,6 +84,7 @@ function SessionStagingPane({
         <BrowserPane
           url={url}
           name="Preview environment"
+          keepAliveKey={keepAliveKey}
           frameTitle="Preview environment"
           allow="camera; microphone; display-capture; fullscreen; autoplay; clipboard-write"
           leading={

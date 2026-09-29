@@ -475,6 +475,7 @@ export function SessionViewer({
     showTerminal = false,
     onCloseTerminal,
     terminalTabOpen = false,
+    frameScope,
     showConversation = false,
     conversationThreadId = null,
     showVideo = false,
@@ -1666,6 +1667,7 @@ export function SessionViewer({
             showVideo,
             subagentOpen,
             conversationThreadId,
+            frameScope,
           }}
           panes={{
             assetFiles,

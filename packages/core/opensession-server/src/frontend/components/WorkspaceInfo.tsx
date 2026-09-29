@@ -68,6 +68,7 @@ import {
 } from "../lib/session-viewer-classes";
 import { openLightbox } from "../lib/media-lightbox";
 import { SandboxBadge } from "./SandboxBadge";
+import { WorkspaceCollaborators } from "./WorkspaceCollaborators";
 import {
   IconBell,
   IconCheck,
@@ -81,6 +82,7 @@ import {
   IconRobot,
   IconStack,
 } from "./icons";
+import { ensureDiffLanguages } from "../lib/diff-languages";
 
 /**
  * Workspace info block at the top of the right side panel (the "Info" tab): a
@@ -488,6 +490,7 @@ function FileRow({
   theme: "light" | "dark";
   onOpenTab?: (tab: PanelTab) => void;
 }) {
+  ensureDiffLanguages();
   const slash = file.path.lastIndexOf("/");
   const dir = slash >= 0 ? file.path.slice(0, slash + 1) : "";
   const base = slash >= 0 ? file.path.slice(slash + 1) : file.path;
@@ -1647,6 +1650,10 @@ export function WorkspaceInfo({
           <div className={INFO_LIST_CLASS}>{reviewerRow}</div>
         </div>
       )}
+      <WorkspaceCollaborators
+        workspaceId={workspaceId}
+        sessionId={sessionId || undefined}
+      />
       {sandbox && (
         // `px-3`, the label inset: the badge is a section's worth of content
         // with no plate under it, so it lines up with the labels rather than

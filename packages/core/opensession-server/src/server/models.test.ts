@@ -81,6 +81,33 @@ describe("Pi-only model routing", () => {
     expect(fallbackTier("pi/anthropic/claude-opus-5-5")).toBe(3);
   });
 
+  test("upgrades old Sonnet selections without changing historical labels", () => {
+    for (const old of ["claude-sonnet-5", "claude-sonnet-4-6"]) {
+      for (const prefix of [
+        "",
+        "anthropic/",
+        "pi/anthropic/",
+        "claude/anthropic/",
+      ]) {
+        expect(toPiModel(prefix + old)).toBe("pi/anthropic/claude-sonnet-5-5");
+      }
+    }
+    for (const alias of ["sonnet", "sonnet5", "sonnet5.5"]) {
+      expect(resolveModel(alias)?.id).toBe("claude-sonnet-5-5");
+    }
+    expect(modelLabel("claude-sonnet-5")).toBe("Claude Sonnet 5");
+    expect(modelLabel("claude-sonnet-5-5")).toBe("Claude Sonnet 5.5");
+    expect(modelEfforts("pi/anthropic/claude-sonnet-5-5")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(contextWindowFor("pi/anthropic/claude-sonnet-5-5")).toBe(1_000_000);
+    expect(fallbackTier("pi/anthropic/claude-sonnet-5-5")).toBe(1);
+  });
+
   test("preserves explicit Pi ids and case-sensitive model suffixes", () => {
     expect(toPiModel("pi/wafer/glm-5.2")).toBe("pi/wafer/glm-5.2");
     expect(toPiModel(" pi/My-Gateway/Qwen/Qwen3-Coder ")).toBe(

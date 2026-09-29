@@ -247,6 +247,15 @@ export interface Automation {
   webhookSecret: string;
   /** False removes the public trigger route while retaining the rotatable secret. */
   webhookEnabled?: boolean;
+  /**
+   * How many webhook runs of this automation may be in flight at once. Unset
+   * means 1: a webhook call while a run is going is answered with
+   * `skipped: "already running"`. Raise it when every call is its own piece
+   * of work that must not be dropped (one incident per call). Capped at
+   * {@link WEBHOOK_MAX_CONCURRENT_LIMIT} because the route is public and the
+   * secret in the path is its only auth.
+   */
+  webhookMaxConcurrent?: number;
   eventKey?: string; // internal event subscription, e.g. "plain:thread_created"
   /**
    * MCP server allowlist for this automation's runs (least privilege).
@@ -847,7 +856,30 @@ const AUTOMATION_FIELDS: Record<string, AutomationFieldValidator> = {
   inputs: (v) => sanitizeAutomationInputs(v),
   outputs: (v) => sanitizeAutomationOutputs(v),
   webhookEnabled: (v) => (v === false ? false : undefined),
+  webhookMaxConcurrent: (v) => sanitizeWebhookMaxConcurrent(v),
 };
+
+/** Upper bound for {@link Automation.webhookMaxConcurrent}. */
+export const WEBHOOK_MAX_CONCURRENT_LIMIT = 10;
+
+/** 1 (the default) and unset both store as unset; anything else must be an
+ *  integer in 2..{@link WEBHOOK_MAX_CONCURRENT_LIMIT}. */
+export function sanitizeWebhookMaxConcurrent(
+  v: unknown,
+): number | undefined | { error: string } {
+  if (v === undefined || v === null || v === 1) return undefined;
+  if (
+    typeof v !== "number" ||
+    !Number.isInteger(v) ||
+    v < 1 ||
+    v > WEBHOOK_MAX_CONCURRENT_LIMIT
+  ) {
+    return {
+      error: `webhookMaxConcurrent must be an integer from 1 to ${WEBHOOK_MAX_CONCURRENT_LIMIT}`,
+    };
+  }
+  return v;
+}
 
 /** Cross-field rules, run once at the end of every write. */
 function normalizeAutomation(
@@ -1040,6 +1072,7 @@ export async function updateAutomation(
       | "mode"
       | "enabled"
       | "eventKey"
+      | "webhookMaxConcurrent"
       | "mcpServers"
       | "repo"
       | "prReviewer"
@@ -1598,6 +1631,14 @@ const activeAutomationIntentSessions = new Set<string>();
 
 export function isAutomationRunning(id: string): boolean {
   return (runningCounts.get(id) || 0) > 0;
+}
+
+/** Would a webhook call for this automation exceed its concurrency cap? */
+export function webhookAtCapacity(
+  automation: Pick<Automation, "id" | "webhookMaxConcurrent">,
+  running: number = runningCounts.get(automation.id) || 0,
+): boolean {
+  return running >= (automation.webhookMaxConcurrent || 1);
 }
 
 export function activeAutomationPreparationCount(): number {
@@ -2725,7 +2766,7 @@ export function getWebhookRoutes(
     if (!automation.enabled) {
       return Response.json({ ok: false, skipped: "disabled" });
     }
-    if (isAutomationRunning(automation.id)) {
+    if (webhookAtCapacity(automation)) {
       return Response.json({ ok: false, skipped: "already running" });
     }
 

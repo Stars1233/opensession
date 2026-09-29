@@ -48,8 +48,12 @@ export function findPrWorkspaceId(
   pr: PrIdentity,
 ): string | null {
   if (pr.number !== undefined) {
-    const byNumber = workspaces.find((workspace) =>
-      workspaceCarriesPr(workspace, { repo: pr.repo, number: pr.number }),
+    // A number-only record (minted before its branch was known) has no
+    // Review to open. Let the server resolve it, which fills the branch in.
+    const byNumber = workspaces.find(
+      (workspace) =>
+        !!workspace.branch &&
+        workspaceCarriesPr(workspace, { repo: pr.repo, number: pr.number }),
     );
     if (byNumber) return byNumber.id;
   }

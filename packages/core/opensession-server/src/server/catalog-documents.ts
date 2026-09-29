@@ -31,6 +31,7 @@ export const APPLICATION_CATALOG_NAMESPACES = [
   "hides",
   "settlements",
   "mentions",
+  "notifications",
 ] as const;
 
 export type ApplicationCatalogNamespace =

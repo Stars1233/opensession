@@ -39,17 +39,50 @@ function fmt(p: ScheduledPrompt): string {
   return `- [${p.id}] at ${p.at}: ${snippet.replace(/\s+/g, " ")}`;
 }
 
+/** A week: longer than any sensible check-back, short enough to catch a
+ *  seconds-for-minutes mistake. */
+const MAX_DELAY_MINUTES = 7 * 24 * 60;
+
+/** Exactly one of a relative delay or an absolute time. A relative delay
+ *  spares the model computing a timestamp, which is most of what made
+ *  `sleep` the easier choice for a short wait. */
+export function resolveDeliveryTime(
+  args: { in_minutes?: number; at?: string },
+  now = Date.now(),
+): { at: string } | { error: string } {
+  const hasDelay = args.in_minutes !== undefined;
+  const hasAt = Boolean(args.at?.trim());
+  if (hasDelay === hasAt)
+    return { error: "Give exactly one of `in_minutes` or `at`." };
+  if (hasAt) return { at: args.at!.trim() };
+  const minutes = args.in_minutes!;
+  if (!Number.isFinite(minutes) || minutes <= 0)
+    return { error: "`in_minutes` must be a positive number." };
+  if (minutes > MAX_DELAY_MINUTES)
+    return { error: `\`in_minutes\` must be at most ${MAX_DELAY_MINUTES}.` };
+  return { at: new Date(now + minutes * 60_000).toISOString() };
+}
+
 export function createScheduleMcpServer(ctx: ScheduleToolContext) {
   const tz = timezoneForUser(ctx.user);
   const tools = [
     tool(
       "schedule_prompt",
-      'Schedule a prompt to be sent to THIS session at a future time, then end your turn. Use it to check back on something that takes a while (a release workflow, CI, a deploy, a long job) instead of polling or sleeping. The prompt arrives in this conversation marked as a scheduled check-back, so write it to your future self with everything needed to pick the work up: what to run, what "done" looks like, what to do on failure. Fires once; survives restarts. Do not use harness built-ins like CronCreate or ScheduleWakeup here; they do not exist in this session.',
+      'Schedule a prompt to be sent to THIS session later, then end your turn. Use it instead of `sleep` for any wait longer than a few minutes: a benchmark or job you started, a release workflow, CI, a deploy. Give `in_minutes` (simplest) or an absolute `at`. The prompt arrives in this conversation marked as a scheduled check-back, so write it to your future self with everything needed to pick the work up: what to run, what "done" looks like, what to do on failure. Fires once; survives restarts. Do not use harness built-ins like CronCreate or ScheduleWakeup here; they do not exist in this session.',
       {
+        in_minutes: z
+          .number()
+          .positive()
+          .max(MAX_DELAY_MINUTES)
+          .optional()
+          .describe(
+            "Deliver this many minutes from now (e.g. 20). Use this or `at`.",
+          ),
         at: z
           .string()
+          .optional()
           .describe(
-            `When to deliver, as an ISO 8601 UTC datetime (e.g. 2026-09-01T19:49:00Z). Compute from the current time; the user's timezone is ${tz}. Must be in the future.`,
+            `Deliver at this ISO 8601 UTC datetime (e.g. 2026-09-01T19:49:00Z), for a wall-clock time. The user's timezone is ${tz}. Use this or \`in_minutes\`.`,
           ),
         prompt: z
           .string()
@@ -57,11 +90,13 @@ export function createScheduleMcpServer(ctx: ScheduleToolContext) {
             "The message to deliver to this session, addressed to yourself.",
           ),
       },
-      async (args: { at: string; prompt: string }) => {
+      async (args: { in_minutes?: number; at?: string; prompt: string }) => {
+        const at = resolveDeliveryTime(args);
+        if ("error" in at) return text(`Couldn't schedule it: ${at.error}`);
         const result = createScheduledPrompt({
           sessionId: ctx.sessionId,
           prompt: args.prompt,
-          at: args.at,
+          at: at.at,
           user: ctx.user,
         });
         if ("error" in result)

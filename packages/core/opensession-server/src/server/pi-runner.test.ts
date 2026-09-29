@@ -1810,6 +1810,7 @@ describe("makePiBashTool exit-gated completion", () => {
       command_kind: "sleep",
       sleep_calls: 1,
       sleep_seconds: 0.01,
+      sleep_in_loop: false,
       timeout_s: 120,
     });
     expect(events[1]).toMatchObject({
@@ -1823,6 +1824,27 @@ describe("makePiBashTool exit-gated completion", () => {
     expect(events[0]?.command_sha256).toBe(events[1]?.command_sha256);
     expect(events[1]?.duration_ms).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(events)).not.toContain("top-secret");
+  });
+
+  test("tells a capped poll loop apart from a fixed sleep", async () => {
+    const events: PiBashAuditEvent[] = [];
+    const auditedTool = makePiBashTool({
+      cwd: tmpdir(),
+      env,
+      gated: false,
+      unattended: false,
+      onAudit: (event) => events.push(event),
+    });
+    await (auditedTool as any).execute(
+      "audit-poll",
+      { command: "n=0; until [ $n -ge 1 ]; do sleep 0.01; n=1; done" },
+      undefined,
+      undefined,
+    );
+    expect(events[0]).toMatchObject({
+      sleep_calls: 1,
+      sleep_in_loop: true,
+    });
   });
 
   test("records timeout and cancellation outcomes", async () => {

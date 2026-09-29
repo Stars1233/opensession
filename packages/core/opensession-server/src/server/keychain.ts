@@ -34,8 +34,10 @@
  * (same bar as opensession-humans — never automation runs), so untrusted
  * ticket text cannot social-engineer an owner with a plausible "purpose".
  * Registration is HTTP-only (routes/keychain.ts, web-auth gated): a secret
- * typed into a session prompt would land in the transcript, so there is
- * deliberately no add_credential tool.
+ * typed into a session prompt would land in the transcript. The
+ * register_credential tool (credential-registrations.ts) keeps that rule: the
+ * agent supplies only metadata, and the session's own driver pastes the
+ * secret into a card that posts straight to that HTTP path.
  *
  * Two limitations, stated rather than papered over:
  *
@@ -57,10 +59,13 @@
 
 import { stateDir } from "./paths";
 import { existsSync, readFileSync, chmodSync } from "node:fs";
-import { writeJsonAtomic } from "./shared/atomic-write";
+import { readFile } from "node:fs/promises";
+import { writeJsonAtomic, writeJsonAtomicAsync } from "./shared/atomic-write";
 import { audit } from "./audit";
 import { resolveTeammate } from "./shared/user-mappings";
 import {
+  cancelAsk,
+  getAsk,
   registerAsk,
   registerAskDomainHandler,
   type HumanAsk,
@@ -134,7 +139,7 @@ export interface KeychainAskRecord {
   requestedBy: string;
   purpose: string;
   requestedMode: GrantMode;
-  status: "pending" | "approved" | "declined" | "expired";
+  status: "pending" | "approved" | "declined" | "expired" | "cancelled";
   /** The human-asks transport record carrying the owner's buttons. */
   humanAskId?: string;
   grantId?: string;
@@ -158,18 +163,64 @@ const keychainAsks: Map<string, KeychainAskRecord> = (g.__keychainAsks ??=
 /** The path we last loaded from — a change (only tests do this) reloads. */
 let loadedFrom: string | null = null;
 
-function persist(): void {
-  const path = storePath();
-  writeJsonAtomic(path, {
+/** Bumped on every in-memory change that is persisted, so an async write
+ *  that raced a newer one knows to write again. */
+let revision = 0;
+
+function snapshot(): Stored {
+  return {
     credentials: [...credentials.values()],
     grants: [...grants.values()],
     asks: [...keychainAsks.values()],
-  } satisfies Stored);
+  };
+}
+
+function persist(): void {
+  revision++;
+  const path = storePath();
+  writeJsonAtomic(path, snapshot());
   try {
     chmodSync(path, 0o600);
   } catch {
     // best-effort — the file holds secrets, but a chmod failure must not
     // lose the write (the box is single-tenant either way)
+  }
+}
+
+let asyncWrites: Promise<void> = Promise.resolve();
+
+/**
+ * Persist without blocking the calling thread, for request handlers on the
+ * gateway. Writes are serialized, and each one re-writes if the store changed
+ * while it was in flight (including through a synchronous persist), so the
+ * file always ends on the latest state. The temp file is created 0600, so
+ * the secret-bearing file is never readable by others, even briefly.
+ */
+function persistAsync(): Promise<void> {
+  revision++;
+  const write = asyncWrites.then(async () => {
+    let written: number;
+    do {
+      written = revision;
+      await writeJsonAtomicAsync(storePath(), snapshot(), true, 0o600);
+    } while (written !== revision);
+  });
+  asyncWrites = write.catch(() => {});
+  return write;
+}
+
+function ingest(data: Stored): void {
+  const cutoff = Date.now() - TERMINAL_RETENTION_MS;
+  for (const c of data.credentials || []) credentials.set(c.id, c);
+  for (const gr of data.grants || []) {
+    if (gr.status !== "active" && new Date(gr.createdAt).getTime() < cutoff)
+      continue;
+    grants.set(gr.id, gr);
+  }
+  for (const a of data.asks || []) {
+    if (a.status !== "pending" && new Date(a.createdAt).getTime() < cutoff)
+      continue;
+    keychainAsks.set(a.id, a);
   }
 }
 
@@ -179,19 +230,31 @@ function load(): void {
   loadedFrom = path;
   if (!existsSync(path)) return;
   try {
-    const data: Stored = JSON.parse(readFileSync(path, "utf-8"));
-    const cutoff = Date.now() - TERMINAL_RETENTION_MS;
-    for (const c of data.credentials || []) credentials.set(c.id, c);
-    for (const gr of data.grants || []) {
-      if (gr.status !== "active" && new Date(gr.createdAt).getTime() < cutoff)
-        continue;
-      grants.set(gr.id, gr);
-    }
-    for (const a of data.asks || []) {
-      if (a.status !== "pending" && new Date(a.createdAt).getTime() < cutoff)
-        continue;
-      keychainAsks.set(a.id, a);
-    }
+    ingest(JSON.parse(readFileSync(path, "utf-8")));
+  } catch (e) {
+    console.error("[keychain] failed to load store:", e);
+  }
+}
+
+/** Async counterpart of load(), for request handlers on the gateway. After
+ *  it resolves, the synchronous load() inside the store's functions is a
+ *  no-op. */
+export async function ensureKeychainLoaded(): Promise<void> {
+  const path = storePath();
+  if (loadedFrom === path) return;
+  let raw: string | null = null;
+  try {
+    raw = await readFile(path, "utf-8");
+  } catch (e: any) {
+    if (e?.code !== "ENOENT")
+      console.error("[keychain] failed to read store:", e);
+  }
+  // Another caller may have loaded while this one awaited.
+  if (loadedFrom === path) return;
+  loadedFrom = path;
+  if (raw === null) return;
+  try {
+    ingest(JSON.parse(raw));
   } catch (e) {
     console.error("[keychain] failed to load store:", e);
   }
@@ -241,9 +304,37 @@ export interface AddCredentialInput {
   allowedPathPrefixes?: string[];
 }
 
-export function addCredential(
-  input: AddCredentialInput,
-): KeychainCredentialMeta {
+export type CredentialSpec = Omit<AddCredentialInput, "owner" | "secret">;
+
+export interface NormalizedCredentialSpec {
+  service: string;
+  host: string;
+  description?: string;
+  injection?: { header?: string; scheme?: string };
+  allowedMethods?: string[];
+  allowedPathPrefixes?: string[];
+}
+
+const HTTP_METHODS = new Set([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
+
+/**
+ * Validate and normalize everything about a credential except its owner and
+ * secret. Throws with a message safe to show the caller. Shared by the HTTP
+ * registration route and the register_credential tool, which checks a spec
+ * before it asks the owner for the secret. Also rejects a service slug that
+ * is already taken, since slugs are how asks name a credential.
+ */
+export function normalizeCredentialSpec(
+  input: CredentialSpec,
+): NormalizedCredentialSpec {
   load();
   const service = norm(input.service);
   const host = input.host
@@ -259,13 +350,15 @@ export function addCredential(
   if (!host || !/^[a-z0-9][a-z0-9.-]*$/.test(host) || host.includes(":")) {
     throw new Error("host must be a bare host name (no scheme, port, or path)");
   }
-  if (!input.secret.trim()) throw new Error("secret is empty");
   if ([...credentials.values()].some((c) => c.service === service)) {
     throw new Error(`a credential for service "${service}" already exists`);
   }
   const methods = (input.allowedMethods || [])
     .map((m) => m.trim().toUpperCase())
     .filter(Boolean);
+  for (const m of methods) {
+    if (!HTTP_METHODS.has(m)) throw new Error(`unknown HTTP method: ${m}`);
+  }
   const prefixes = (input.allowedPathPrefixes || [])
     .map((p) => p.trim())
     .filter(Boolean);
@@ -273,22 +366,48 @@ export function addCredential(
     if (!p.startsWith("/"))
       throw new Error(`path prefix must start with /: ${p}`);
   }
+  let injection: NormalizedCredentialSpec["injection"];
+  if (input.injection) {
+    const { header, scheme } = input.injection;
+    if (header !== undefined && !/^[A-Za-z0-9-]{1,64}$/.test(header))
+      throw new Error("injection header must be a plain header name");
+    if (scheme !== undefined && !/^[A-Za-z0-9-]{0,32}$/.test(scheme))
+      throw new Error("injection scheme must be a single word, or empty");
+    injection = {
+      ...(header !== undefined ? { header } : {}),
+      ...(scheme !== undefined ? { scheme } : {}),
+    };
+  }
+  const description = input.description?.trim();
+  return {
+    service,
+    host,
+    ...(description ? { description } : {}),
+    ...(injection && Object.keys(injection).length ? { injection } : {}),
+    ...(methods.length ? { allowedMethods: methods } : {}),
+    ...(prefixes.length ? { allowedPathPrefixes: prefixes } : {}),
+  };
+}
+
+/** Validate and insert, without persisting. Synchronous from the check to
+ *  the insert, so two concurrent adds cannot both take one service slug. */
+function insertCredential(input: AddCredentialInput): KeychainCredential {
+  const spec = normalizeCredentialSpec(input);
+  if (!input.secret.trim()) throw new Error("secret is empty");
   const now = new Date().toISOString();
   const cred: KeychainCredential = {
     id: `kc-${crypto.randomUUID()}`,
     owner: ownerName(input.owner),
-    service,
-    host,
+    ...spec,
     secret: input.secret.trim(),
-    ...(input.description ? { description: input.description } : {}),
-    ...(input.injection ? { injection: input.injection } : {}),
-    ...(methods.length ? { allowedMethods: methods } : {}),
-    ...(prefixes.length ? { allowedPathPrefixes: prefixes } : {}),
     createdAt: now,
     updatedAt: now,
   };
   credentials.set(cred.id, cred);
-  persist();
+  return cred;
+}
+
+function auditAdded(cred: KeychainCredential): KeychainCredentialMeta {
   audit({
     kind: "keychain_credential_added",
     credential_id: cred.id,
@@ -297,6 +416,34 @@ export function addCredential(
     host: cred.host,
   });
   return meta(cred);
+}
+
+export function addCredential(
+  input: AddCredentialInput,
+): KeychainCredentialMeta {
+  const cred = insertCredential(input);
+  persist();
+  return auditAdded(cred);
+}
+
+/** addCredential for request handlers: loads and persists asynchronously so
+ *  the gateway thread never blocks on the store. If the write fails, the
+ *  credential is taken back out of memory and the error propagates. */
+export async function addCredentialAsync(
+  input: AddCredentialInput,
+): Promise<KeychainCredentialMeta> {
+  await ensureKeychainLoaded();
+  const cred = insertCredential(input);
+  try {
+    await persistAsync();
+  } catch (error) {
+    credentials.delete(cred.id);
+    await persistAsync().catch(() => {});
+    // A filesystem error names the store path, never the secret.
+    console.error("[keychain] failed to save credential:", error);
+    throw new Error("couldn't write the keychain store");
+  }
+  return auditAdded(cred);
 }
 
 export function deleteCredential(id: string, by: string): boolean {
@@ -567,9 +714,16 @@ export interface RequestCredentialInput {
   mode?: GrantMode;
 }
 
+export type RequestCredentialResult =
+  /** A new ask, or (resurfaced) this session's ask already awaiting the owner. */
+  | { ask: KeychainAskRecord; transport: HumanAsk; resurfaced?: true }
+  /** This session already holds a live grant that covers the request. */
+  | { grant: KeychainGrant; instructions: string }
+  | { error: string };
+
 export function requestCredential(
   input: RequestCredentialInput,
-): { ask: KeychainAskRecord; transport: HumanAsk } | { error: string } {
+): RequestCredentialResult {
   load();
   const credMeta = findCredential(input.credential);
   if (!credMeta) {
@@ -591,16 +745,50 @@ export function requestCredential(
       error: `credential owner "${credMeta.owner}" is not in the identity roster`,
     };
 
+  const requestedMode = input.mode || "once";
+  // An approval that landed after the caller stopped waiting is already a
+  // grant: hand it back rather than asking the owner twice. Only for the
+  // purpose the owner approved; a new purpose is a new ask.
+  const live = listGrants({ sessionId: input.sessionId }).find(
+    (gr) =>
+      gr.credentialId === credMeta.id &&
+      gr.status === "active" &&
+      norm(gr.purpose) === norm(purpose) &&
+      (gr.mode === "standing" || requestedMode === "once"),
+  );
+  if (live)
+    return { grant: live, instructions: grantInstructions(live, credMeta) };
+
   const pending = [...keychainAsks.values()].find(
     (a) =>
       a.status === "pending" &&
       a.credentialId === credMeta.id &&
       a.sessionId === input.sessionId,
   );
-  if (pending)
-    return {
-      error: `an ask for this credential is already pending (${pending.id})`,
-    };
+  if (pending) {
+    const transport = pending.humanAskId
+      ? getAsk(pending.humanAskId)
+      : undefined;
+    // Still in front of the owner: re-surface it instead of refusing, so a
+    // caller that gave up waiting can pick the same ask back up.
+    if (
+      transport &&
+      transport.state !== "answered" &&
+      transport.state !== "cancelled"
+    ) {
+      // The owner is approving that ask's sentence, not this one.
+      if (norm(pending.purpose) !== norm(purpose))
+        return {
+          error:
+            `a different ask for this credential is already pending (${pending.id}, purpose: "${pending.purpose}"). ` +
+            `Ask again with that purpose to remind the owner, or withdraw it with cancel_credential_ask first`,
+        };
+      return { ask: pending, transport, resurfaced: true };
+    }
+    // Its owner message is gone (cancelled or settled without reaching this
+    // record), so nobody can answer it. Close it and ask afresh.
+    settleAsk(pending, "cancelled", "owner message no longer open");
+  }
 
   const record: KeychainAskRecord = {
     id: `ka-${crypto.randomUUID()}`,
@@ -609,7 +797,7 @@ export function requestCredential(
     sessionId: input.sessionId,
     requestedBy: input.requestedBy,
     purpose,
-    requestedMode: input.mode || "once",
+    requestedMode,
     status: "pending",
     createdAt: new Date().toISOString(),
   };
@@ -644,6 +832,39 @@ export function requestCredential(
     owner: credMeta.owner,
   });
   return { ask: record, transport };
+}
+
+function settleAsk(
+  record: KeychainAskRecord,
+  status: "cancelled",
+  note: string,
+): void {
+  record.status = status;
+  record.resolvedAt = new Date().toISOString();
+  record.note = note;
+  keychainAsks.set(record.id, record);
+  persist();
+  audit({
+    kind: "keychain_ask_cancelled",
+    ask_id: record.id,
+    credential_id: record.credentialId,
+    session_id: record.sessionId,
+    note,
+  });
+}
+
+/** Withdraw a session's own pending ask; the owner is told it's moot. */
+export function cancelCredentialAsk(
+  askId: string,
+  sessionId: string,
+): { ask: KeychainAskRecord } | { error: string } {
+  load();
+  const record = keychainAsks.get(askId);
+  if (!record || record.sessionId !== sessionId || record.status !== "pending")
+    return { error: "no pending ask with that id in this session" };
+  settleAsk(record, "cancelled", "withdrawn by the requesting session");
+  if (record.humanAskId) cancelAsk(record.humanAskId);
+  return { ask: record };
 }
 
 export function listKeychainAsks(opts?: {

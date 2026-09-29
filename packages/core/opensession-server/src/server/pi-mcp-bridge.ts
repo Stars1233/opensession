@@ -7,7 +7,21 @@ export interface PiMcpBridge {
   tools: ToolDefinition<any, any, any>[];
   /** Exactly mcp_search and mcp_call when the runtime has any catalog source. */
   discoveryTools: ToolDefinition<any, any, any>[];
+  /** The few catalog tools also offered by name (DIRECT_MCP_TOOLS), only
+   *  when this run's post-policy catalog carries them. */
+  directTools: ToolDefinition<any, any, any>[];
 }
+
+/**
+ * Catalog tools the model is handed directly, keyed by runtime id, valued by
+ * the name it sees. Everything else stays behind mcp_search. A tool earns a
+ * place here only when the two-step search is itself what stops the model
+ * from using it: `schedule_prompt` competes with a one-line `sleep`, and
+ * searching for it first made the wrong choice the easy one.
+ */
+export const DIRECT_MCP_TOOLS: Readonly<Record<string, string>> = {
+  "opensession-schedule_schedule_prompt": "schedule_prompt",
+};
 
 type BoundTool = McpRuntimeTool & { runtime: McpRuntime };
 
@@ -157,8 +171,14 @@ export async function createPiMcpBridge(
     },
   };
 
+  const directTools = tools.flatMap((definition) => {
+    const name = DIRECT_MCP_TOOLS[definition.name];
+    return name ? [{ ...definition, name }] : [];
+  });
+
   return {
     tools,
     discoveryTools: runtime.hasCatalog ? [searchCatalog, callCatalog] : [],
+    directTools,
   };
 }

@@ -313,6 +313,9 @@ export function AppSessionPane({
           // Presence, not foreground: the shells stay mounted behind whatever
           // else is in front, and only unmount when the tab is closed.
           terminalTabOpen: !!wsKey && terminalOpen.has(wsKey),
+          // Browser and Portal tabs are per workspace, and so are their
+          // kept-alive pages.
+          frameScope: wsKey ?? viewerSession.id,
           showPortal: splitMode
             ? viewTabKind(surfaceId) === "portal"
             : focused && portalActive,

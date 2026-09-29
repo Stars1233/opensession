@@ -21,9 +21,16 @@ import {
   SettingCard,
   SettingsGroupLabel,
   SettingsHeader,
+  SettingsHint,
   SettingsPanel,
 } from "../../ui/settings";
 import { Switch } from "../../ui/switch";
+import { useNotifications } from "../../hooks/useNotifications";
+import {
+  setNotificationAlerts,
+  setPushActive,
+  type NotificationAlerts,
+} from "../../lib/notifications";
 import { getCurrentUser } from "../UserPicker";
 import { Select, SettingRow } from "./shared";
 
@@ -46,7 +53,9 @@ function PushRow() {
     await (async () => {
       if (v) await enablePush(getCurrentUser());
       else await disablePush();
-      setState(await getPushState());
+      const next = await getPushState();
+      setPushActive(next === "on");
+      setState(next);
     })().catch(async (error) => {
       setError(errorMessage(error, "Failed to update push notifications"));
       setState(await getPushState());
@@ -76,8 +85,29 @@ function PushRow() {
   );
 }
 
+const ALERT_ROWS: {
+  group: keyof NotificationAlerts;
+  title: string;
+  desc: string;
+}[] = [
+  {
+    group: "reviews",
+    title: "Reviews",
+    desc: "Someone asks for your review, or finishes one you asked for",
+  },
+  { group: "mentions", title: "Mentions", desc: "Someone tags you" },
+  {
+    group: "collaborators",
+    title: "Added to a workspace",
+    desc: "Someone adds you as a collaborator",
+  },
+  { group: "reminders", title: "Reminders", desc: "Desk task reminders" },
+];
+
 export function NotificationsPanel() {
   const [s, setS] = useState<NotifSettings>(getNotifSettings);
+  const { alerts } = useNotifications();
+  const [alertError, setAlertError] = useState<string | null>(null);
   useEffect(() => onNotifSettingsChanged(() => setS(getNotifSettings())), []);
 
   function patch(p: Partial<NotifSettings>) {
@@ -88,7 +118,7 @@ export function NotificationsPanel() {
     <SettingsPanel>
       <SettingsHeader title="Notifications" />
 
-      <SettingsGroupLabel>Alerts</SettingsGroupLabel>
+      <SettingsGroupLabel>This device</SettingsGroupLabel>
       <SettingCard>
         <PushRow />
         <SettingRow
@@ -105,11 +135,11 @@ export function NotificationsPanel() {
           }
         />
         <SettingRow
-          title="Completion sound"
+          title="Sound"
           control={
             <div className="flex items-center gap-2">
               <Select
-                label="Completion sound"
+                label="Sound"
                 value={s.sound}
                 options={SOUND_OPTIONS}
                 onChange={(v) => patch({ sound: v })}
@@ -153,29 +183,35 @@ export function NotificationsPanel() {
         />
       </SettingCard>
 
-      <SettingsGroupLabel>Events</SettingsGroupLabel>
+      <SettingsGroupLabel>Notify me when</SettingsGroupLabel>
       <SettingCard>
-        <SettingRow
-          title="Needs input"
-          control={
-            <Switch
-              aria-label="Needs input alerts"
-              checked={s.needsInput}
-              onCheckedChange={(v) => patch({ needsInput: v })}
-            />
-          }
-        />
-        <SettingRow
-          title="Run complete"
-          control={
-            <Switch
-              aria-label="Run complete alerts"
-              checked={s.done}
-              onCheckedChange={(v) => patch({ done: v })}
-            />
-          }
-        />
+        {ALERT_ROWS.map((row) => (
+          <SettingRow
+            key={row.group}
+            title={row.title}
+            desc={row.desc}
+            control={
+              <Switch
+                aria-label={row.title}
+                checked={alerts[row.group]}
+                onCheckedChange={(v) => {
+                  setAlertError(null);
+                  void setNotificationAlerts({ [row.group]: v }).catch(
+                    (error) =>
+                      setAlertError(
+                        errorMessage(error, "Couldn't save that setting"),
+                      ),
+                  );
+                }}
+              />
+            }
+          />
+        ))}
       </SettingCard>
+      <SettingsHint className={alertError ? "text-red" : undefined}>
+        {alertError ||
+          "Everything still lands in your inbox. These choose what also sends a banner, a sound and a push, on every device."}
+      </SettingsHint>
     </SettingsPanel>
   );
 }

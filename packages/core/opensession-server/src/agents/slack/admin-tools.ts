@@ -396,6 +396,13 @@ export function createAdminMcpServer(ctx: AdminToolContext) {
             .describe(
               "Workspace id to file this automation under; '' clears it.",
             ),
+          webhookMaxConcurrent: z
+            .number()
+            .int()
+            .optional()
+            .describe(
+              "Webhook runs allowed in flight at once (1-10, default 1). Raise it when each webhook call is separate work that must not be skipped, such as one incident per call.",
+            ),
         },
         async (args: {
           id: string;
@@ -416,6 +423,7 @@ export function createAdminMcpServer(ctx: AdminToolContext) {
           readRepos?: string[];
           owner?: string;
           workspaceId?: string;
+          webhookMaxConcurrent?: number;
         }) => {
           const { id, ...patch } = args;
           const res = await updateAutomation(id, patch);

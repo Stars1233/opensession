@@ -175,7 +175,7 @@ export const DEFAULT_WORKSPACE_MODEL_SETTINGS: WorkspaceModelSettings = {
       lead: { model: "pi/anthropic/claude-fable-5-1", effort: "high" },
       supporting: [
         {
-          model: "pi/anthropic/claude-sonnet-5",
+          model: "pi/anthropic/claude-sonnet-5-5",
           effort: "medium",
           role: "Implementation worker",
         },
@@ -284,6 +284,21 @@ export interface Workspace {
    * payload by the workspace count).
    */
   draft?: WorkspaceDraft;
+  /**
+   * Teammates added to this workspace besides its creator. A collaborator sees
+   * the workspace in their own sidebar exactly as the creator does. Absent =
+   * nobody added.
+   */
+  collaborators?: WorkspaceCollaborator[];
+}
+
+/** A teammate added to a workspace, keyed by picker first name. */
+export interface WorkspaceCollaborator {
+  name: string;
+  /** Who added them. */
+  by: string;
+  /** ISO time they were added. */
+  at: string;
 }
 
 /** Reject ids that could name a foreign catalog key or escape the scratch
@@ -524,6 +539,44 @@ async function mutateWorkspace(
     if (error instanceof Unchanged) return error.current;
     throw error;
   }
+}
+
+/**
+ * Add a collaborator. `added` is false when they were already on the
+ * workspace, so the caller notifies a person once, not on every repeat.
+ */
+export async function addWorkspaceCollaborator(
+  id: string,
+  name: string,
+  by: string,
+): Promise<{ workspace: Workspace; added: boolean } | null> {
+  let added = false;
+  const workspace = await mutateWorkspace(id, (cur) => {
+    const current = cur.collaborators || [];
+    const key = name.toLowerCase();
+    if (current.some((entry) => entry.name.toLowerCase() === key)) return cur;
+    added = true;
+    return {
+      ...cur,
+      collaborators: [...current, { name, by, at: new Date().toISOString() }],
+    };
+  });
+  return workspace ? { workspace, added } : null;
+}
+
+/** Remove a collaborator. Removing someone who is not listed is a no-op. */
+export async function removeWorkspaceCollaborator(
+  id: string,
+  name: string,
+): Promise<Workspace | null> {
+  return mutateWorkspace(id, (cur) => {
+    const current = cur.collaborators || [];
+    const key = name.toLowerCase();
+    const next = current.filter((entry) => entry.name.toLowerCase() !== key);
+    if (next.length === current.length) return cur;
+    const { collaborators: _, ...rest } = cur;
+    return next.length ? { ...rest, collaborators: next } : rest;
+  });
 }
 
 export async function createWorkspace(input: {

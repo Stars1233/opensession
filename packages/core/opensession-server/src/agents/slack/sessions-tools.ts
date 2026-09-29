@@ -82,6 +82,23 @@ export interface SessionsToolContext {
    * workspaces, not automation-owned ones.
    */
   humanResume?: boolean;
+  /**
+   * Who owns a session these tools create, resolved at call time. The turn's
+   * sender (`createdBy`) may be a webhook or a scheduled check-back while a
+   * person owns or is steering the calling session; see
+   * `sessionCreationOwner`. Defaults to `createdBy`.
+   */
+  creationOwner?: () => Promise<string>;
+}
+
+/** Owner of a session created from this context (create_session, spawn_task). */
+async function creationOwnerOf(ctx: SessionsToolContext): Promise<string> {
+  if (!ctx.creationOwner) return ctx.createdBy;
+  try {
+    return (await ctx.creationOwner()) || ctx.createdBy;
+  } catch {
+    return ctx.createdBy;
+  }
 }
 
 function text(s: string) {
@@ -571,7 +588,7 @@ export async function spawnTaskImpl(
     isolatedWorktree,
     parentSessionId: caller,
     reportBack: Boolean(caller),
-    user: ctx.createdBy,
+    user: await creationOwnerOf(ctx),
     sandbox: args.sandbox,
   });
   const depth = myDepth + 1;
@@ -1404,7 +1421,7 @@ export function createSessionsMcpServer(
               isolatedWorktree: args.isolatedWorktree,
               parentSessionId,
               reportBack: shouldReportBack,
-              user: ctx.createdBy,
+              user: await creationOwnerOf(ctx),
               sandbox: args.sandbox,
               accountId: args.accountId,
               forkFrom: args.forkFrom,
@@ -1425,7 +1442,7 @@ export function createSessionsMcpServer(
       ),
       tool(
         "migrate_session_engine",
-        "Migrate an existing session onto the Pi engine by flipping its model to a pi/* id (e.g. pi/anthropic/claude-sonnet-5). Does NOT start a run: the session's NEXT prompt builds a transcript handoff from its claude/codex history and continues on a fresh Pi session — file, workspace, branch, title and UI history all stay. Automation-owned sessions may migrate to Pi but not to a non-Pi engine; sessions with an in-flight run are refused.",
+        "Migrate an existing session onto the Pi engine by flipping its model to a pi/* id (e.g. pi/anthropic/claude-sonnet-5-5). Does NOT start a run: the session's NEXT prompt builds a transcript handoff from its claude/codex history and continues on a fresh Pi session — file, workspace, branch, title and UI history all stay. Automation-owned sessions may migrate to Pi but not to a non-Pi engine; sessions with an in-flight run are refused.",
         {
           sessionId: z
             .string()
@@ -1433,7 +1450,7 @@ export function createSessionsMcpServer(
           model: z
             .string()
             .describe(
-              "Target pi model id: pi/<provider>/<model>, e.g. pi/anthropic/claude-sonnet-5.",
+              "Target pi model id: pi/<provider>/<model>, e.g. pi/anthropic/claude-sonnet-5-5.",
             ),
         },
         async (args: { sessionId: string; model: string }) => {

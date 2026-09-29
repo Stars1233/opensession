@@ -169,6 +169,7 @@ import {
   applyRunOutcomeProjection,
   touchNativeSession,
   updateSessionFile,
+  recordSessionPrompter,
   SESSIONS_DIR,
 } from "./session-cache";
 import { markRecapPendingIfUnwatched } from "./recap";
@@ -2691,25 +2692,7 @@ async function runSessionPromptInner(
   // commits on their behalf, not the creator's (sessionPrincipal). Recorded
   // before the turn so a run that dies mid-way still leaves it behind, and
   // never allowed to block the turn: attribution is not worth a lost prompt.
-  const prompter = humanPrompter(user);
-  if (
-    prompter &&
-    session.source === "opensession" &&
-    session.lastPromptedBy !== prompter
-  ) {
-    try {
-      await updateSessionFile(sessionId, (data) => ({
-        ...data,
-        lastPromptedBy: prompter,
-      }));
-      session.lastPromptedBy = prompter;
-    } catch (error) {
-      console.warn(
-        `[run] could not record ${sessionId}'s prompter:`,
-        error instanceof Error ? error.message : error,
-      );
-    }
-  }
+  await recordSessionPrompter(sessionId, user, session);
 
   // The engine session id depends on the session's model: codex models resume
   // the codex thread, claude models the claude session. A missing engine id
@@ -3179,6 +3162,15 @@ async function runSessionPromptInner(
         })
       : {};
   const automationProxyMcpServers = Object.keys(automationMcp);
+  // A thread reply that resumes an automation-owned session keeps the
+  // automation's sibling-repository read token (Automation.readRepos), so a
+  // follow-up can still read the repos its unattended run could.
+  const automationReadRepos =
+    isAutomationSession &&
+    !session.automationDescendantPolicy &&
+    session.automationId
+      ? (await getAutomation(session.automationId))?.readRepos
+      : undefined;
   const runnerRun = await maybeLaunchRunnerRun(session, {
     prompt,
     hostId: startToken,
@@ -3329,6 +3321,7 @@ async function runSessionPromptInner(
           aws:
             (!isAutomationSession && !session.plainDiscussionId) ||
             agentAwsCredsForUntrustedRuns(),
+          readRepos: automationReadRepos,
           author: commitAuthorFor(user, sessionPrincipal(session)),
           user: runInputs.user,
           accountUser: runInputs.accountUser,

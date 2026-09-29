@@ -41,6 +41,8 @@ export function GitStatusRows({
   onMerge,
   merging,
   mergeScheduled,
+  onMarkReady,
+  markingReady,
 }: {
   git: GitStatusInfo | null;
   pr: PrDetails | null;
@@ -51,6 +53,8 @@ export function GitStatusRows({
   onMerge?: () => void;
   merging?: boolean;
   mergeScheduled?: boolean;
+  onMarkReady?: () => void;
+  markingReady?: boolean;
 }) {
   const runner = useGitTaskRunner({ sessionId, repo, send, onRefresh });
   const { prompted, error } = runner;
@@ -76,12 +80,24 @@ export function GitStatusRows({
           {conflicts.action}
         </button>
       ) : undefined;
+    const readyAction =
+      pr.state === "OPEN" && pr.isDraft && onMarkReady ? (
+        <button
+          className={GIT_ACTION}
+          onClick={onMarkReady}
+          disabled={markingReady}
+          title="Mark this pull request ready for review"
+        >
+          {markingReady ? "Marking ready…" : "Ready for review"}
+        </button>
+      ) : undefined;
     rows.push({
       key: "pr-status",
       label: status.qualifier || status.label,
       tone: status.tone,
       action:
         resolveAction ||
+        readyAction ||
         (pr.state === "OPEN" && !pr.isDraft && onMerge ? (
           <span className="inline-flex shrink-0 items-center gap-1">
             {mergeScheduled && (

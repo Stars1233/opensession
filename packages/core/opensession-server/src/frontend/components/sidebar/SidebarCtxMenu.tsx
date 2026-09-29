@@ -6,10 +6,19 @@ import {
 import { statusMenuIcon } from "../../lib/sidebar-lanes";
 import { MINE_STATUS_META, type CtxEntry } from "../../lib/sidebar-types";
 import { snoozePresets } from "../../lib/snoozes";
-import { IconChevronRight, IconMoon, IconStatusRing } from "../icons";
+import {
+  IconChevronRight,
+  IconMoon,
+  IconPeople,
+  IconStatusRing,
+} from "../icons";
+import { UserAvatar } from "../UserAvatar";
+import { useWorkspaceCollaborators } from "../WorkspaceCollaborators";
+import { useWorkspaceRecord } from "../../lib/workspace-records";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MenuCheck, MenuShortcut } from "../../ui/menu";
+import { TEAM } from "../UserPicker";
 
 function CtxItem({
   icon,
@@ -118,6 +127,56 @@ function CtxFlyoutRow({
   );
 }
 
+/** The Collaborators flyout: every teammate with a tick, toggled in place so
+ *  several can be added without reopening the menu. */
+function CollaboratorsFlyout({
+  workspaceId,
+  sessionId,
+  className,
+  style,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  workspaceId: string;
+  sessionId?: string;
+  className: string;
+  style: React.CSSProperties;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  const state = useWorkspaceCollaborators(workspaceId, sessionId);
+  return (
+    <div
+      className={className}
+      style={style}
+      onClick={(e) => e.stopPropagation()}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {state?.candidates.length ? (
+        state.candidates.map((name) => (
+          <CtxItem
+            key={name}
+            icon={<UserAvatar name={name} size={20} edge={false} />}
+            label={name}
+            trailing={
+              <MenuCheck on={state.isOn(name)} size={20} className="text-dim" />
+            }
+            onClick={() => state.toggle(name)}
+          />
+        ))
+      ) : (
+        <div className="px-2 py-1 text-meta text-faint">No teammates</div>
+      )}
+      {state?.error && (
+        <div className="px-2 py-1 text-meta font-medium text-red">
+          {state.error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // The popup surface, worn by the menu and by every flyout it opens.
 const POPUP_CLASS =
   "smooth-shadow-ring-md [--smooth-ring-color:var(--popup-ring)] [corner-shape:squircle] [&_button:not(.tab-color-swatch):hover]:bg-hover!";
@@ -155,7 +214,7 @@ export function SidebarCtxMenu({
   // Flyout state + hover grace so the pointer can
   // cross the gap between the menu and the panel.
   const [sub, setSub] = useState<{
-    kind: "status" | "snooze";
+    kind: "status" | "snooze" | "collaborators";
     rect: DOMRect;
   } | null>(null);
   const closeT = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -175,6 +234,13 @@ export function SidebarCtxMenu({
   const snoozeEntry = entries.find(
     (e): e is Extract<CtxEntry, { kind: "snooze" }> => e.kind === "snooze",
   );
+  const collaboratorsEntry = entries.find(
+    (e): e is Extract<CtxEntry, { kind: "collaborators" }> =>
+      e.kind === "collaborators",
+  );
+  const collaboratorCount =
+    useWorkspaceRecord(collaboratorsEntry?.workspaceId ?? null)?.collaborators
+      ?.length ?? 0;
   const check = (on: boolean) => (
     <MenuCheck on={on} size={20} className="text-dim" />
   );
@@ -190,7 +256,9 @@ export function SidebarCtxMenu({
   const subRows =
     sub?.kind === "status"
       ? MINE_STATUS_META.length + 1
-      : snoozePresets().length + (snoozeEntry?.until ? 1 : 0);
+      : sub?.kind === "collaborators"
+        ? TEAM.length || 1
+        : snoozePresets().length + (snoozeEntry?.until ? 1 : 0);
   const subTop = sub
     ? Math.max(
         8,
@@ -232,6 +300,23 @@ export function SidebarCtxMenu({
                 onOpen={(rect) => {
                   cancelClose();
                   setSub({ kind: "status", rect });
+                }}
+                onLeave={scheduleClose}
+              />
+            );
+          }
+          if (entry.kind === "collaborators") {
+            return (
+              <CtxFlyoutRow
+                key={i}
+                icon={<IconPeople size={20} />}
+                label="Collaborators"
+                value={
+                  collaboratorCount ? String(collaboratorCount) : undefined
+                }
+                onOpen={(rect) => {
+                  cancelClose();
+                  setSub({ kind: "collaborators", rect });
                 }}
                 onLeave={scheduleClose}
               />
@@ -307,6 +392,21 @@ export function SidebarCtxMenu({
             }}
           />
         </div>
+      )}
+      {sub?.kind === "collaborators" && collaboratorsEntry && (
+        <CollaboratorsFlyout
+          workspaceId={collaboratorsEntry.workspaceId}
+          sessionId={collaboratorsEntry.sessionId}
+          className={POPUP_CLASS}
+          style={{
+            ...CTX_MENU_STYLE,
+            left: subLeft,
+            top: subTop,
+            minWidth: SUB_W,
+          }}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+        />
       )}
       {sub?.kind === "snooze" && snoozeEntry && (
         <div

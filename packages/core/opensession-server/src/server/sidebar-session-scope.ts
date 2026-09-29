@@ -30,13 +30,18 @@ export interface SidebarScopeSession extends UnifiedSession {
   queuedCount?: number;
 }
 
+type SidebarScopeWorkspace = Pick<Workspace, "createdBy" | "repo"> & {
+  /** Collaborator first names; each sees the workspace as their own. */
+  collaborators?: string[];
+};
+
 export interface SidebarSessionScopeContext {
   pins: Set<string>;
   lanes: Set<string>;
   snoozes: Set<string>;
   hides: Set<string>;
   mentions: Set<string>;
-  workspaces: Map<string, Pick<Workspace, "createdBy" | "repo">>;
+  workspaces: Map<string, SidebarScopeWorkspace>;
   automations: Map<string, AutomationAudience>;
   defaultRepo: string;
 }
@@ -117,7 +122,7 @@ export async function loadSidebarSessionScopeContext(
       ].filter((id): id is string => !!id),
     ),
   ];
-  const workspaces = new Map<string, Pick<Workspace, "createdBy" | "repo">>();
+  const workspaces = new Map<string, SidebarScopeWorkspace>();
   for (const { key, value } of await catalogDocuments("workspaces").getMany(
     workspaceIds,
   )) {
@@ -127,8 +132,15 @@ export async function loadSidebarSessionScopeContext(
     )
       continue;
     const repo = stringField(value, "repo");
+    const collaborators = documentField(value, "collaborators");
+    const collaboratorNames = Array.isArray(collaborators)
+      ? collaborators
+          .map((entry) => stringField(entry, "name"))
+          .filter((name): name is string => !!name)
+      : [];
     workspaces.set(key, {
       createdBy: stringField(value, "createdBy") ?? "",
+      ...(collaboratorNames.length ? { collaborators: collaboratorNames } : {}),
       repo:
         repo === "auto"
           ? defaultRepo().id
@@ -471,11 +483,14 @@ export function scopeSessionsForSidebar<T extends SidebarScopeSession>(
     const review =
       scope.person === "me" &&
       rows.some((row) => requestInvolvesPerson(row, scope.user));
-    const workspaceOwner = key.startsWith("workspace:")
-      ? context.workspaces.get(key.slice("workspace:".length))?.createdBy
+    const workspace = key.startsWith("workspace:")
+      ? context.workspaces.get(key.slice("workspace:".length))
       : undefined;
     const owned =
-      personMatches(workspaceOwner, focus) ||
+      personMatches(workspace?.createdBy, focus) ||
+      (workspace?.collaborators || []).some((name) =>
+        personMatches(name, focus),
+      ) ||
       rows.some(
         (row) => !row.automation && personMatches(row.startedBy, focus),
       );

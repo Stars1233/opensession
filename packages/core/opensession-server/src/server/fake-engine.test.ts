@@ -60,7 +60,7 @@ describe("fake engine through runAgent", () => {
         prompt: "do the thing",
         cwd: "/tmp",
         mcpServers: [],
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         fallbackModel: "none",
       }),
     );
@@ -73,7 +73,7 @@ describe("fake engine through runAgent", () => {
       "done",
     ]);
     expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0].model).toBe("pi/anthropic/claude-sonnet-5");
+    expect(fake.calls[0].model).toBe("pi/anthropic/claude-sonnet-5-5");
     expect(fake.calls[0].prompt).toBe("do the thing");
     const done = events.at(-1)!;
     expect(done.sessionId).toBe("ses_fake1");
@@ -89,7 +89,7 @@ describe("fake engine through runAgent", () => {
         prompt: "p",
         cwd: "/tmp",
         mcpServers: [],
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         fallbackModel: "none",
       }),
     );
@@ -108,7 +108,7 @@ describe("fake engine through runAgent", () => {
         prompt: "keep going",
         cwd: "/tmp",
         mcpServers: [],
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         fallbackModel: "claude-opus-4-8",
         journal: { osSessionId: "bks-test-hop", kind: "prompt" },
       }),
@@ -129,7 +129,7 @@ describe("fake engine through runAgent", () => {
     const sw = events[1];
     // fromModel is the picker-form id (resolveConcreteModel keeps native ids
     // native); toModel is the pi-mapped hop target.
-    expect(sw.fromModel).toBe("claude-sonnet-5");
+    expect(sw.fromModel).toBe("claude-sonnet-5-5");
     expect(sw.toModel).toBe("pi/openai/gpt-6-astra");
     expect(sw.switchReason).toBe("out of credits");
     expect(fake.calls).toHaveLength(2);
@@ -217,7 +217,7 @@ describe("fake engine through runAgent", () => {
         prompt: "keep going",
         cwd: "/tmp",
         mcpServers: [],
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         fallbackModel: "claude-opus-4-8",
         journal: { osSessionId: "bks-test-dry-short-circuit", kind: "prompt" },
       }),
@@ -235,7 +235,7 @@ describe("fake engine through runAgent", () => {
     expect(fake.calls[0].prompt).toBe("keep going");
     expect(events[0]).toMatchObject({
       type: "model_switch",
-      fromModel: "claude-sonnet-5",
+      fromModel: "claude-sonnet-5-5",
       toModel: "pi/openai/gpt-6-astra",
     });
   });
@@ -253,7 +253,7 @@ describe("fake engine through runAgent", () => {
         prompt: "p",
         cwd: "/tmp",
         mcpServers: [],
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         fallbackModel: "none",
       }),
     );
@@ -277,7 +277,7 @@ describe("fake engine through runAgent", () => {
         prompt: "p",
         cwd: "/tmp",
         mcpServers: [],
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         fallbackModel: "claude-opus-4-8",
         journal: { osSessionId: "bks-test-breaker", kind: "prompt" },
       }),
@@ -311,7 +311,7 @@ describe("fake engine through runAgent", () => {
         prompt: "p",
         cwd: "/tmp",
         mcpServers: [],
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         fallbackModel: "claude-opus-5-5",
         journal: { osSessionId: "bks-test-claude-terminal", kind: "prompt" },
       }),
@@ -319,7 +319,7 @@ describe("fake engine through runAgent", () => {
     expect(fake.calls).toHaveLength(2);
     expect(events.find((event) => event.type === "model_switch")).toMatchObject(
       {
-        fromModel: "claude-sonnet-5",
+        fromModel: "claude-sonnet-5-5",
         toModel: "pi/openai/gpt-6-astra",
         temporaryFallback: true,
       },
@@ -425,7 +425,7 @@ describe("fake engine through runAgent", () => {
       runAgent({
         prompt: "p",
         cwd: "/tmp",
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         fallbackModel: "none",
         mcpServers: [],
       }),

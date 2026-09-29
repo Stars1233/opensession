@@ -58,7 +58,7 @@
         "snapshot-restricted"
       ],
       "mode": "scratch",
-      "model": "pi/anthropic/claude-sonnet-5",
+      "model": "pi/anthropic/claude-sonnet-5-5",
       "prompt": {
         "injectedContext": [],
         "visible": "list what you can reach"
@@ -228,7 +228,7 @@
     },
     {
       "content": "Only alpha.",
-      "model": "pi/anthropic/claude-sonnet-5",
+      "model": "pi/anthropic/claude-sonnet-5-5",
       "seq": 3,
       "type": "assistant"
     }

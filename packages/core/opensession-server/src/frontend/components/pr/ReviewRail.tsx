@@ -51,6 +51,8 @@ export function ReviewRail({
   merging,
   mergeScheduled,
   mergeError,
+  onMarkReady,
+  markingReady,
   onOpenFile,
   onOpenFiles,
   onStartSession,
@@ -78,6 +80,8 @@ export function ReviewRail({
   merging?: boolean;
   mergeScheduled?: boolean;
   mergeError?: string | null;
+  onMarkReady?: () => void;
+  markingReady?: boolean;
   /** Reveal one file in the Files changed page. */
   onOpenFile: (path: string) => void;
   /** Go to the Files changed page. */
@@ -122,6 +126,8 @@ export function ReviewRail({
           onMerge={onMerge}
           merging={merging}
           mergeScheduled={mergeScheduled}
+          onMarkReady={onMarkReady}
+          markingReady={markingReady}
         />
         {mergeError && (
           <p className="m-0 px-2 pt-1 text-supporting text-red">{mergeError}</p>

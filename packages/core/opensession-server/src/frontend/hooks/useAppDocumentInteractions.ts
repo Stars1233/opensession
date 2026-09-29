@@ -6,15 +6,12 @@ import { isSettingsRoute, type Route } from "../lib/app-route";
 import { closestHTMLElement, eventTargetElement } from "../lib/event-target";
 import { trackKeyboardInset } from "../lib/keyboard-inset";
 import { initAlerts } from "../lib/notify";
-import { reviewRequestTargetsPerson } from "../lib/review-queue";
 import type { useSidebarFilter } from "../lib/sidebar-filter";
 import { personFilterFor, setFilter } from "../lib/sidebar-filter";
 import { getTabColors, onTabColorsChanged } from "../lib/tab-colors";
-import type { UnifiedSession } from "../lib/types";
 import type { UnreadChat } from "../lib/unread-chats";
 import type { useAppRoute } from "./useAppRoute";
 import { useBackSwipe } from "./useBackSwipe";
-import { useInputAlerts } from "./useInputAlerts";
 import { useIsPhone } from "./useIsPhone";
 
 interface UseAppDocumentInteractionsOptions {
@@ -23,8 +20,6 @@ interface UseAppDocumentInteractionsOptions {
   navigate: ReturnType<typeof useAppRoute>["navigate"];
   goBack: () => void;
   detailPaneRef: React.RefObject<HTMLElement | null>;
-  sessions: UnifiedSession[];
-  connected: boolean;
   setTabColors: Dispatch<SetStateAction<Record<string, string>>>;
 }
 
@@ -34,8 +29,6 @@ export function useAppDocumentInteractions({
   navigate,
   goBack,
   detailPaneRef,
-  sessions,
-  connected,
   setTabColors,
 }: UseAppDocumentInteractionsOptions) {
   // Track the on-screen keyboard via input focus. It's the only reliable iOS
@@ -251,21 +244,6 @@ export function useAppDocumentInteractions({
 
   // Arm audio + request notification permission on the first user gesture.
   useEffect(() => initAlerts(), []);
-
-  // Sound + desktop notification whenever one of *my* sessions newly flips into
-  // "needs input" (blocked on a question). Scoped to the current user's own
-  // non-automation sessions — the same set as the sidebar's "Needs input" bucket.
-  useInputAlerts(sessions, {
-    isMine: (s) => {
-      const me = getCurrentUser().toLowerCase();
-      return !s.automation && !!s.startedBy && s.startedBy.toLowerCase() === me;
-    },
-    isMyReview: (s) =>
-      reviewRequestTargetsPerson(s.reviewRequest, getCurrentUser()) &&
-      !s.reviewRequest?.accepted,
-    onOpen: (id) => navigate({ view: "session", id }),
-    connected,
-  });
 
   return {
     settingsActive,

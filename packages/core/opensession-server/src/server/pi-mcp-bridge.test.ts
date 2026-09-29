@@ -187,4 +187,31 @@ describe("Pi MCP adapter", () => {
     expect(bridge.discoveryTools).toEqual([]);
     expect(bridge.tools).toEqual([]);
   });
+
+  test("offers schedule_prompt by name only when the catalog carries it", async () => {
+    const runtime = fakeRuntime([
+      tool("opensession-schedule_schedule_prompt", "Schedule a check-back"),
+      tool("opensession-schedule_list_scheduled_prompts", "List them"),
+      tool("alpha_echo", "Echo text"),
+    ]);
+    const bridge = await createPiMcpBridge(runtime);
+    expect(bridge.directTools.map((item) => item.name)).toEqual([
+      "schedule_prompt",
+    ]);
+    // Still searchable, and the direct name dispatches to the same runtime id.
+    expect(bridge.tools.map((item) => item.name)).toContain(
+      "opensession-schedule_schedule_prompt",
+    );
+    await exec(bridge.directTools[0]!, { value: "x" });
+    expect(runtime.calls[0]).toMatchObject({
+      id: "opensession-schedule_schedule_prompt",
+      args: { value: "x" },
+      toolCallId: "call-42",
+    });
+
+    const without = await createPiMcpBridge(
+      fakeRuntime([tool("alpha_echo", "Echo text")]),
+    );
+    expect(without.directTools).toEqual([]);
+  });
 });

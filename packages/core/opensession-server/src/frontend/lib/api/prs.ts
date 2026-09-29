@@ -681,6 +681,28 @@ export async function closePrPreviewApi(repo: string, branch: string) {
   return result;
 }
 
+/** Take a draft PR out of draft ("Ready for review"). */
+export async function markPrReadyApi(
+  sessionId: string,
+  repo?: string,
+  branch?: string,
+) {
+  const body: PrTargetRequest = {};
+  if (repo) body.repo = repo;
+  if (branch) body.branch = branch;
+  return request<{ ok: true; url?: string }>(
+    `/sessions/${encodeURIComponent(sessionId)}/pr-ready`,
+    { method: "POST", body },
+  );
+}
+
+export async function markPrPreviewReadyApi(repo: string, branch: string) {
+  return request<{ ok: true; url?: string }>("/pr-preview-ready", {
+    method: "POST",
+    body: { repo, branch },
+  });
+}
+
 export const PR_CLOSED_EVENT = "opensession:pr-closed";
 
 export interface PrClosedDetail {

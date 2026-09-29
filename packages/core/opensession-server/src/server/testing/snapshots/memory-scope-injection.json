@@ -39,7 +39,7 @@
       "journalKind": "prompt",
       "mcpScope": "all",
       "mode": "scratch",
-      "model": "pi/anthropic/claude-sonnet-5",
+      "model": "pi/anthropic/claude-sonnet-5-5",
       "prompt": {
         "injectedContext": [
           {
@@ -150,7 +150,7 @@
     },
     {
       "content": "Three standing facts.",
-      "model": "pi/anthropic/claude-sonnet-5",
+      "model": "pi/anthropic/claude-sonnet-5-5",
       "seq": 4,
       "type": "assistant"
     }
