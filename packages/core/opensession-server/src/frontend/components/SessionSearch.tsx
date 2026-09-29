@@ -302,6 +302,54 @@ export function searchArchived(
 }
 
 /**
+ * The palette's Archived group: archived workspaces whose name matches, then
+ * archived sessions a workspace row doesn't already cover. A workspace that
+ * still has live sessions belongs to the live Workspaces group instead.
+ * Exported for tests.
+ */
+export function archivedResults(
+  query: string,
+  pool: UnifiedSession[],
+  liveWorkspaceIds: ReadonlySet<string | null | undefined>,
+  snippets: ReadonlyMap<string, string>,
+): PaletteResult[] {
+  const recent = pool
+    .slice()
+    .sort(
+      (a, b) =>
+        new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime(),
+    );
+  const workspaces = matchWorkspaces(query, recent)
+    .filter((hit) => !liveWorkspaceIds.has(hit.id))
+    .slice(0, 8);
+  const shown = new Map(workspaces.map((hit) => [hit.id, hit.name]));
+  const sessions = searchArchived(
+    query,
+    recent.filter((s) => {
+      const shownAs = s.workspaceId ? shown.get(s.workspaceId) : undefined;
+      return (
+        shownAs === undefined ||
+        (shownAs !== s.title && fuzzyScore(query, s.title) > 0)
+      );
+    }),
+    snippets,
+  );
+  return [
+    ...workspaces.map((workspace): PaletteResult => ({
+      type: "workspace",
+      category: "Archived",
+      workspace,
+    })),
+    ...sessions.map(({ session, metaMatch }): PaletteResult => ({
+      type: "session",
+      category: "Archived",
+      session,
+      snippet: metaMatch ? undefined : snippets.get(session.id),
+    })),
+  ];
+}
+
+/**
  * Stacks result groups by their best match, so a query naming a session puts
  * it above a list of loosely matching commands. Groups that tie keep their
  * given order.
@@ -697,13 +745,11 @@ export function SessionSearch({
     // Archived matches come last whatever they score: live work is what the
     // palette is for, and the archive is where a person looks when it isn't.
     const archivedRows: PaletteResult[] = hasQuery
-      ? searchArchived(q, archivedPool.filter(passesFilters), snippets).map(
-          ({ session, metaMatch }) => ({
-            type: "session",
-            category: "Archived",
-            session,
-            snippet: metaMatch ? undefined : snippets.get(session.id),
-          }),
+      ? archivedResults(
+          q,
+          archivedPool.filter(passesFilters),
+          new Set(pool.map((s) => s.workspaceId).filter(Boolean)),
+          snippets,
         )
       : [];
     return [
@@ -963,7 +1009,9 @@ export function SessionSearch({
                       </span>
                     </span>
                     <span className="shrink-0 text-meta text-faint max-[560px]:hidden">
-                      {STATUS_META[sessionStatus(latest)].label}
+                      {latest.archived
+                        ? ARCHIVED_META.label
+                        : STATUS_META[sessionStatus(latest)].label}
                     </span>
                   </button>
                 </React.Fragment>

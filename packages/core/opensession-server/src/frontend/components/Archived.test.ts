@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { UnifiedSession } from "../lib/types";
 import { archivedMatchesSearch } from "./Archived";
-import { searchArchived } from "./SessionSearch";
+import { archivedResults, searchArchived } from "./SessionSearch";
 
 function row(over: Partial<UnifiedSession> = {}): UnifiedSession {
   // SAFETY: the matchers under test read only the fields set here.
@@ -70,4 +70,31 @@ test("archive search matches the workspace name the sidebar showed", () => {
     workspaceName: "How many T4 GPUs do we use",
   });
   expect(archivedMatchesSearch(s, "t4 gpus")).toBe(true);
+});
+
+test("the command menu lists an archived workspace by its name", () => {
+  const ws = {
+    workspaceId: "ws-t4",
+    workspaceName: "How many T4 GPUs do we use",
+  };
+  const pool = [
+    row({ id: "os-a", title: "Debug review", ...ws }),
+    row({ id: "os-b", title: "Reduce GPU costs", ...ws }),
+    row({ id: "os-c", title: "T4 pricing notes", ...ws }),
+  ];
+  const results = archivedResults("t4", pool, new Set(), new Map());
+  expect(results[0]).toMatchObject({
+    type: "workspace",
+    category: "Archived",
+    workspace: { id: "ws-t4", name: "How many T4 GPUs do we use" },
+  });
+  // Sessions the workspace row covers stay folded into it, unless their own
+  // title matches too.
+  expect(
+    results.slice(1).map((r) => (r.type === "session" ? r.session.id : r.type)),
+  ).toEqual(["os-c"]);
+  // A workspace with live sessions is the live group's to show.
+  expect(
+    archivedResults("t4", pool, new Set(["ws-t4"]), new Map())[0],
+  ).toMatchObject({ type: "session" });
 });
