@@ -32,6 +32,7 @@ import { NO_TYPING, type TypingPresence } from "../lib/typing";
 import { previewOpenable, withPreviewPath } from "../lib/preview-url";
 import type { SessionViewerProps } from "../lib/session-viewer-bindings";
 import { sessionHasWorkspace } from "../lib/session-workspace";
+import { useWorkspaceRecord } from "../lib/workspace-records";
 import { ownedBy } from "../lib/sidebar-lanes";
 import { copyToClipboard } from "../lib/share-link";
 import { matchesShortcut } from "../lib/shortcuts";
@@ -180,12 +181,19 @@ export function useSessionRuntimeController({
   // work, automation runs and agent-spawned probes all stay out until claimed.
   // A session you started (or a workspace with one) already renders in your
   // sidebar bands without a lane claim, so it must not offer Add to sidebar.
-  const naturallyInSidebar = claimSessions.some(
-    (candidate) =>
-      !candidate.spawnedBy &&
-      !candidate.automation &&
-      ownedBy(candidate, currentUser),
-  );
+  // Neither does a workspace you were added to as a collaborator.
+  const workspace = useWorkspaceRecord(session.workspaceId ?? null);
+  const currentUserKey = currentUser.toLowerCase();
+  const naturallyInSidebar =
+    !!workspace?.collaborators?.some(
+      (collaborator) => collaborator.name.toLowerCase() === currentUserKey,
+    ) ||
+    claimSessions.some(
+      (candidate) =>
+        !candidate.spawnedBy &&
+        !candidate.automation &&
+        ownedBy(candidate, currentUser),
+    );
   const canKeepInSidebar =
     !session.archived &&
     !!onSetStatus &&
