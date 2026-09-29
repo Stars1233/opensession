@@ -169,19 +169,24 @@ function sessionRepo(s: UnifiedSession): string {
   return sessionRepoOr(s, FALLBACK_REPO);
 }
 
-/** Whether an archived row matches the search box. The id is included so a
- * pasted session id finds its row. Exported for tests. */
+/** Lowercased, with branch-style separators read as spaces, so "t4 gpus"
+ * finds the branch `how-many-t4-gpus`. */
+function searchText(text: string): string {
+  return text.toLowerCase().replace(/[-_/\s]+/g, " ");
+}
+
+/** Whether an archived row matches the search box: every word must appear
+ * somewhere in its title, repo, branch, owner, automation or id (so a
+ * pasted session id finds its row). Exported for tests. */
 export function archivedMatchesSearch(s: UnifiedSession, query: string) {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return [
-    s.title,
-    sessionRepo(s),
-    s.branch,
-    s.startedBy,
-    s.automation,
-    s.id,
-  ].some((field) => (field || "").toLowerCase().includes(q));
+  const terms = searchText(query).split(" ").filter(Boolean);
+  if (terms.length === 0) return true;
+  const hay = searchText(
+    [s.title, sessionRepo(s), s.branch, s.startedBy, s.automation, s.id]
+      .filter(Boolean)
+      .join(" "),
+  );
+  return terms.every((term) => hay.includes(term));
 }
 
 // The repo the sidebar is currently filtered to ("all" when unset), read fresh
