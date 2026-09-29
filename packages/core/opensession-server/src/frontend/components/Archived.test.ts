@@ -29,6 +29,14 @@ test("archive search matches the title, branch, repo, owner and id", () => {
   expect(archivedMatchesSearch(s, "   ")).toBe(true);
 });
 
+test("archive search reads branch separators as spaces and matches every word", () => {
+  const s = row({ title: "Debug review" });
+  expect(archivedMatchesSearch(s, "how many t4")).toBe(true);
+  expect(archivedMatchesSearch(s, "t4 gpus")).toBe(true);
+  expect(archivedMatchesSearch(s, "gpus t4")).toBe(true);
+  expect(archivedMatchesSearch(s, "t4 billing")).toBe(false);
+});
+
 test("the command menu finds archived sessions by branch and conversation", () => {
   const byBranch = row();
   const byTranscript = row({
