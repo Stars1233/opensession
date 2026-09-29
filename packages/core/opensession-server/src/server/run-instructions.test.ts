@@ -151,6 +151,9 @@ describe("buildRunInstructions", () => {
       "## Media",
     ]);
     expect(prompt).toContain(
+      "Make every question self-contained, even a repeated one",
+    );
+    expect(prompt).toContain(
       "For PRs outside the current primary repository, write `<repo>#<number>`, never bare `#<number>`. " +
         "A bare `#<number>` reads as a PR; write GitHub issues as `issue #<number>`.",
     );
@@ -180,7 +183,9 @@ describe("buildRunInstructions", () => {
     // they exist. Two servers mounted here; a full interactive mount adds
     // roughly 150 chars per server on top. Waiting adds ~250: the one
     // behavioral rule every run needs that no tool description can carry.
-    expect(prompt.length).toBeLessThan(3_250);
+    // Self-contained questions add ~150: a late question that only points back
+    // at an earlier turn is unanswerable once the person has lost that context.
+    expect(prompt.length).toBeLessThan(3_400);
   });
 
   // `sleep 240; check` blocks the turn and misses a job that finished early

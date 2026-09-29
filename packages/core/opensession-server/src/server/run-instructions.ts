@@ -94,7 +94,8 @@ export function buildRunInstructions(input: {
   );
   parts.push(
     "## Finish your turns\nComplete promised actions, then briefly report the outcome and " +
-      "relevant links.",
+      "relevant links. Make every question self-contained, even a repeated one: say " +
+      "what it is about and what each option means. Never point back to an earlier turn.",
   );
   parts.push(
     "## References\nFor PRs outside the current primary repository, write " +
