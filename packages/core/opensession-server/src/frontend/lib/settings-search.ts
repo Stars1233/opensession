@@ -85,7 +85,9 @@ export const SETTINGS_KEYWORDS = {
     "alerts",
     "reviews",
     "review requests",
+    "mentions",
     "collaborators",
+    "reminders",
     "inbox",
   ],
   shortcuts: [

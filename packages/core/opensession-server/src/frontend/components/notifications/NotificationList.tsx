@@ -9,11 +9,11 @@ import { NotificationRow } from "./NotificationRow";
 const EMPTY: Record<InboxFilter, { title: string; body: string }> = {
   unread: {
     title: "You're all caught up",
-    body: "Review requests and workspace invites show up here.",
+    body: "Reviews, mentions, workspace invites and reminders show up here.",
   },
   all: {
     title: "No notifications yet",
-    body: "When someone asks for your review or adds you to a workspace, it shows up here.",
+    body: "When a teammate needs you, it shows up here.",
   },
   done: {
     title: "Nothing marked done",

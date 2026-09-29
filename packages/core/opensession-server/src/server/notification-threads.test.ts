@@ -130,6 +130,11 @@ describe("notification threads", () => {
   test("alerts follow the person's settings", () => {
     expect(shouldAlert(null, "review_requested")).toBe(true);
     expect(shouldAlert(null, "collaborator")).toBe(true);
+    expect(shouldAlert(null, "mention")).toBe(true);
+    expect(shouldAlert(null, "reminder")).toBe(true);
+    expect(
+      shouldAlert({ threads: [], alerts: { reviews: false } }, "review_done"),
+    ).toBe(false);
     expect(
       shouldAlert(
         { threads: [], alerts: { collaborators: false } },
@@ -138,17 +143,17 @@ describe("notification threads", () => {
     ).toBe(false);
   });
 
-  test("agent and mention rows stored before they were removed are dropped", () => {
+  test("agent rows stored before they were removed are dropped", () => {
     const { doc } = applyNotificationEvent(empty, event());
     const stored = JSON.parse(JSON.stringify(doc));
-    for (const kind of ["needs_input", "run_failed", "mention", "reminder"])
+    for (const kind of ["needs_input", "run_failed", "run_finished"])
       stored.threads.push({
         ...stored.threads[0],
         id: `session:${kind}`,
         kind,
         subject: { ...stored.threads[0].subject, id: kind },
       });
-    stored.alerts = { needsInput: false, mentions: false };
+    stored.alerts = { needsInput: false, done: true };
     expect(cleanDocument(stored)).toEqual({ threads: doc.threads });
   });
 

@@ -5,7 +5,7 @@
  * tested without the catalog.
  *
  * The inbox is thread-shaped, like GitHub's: one row per subject (a session,
- * a pull request, a workspace). A new event on a subject moves
+ * a pull request, a workspace, a reminder). A new event on a subject moves
  * that row to the top and marks it unread instead of adding a second row.
  *
  * Every event carries an optional key naming the real-world occurrence (a
@@ -15,27 +15,41 @@
  */
 
 /**
- * Only requests from a person to a person notify: being asked to review, and
- * being added to a workspace. Agent activity (questions, failed runs) and
- * mentions do not; the sidebar already shows them.
+ * People notify people: review requests and results, mentions, workspace
+ * invites, and your own Desk reminders. Agent activity (questions, failed or
+ * finished runs) does not; the sidebar already shows it.
  */
-export const NOTIFICATION_KINDS = ["review_requested", "collaborator"] as const;
+export const NOTIFICATION_KINDS = [
+  "review_requested",
+  "review_done",
+  "mention",
+  "collaborator",
+  "reminder",
+] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 /** What a person switches on or off in Settings. */
 export const ALERT_GROUPS = {
-  reviews: ["review_requested"],
+  reviews: ["review_requested", "review_done"],
+  mentions: ["mention"],
   collaborators: ["collaborator"],
+  reminders: ["reminder"],
 } as const satisfies Record<string, readonly NotificationKind[]>;
 export type AlertGroup = keyof typeof ALERT_GROUPS;
 export type AlertPrefs = Record<AlertGroup, boolean>;
 
 export const DEFAULT_ALERT_PREFS: AlertPrefs = {
   reviews: true,
+  mentions: true,
   collaborators: true,
+  reminders: true,
 };
 
-export type NotificationSubjectType = "session" | "pr" | "workspace";
+export type NotificationSubjectType =
+  | "session"
+  | "pr"
+  | "workspace"
+  | "reminder";
 
 export interface NotificationSubject {
   type: NotificationSubjectType;
@@ -100,7 +114,10 @@ export function threadId(subject: Pick<NotificationSubject, "type" | "id">) {
 }
 
 export function kindAlertGroup(kind: NotificationKind): AlertGroup {
-  return kind === "collaborator" ? "collaborators" : "reviews";
+  for (const [group, kinds] of Object.entries(ALERT_GROUPS))
+    if ((kinds as readonly NotificationKind[]).includes(kind))
+      return group as AlertGroup;
+  return "reviews";
 }
 
 export function alertPrefs(doc: NotificationDocument | null): AlertPrefs {
@@ -126,7 +143,13 @@ function cleanThread(value: unknown): StoredThread | null {
   if (!isRecord(value) || !isRecord(value.subject)) return null;
   const subject = value.subject;
   const type = subject.type;
-  if (type !== "session" && type !== "pr" && type !== "workspace") return null;
+  if (
+    type !== "session" &&
+    type !== "pr" &&
+    type !== "workspace" &&
+    type !== "reminder"
+  )
+    return null;
   if (typeof subject.id !== "string" || !subject.id) return null;
   const kind = value.kind;
   if (!NOTIFICATION_KINDS.some((known) => known === kind)) return null;

@@ -135,11 +135,11 @@ export async function recordMentions(
 }
 
 /**
- * Record a mention and announce it: the durable badge and the live socket
- * frame that marks the row on every device the person has open. Mentions do
- * not notify (src/server/notifications.ts carries only people-to-person
- * requests: review requests and collaborator adds). Every surface that can
- * carry a mention calls this rather than assembling both itself.
+ * Record a mention and announce it: the durable badge, the live socket frame
+ * that marks the row on every device the person has open, and the inbox
+ * notification (src/server/notifications.ts), which also pushes. Every surface that can carry a
+ * mention calls this rather than assembling the three itself, so a new
+ * surface cannot ship two of them and forget the third.
  */
 export async function notifyMentions(
   text: string,
@@ -156,6 +156,21 @@ export async function notifyMentions(
     (person, mention) =>
       broadcastToAll({ type: "mention", user: person, mention }),
   );
+  if (!mentioned.length) return mentioned;
+  const { notifyUser, sessionSubject, sessionUrl } =
+    await import("./notifications");
+  const { findSession } = await import("./session-cache");
+  const session = findSession(sessionId);
+  const body = mentionPreview(text);
+  for (const name of mentioned)
+    void notifyUser(name, {
+      kind: "mention",
+      subject: sessionSubject(sessionId, session),
+      reason: `${sender || "Someone"} mentioned you${source === "note" ? " in a note" : ""}`,
+      body,
+      actor: sender || undefined,
+      url: sessionUrl(sessionId),
+    });
   return mentioned;
 }
 

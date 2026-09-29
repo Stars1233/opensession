@@ -92,14 +92,16 @@ const ALERT_ROWS: {
 }[] = [
   {
     group: "reviews",
-    title: "Review requests",
-    desc: "Someone asks you to review a session or pull request",
+    title: "Reviews",
+    desc: "Someone asks for your review, or finishes one you asked for",
   },
+  { group: "mentions", title: "Mentions", desc: "Someone tags you" },
   {
     group: "collaborators",
     title: "Added to a workspace",
     desc: "Someone adds you as a collaborator",
   },
+  { group: "reminders", title: "Reminders", desc: "Desk task reminders" },
 ];
 
 export function NotificationsPanel() {
