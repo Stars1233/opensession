@@ -9,7 +9,11 @@ import {
 import { ARCHIVED_QUERY } from "../lib/session-list-state";
 import type { UnifiedSession } from "../lib/types";
 import { IconTile } from "./BrandTile";
-import { SessionSearch, type CommandPaletteAction } from "./SessionSearch";
+import {
+  SessionSearch,
+  type ArchivedStatus,
+  type CommandPaletteAction,
+} from "./SessionSearch";
 
 export interface CommandMenuHandle {
   open: () => void;
@@ -58,7 +62,10 @@ export const CommandMenuHost = React.forwardRef<CommandMenuHandle, Props>(
     // The archived index, so a query also finds what was archived. Same
     // slim, ETagged snapshot the Archived page reads.
     const [archived, setArchived] = useState<UnifiedSession[]>([]);
+    const [archivedStatus, setArchivedStatus] =
+      useState<ArchivedStatus>("loading");
     const archivedEtag = useRef<string | null>(null);
+    const archivedInFlight = useRef(false);
 
     useImperativeHandle(ref, () => ({
       open: () => setOpen(true),
@@ -94,17 +101,31 @@ export const CommandMenuHost = React.forwardRef<CommandMenuHandle, Props>(
           setEveryone(JSON.parse(snapshot.text));
         })
         .catch(() => {});
-      fetchSessionsSnapshot({
-        etag: archivedEtag.current,
-        signal: ctrl.signal,
-        query: ARCHIVED_QUERY,
-      })
-        .then((snapshot) => {
-          if (snapshot.notModified || snapshot.text === null) return;
-          archivedEtag.current = snapshot.etag;
-          setArchived(JSON.parse(snapshot.text));
+      // Several MB, so it can take seconds on a slow link. Closing the
+      // palette does not cancel it: the next open reuses what arrived
+      // instead of starting over and never finishing.
+      if (!archivedInFlight.current) {
+        archivedInFlight.current = true;
+        fetchSessionsSnapshot({
+          etag: archivedEtag.current,
+          query: ARCHIVED_QUERY,
         })
-        .catch(() => {});
+          .then((snapshot) => {
+            if (!snapshot.notModified && snapshot.text !== null) {
+              archivedEtag.current = snapshot.etag;
+              setArchived(JSON.parse(snapshot.text));
+            }
+            setArchivedStatus("ready");
+          })
+          .catch(() =>
+            setArchivedStatus((current) =>
+              current === "ready" ? current : "failed",
+            ),
+          )
+          .finally(() => {
+            archivedInFlight.current = false;
+          });
+      }
       return () => ctrl.abort();
     }, [open]);
 
@@ -132,6 +153,7 @@ export const CommandMenuHost = React.forwardRef<CommandMenuHandle, Props>(
           archived,
         )}
         actions={[...actions, ...mcpActions]}
+        archivedStatus={archivedStatus}
         onSelectSession={onSelectSession}
         onSelectPr={onSelectPr}
         onClose={() => setOpen(false)}

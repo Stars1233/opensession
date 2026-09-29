@@ -44,9 +44,14 @@ export interface CommandPaletteAction {
   run: () => void;
 }
 
+/** Whether the archived index the palette searches has arrived yet. */
+export type ArchivedStatus = "loading" | "ready" | "failed";
+
 interface Props {
   sessions: UnifiedSession[];
   actions: CommandPaletteAction[];
+  /** Defaults to ready, for callers that pass archived rows in directly. */
+  archivedStatus?: ArchivedStatus;
   /** Open a session or PR (also closes the palette). */
   onSelectSession: (id: string) => void;
   onSelectPr: (pr: OpenPr) => void;
@@ -95,6 +100,8 @@ const STATUS_META: Record<Status, { label: string; dotClass: string }> = {
   merged: { label: "Merged", dotClass: "bg-purple" },
   pending: { label: "Pending", dotClass: "bg-faint" },
 };
+
+const ARCHIVED_META = { label: "Archived", dotClass: "bg-faint" };
 
 const STATUS_ORDER: Status[] = [
   "paused",
@@ -422,6 +429,7 @@ function FilterMenu<Value extends string>({
 export function SessionSearch({
   sessions,
   actions,
+  archivedStatus = "ready",
   onSelectSession,
   onSelectPr,
   onClose,
@@ -793,7 +801,9 @@ export function SessionSearch({
               results[active] ? `command-result-${active}` : undefined
             }
           />
-          {(searching || loadingPrs) && (
+          {(searching ||
+            loadingPrs ||
+            (archivedStatus === "loading" && query.trim() !== "")) && (
             <span
               className={
                 "size-[13px] shrink-0 animate-[spin_0.7s_linear_infinite] rounded-full border-2 border-line-strong border-t-accent " +
@@ -1005,7 +1015,8 @@ export function SessionSearch({
             }
             const s = result.session;
             const st = sessionStatus(s);
-            const meta = STATUS_META[st];
+            // An archived row's run status is stale; say where it lives.
+            const meta = s.archived ? ARCHIVED_META : STATUS_META[st];
             return (
               <React.Fragment key={`session:${s.id}`}>
                 {startsGroup && (
@@ -1067,6 +1078,13 @@ export function SessionSearch({
               </React.Fragment>
             );
           })}
+          {query.trim() !== "" && archivedStatus !== "ready" && (
+            <div className="px-3 pb-1.5 pt-2.5 text-meta text-faint">
+              {archivedStatus === "loading"
+                ? "Loading archived sessions…"
+                : "Couldn't load archived sessions"}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-4 border-t border-line px-4 py-2.5 text-meta text-faint">
