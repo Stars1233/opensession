@@ -45,6 +45,10 @@ test("both Review hosts supply a visible workspace exit and preserve safe-area c
     );
   }
   expect(workspace).toContain("onClick={onBack}");
+  // A session-less PR workspace's home is an empty composer, so back leaves.
+  expect(app).toContain("onLeave={goBack}");
+  expect(workspace).toContain("onLeave && workspaceSessions.length === 0 ? (");
+  expect(workspace).toContain("onClick={onLeave}");
   expect(session).toContain("onClick={openCurrentWorkspace}");
 });
 

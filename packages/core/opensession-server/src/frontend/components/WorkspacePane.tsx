@@ -111,6 +111,9 @@ interface Props {
   workspace: Workspace;
   /** Leave focused phone Review and restore workspace navigation. */
   onBack?: () => void;
+  /** Leave the workspace. Phone Review's back uses it when there is no
+   *  session, since the workspace home would be only an empty composer. */
+  onLeave?: () => void;
   /** The workspace's live sessions, strip order (empty for a session-less workspace). */
   workspaceSessions: UnifiedSession[];
   /** All sessions — the Review pane matches the PR target against any of them. */
@@ -182,6 +185,7 @@ const VIEW_MAIN =
 export function WorkspacePane({
   workspace,
   onBack,
+  onLeave,
   workspaceSessions,
   sessions,
   tab,
@@ -927,7 +931,13 @@ export function WorkspacePane({
           onPageChange={setReviewPage}
           flushToolbarTop={!tabStripVisible}
           phoneNavigation={
-            onBack ? (
+            onLeave && workspaceSessions.length === 0 ? (
+              <PhoneTopBarAction
+                onClick={onLeave}
+                aria-label="Back"
+                icon={<IconChevronLeft size={22} />}
+              />
+            ) : onBack ? (
               <PhoneTopBarAction
                 onClick={onBack}
                 aria-label="Back to workspace"

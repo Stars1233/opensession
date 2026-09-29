@@ -1503,6 +1503,7 @@ export function AppContent({
                         }
                         focusPr={reviewFocusPr ?? undefined}
                         onBack={() => setActiveViewTab(null)}
+                        onLeave={goBack}
                         workspace={routeWorkspace}
                         workspaceSessions={workspaceSessions}
                         sessions={sessions}
