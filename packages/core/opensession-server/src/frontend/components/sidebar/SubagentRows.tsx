@@ -31,17 +31,30 @@ function stateLabel(session: UnifiedSession): string {
   return "Idle";
 }
 
-/** Unarchived workers nested under their selected root workspace. */
+export interface SubagentRename {
+  sessionId: string;
+  value: string;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}
+
+/** Active workers nested under their selected root workspace. */
 export function SubagentRows({
   items,
   selectedId,
   onSelect,
   onArchive,
+  rename = null,
+  onStartRename,
 }: {
   items: WorkspaceSubagent[];
   selectedId: string | null;
   onSelect: (session: UnifiedSession) => void;
   onArchive: (session: UnifiedSession) => void;
+  /** The in-progress rename, when it targets one of these rows. */
+  rename?: SubagentRename | null;
+  onStartRename?: (session: UnifiedSession) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -58,6 +71,41 @@ export function SubagentRows({
         const iconStyle: SidebarIconStyle = {
           "--sidebar-icon-left": `${29 + Math.min(depth - 1, 2) * 10}px`,
         };
+        if (rename?.sessionId === session.id)
+          return (
+            <div
+              key={session.id}
+              className={cn(
+                "relative mt-0.5 flex w-full items-center rounded-row py-[var(--sidebar-row-pad)] pr-2 phone:py-[13px]",
+                SIDEBAR_RAIL_GAP,
+                SIDEBAR_RAIL_PAD,
+                selected && "bg-selected",
+              )}
+              style={iconStyle}
+              data-subagent-row=""
+              data-parent-session-id={session.parentSessionId}
+            >
+              <span
+                className={cn(SIDEBAR_RAIL, "text-faint")}
+                aria-hidden="true"
+              >
+                <IconArrowTurnDownRight size={16} />
+              </span>
+              <input
+                className="min-w-0 flex-1 rounded-md border border-[var(--accent,#6b8afd)] bg-bg px-[3px] text-body font-medium text-inherit outline-none desktop:text-item-title"
+                aria-label={`Rename ${session.title}`}
+                value={rename.value}
+                autoFocus
+                onChange={(e) => rename.onChange(e.target.value)}
+                onBlur={() => rename.onCommit()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") rename.onCommit();
+                  else if (e.key === "Escape") rename.onCancel();
+                  e.stopPropagation();
+                }}
+              />
+            </div>
+          );
         return (
           <div className="group relative" key={session.id}>
             <button
@@ -89,7 +137,19 @@ export function SubagentRows({
               >
                 <IconArrowTurnDownRight size={16} />
               </span>
-              <span className={SIDEBAR_ROW_TITLE}>{session.title}</span>
+              <span
+                className={SIDEBAR_ROW_TITLE}
+                onDoubleClick={
+                  onStartRename
+                    ? (e) => {
+                        e.stopPropagation();
+                        onStartRename(session);
+                      }
+                    : undefined
+                }
+              >
+                {session.title}
+              </span>
               {showPrStatus ? (
                 <WsPrStatusMark sessions={[session]} size={16} />
               ) : (

@@ -77,6 +77,7 @@ interface WorkspaceControllerState {
   wsTimePref: "off" | "always" | "hover";
   workspaceDraft: string;
   sessionDraft: string;
+  editingSessionId: string | null;
   pins: string[];
 }
 
@@ -167,6 +168,7 @@ export function useSidebarWorkspaceController({
     wsTimePref,
     workspaceDraft,
     sessionDraft,
+    editingSessionId,
     pins,
   },
   refs: { sidebarScrollRef, ref },
@@ -751,6 +753,7 @@ export function useSidebarWorkspaceController({
             subagentsByWorkspaceId,
             row.workspace?.id,
             selectedWorkspaceId,
+            selectedId,
           )
         : [];
     const editingState = editing
@@ -892,6 +895,24 @@ export function useSidebarWorkspaceController({
           selectedId={selectedId}
           onSelect={openSidebarSession}
           onArchive={(session) => onArchive(session, null)}
+          rename={
+            editingSessionId &&
+            subagents.some(({ session }) => session.id === editingSessionId)
+              ? {
+                  sessionId: editingSessionId,
+                  value: sessionDraft,
+                  onChange: setSessionDraft,
+                  onCommit: () => {
+                    const session = subagents.find(
+                      (item) => item.session.id === editingSessionId,
+                    )?.session;
+                    if (session) commitSessionRename(session);
+                  },
+                  onCancel: () => setEditingSessionId(null),
+                }
+              : null
+          }
+          onStartRename={startSessionRename}
         />
       </React.Fragment>
     );

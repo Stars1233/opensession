@@ -985,6 +985,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       wsTimePref,
       workspaceDraft,
       sessionDraft,
+      editingSessionId,
       pins,
     },
     refs: { sidebarScrollRef, ref },
