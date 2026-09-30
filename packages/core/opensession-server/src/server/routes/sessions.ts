@@ -41,25 +41,15 @@ import {
 } from "@tellahq/opensession-protocol/workspace-group";
 import { deleteSessionTranscript, transcript } from "../actor-transcript";
 import { clearSessionFileArchive } from "../plain-archive";
-import {
-  editPrReviewers,
-  isNoPrError,
-  prMetaForBranch,
-  prReviewerSpecs,
-} from "../pr-info";
 
 import {
   clientVisibleQueuedCount,
   clientVisibleQueuedCounts,
 } from "../queue-state";
 
-import { markPrReviewNotified } from "../pr-review-notifications";
 import { footerPrsFor, getPrsByRepo, prsBySessionRef } from "../pr-cache";
-import {
-  getReviewRequest,
-  setReviewAccepted,
-  setReviewRequest,
-} from "../review-requests";
+import { getReviewRequest } from "../review-requests";
+import { acceptSessionReview, setSessionReviewer } from "../session-review";
 import { getSessionControl, type SandboxRequest } from "../session-control";
 import {
   requestTurnCancel,
@@ -88,7 +78,6 @@ import {
 import { MAX_PROMPT_IMAGES } from "@tellahq/opensession-protocol/session";
 import { SessionKernelActorError } from "../session-kernel/actor-client";
 import { notifyMentions } from "../mentions";
-import { reviewTeamFor } from "../people";
 import { unarchiveForHumanTurn } from "../session-unarchive";
 import {
   sessionChangesSince,
@@ -104,7 +93,6 @@ import { withSessionMutationLock } from "../session-mutation-lock";
 import { sessionIdForRequest } from "../session-request-id";
 import { suggestBranchName } from "../suggest-branch";
 import { searchIndex } from "../session-index";
-import { resolvePrTarget } from "../session-repos";
 import { destroySessionSandbox } from "../session-sandbox";
 import { deleteSessionCheckpoint } from "../sandbox/checkpoint";
 import { withSessionLifecycleLane } from "../sandbox/lifecycle-lane";
@@ -113,11 +101,9 @@ import { dropRunnerPortalRoutes } from "../runner-portals";
 import { cleanupRunnerWorkspace } from "../runner-ws";
 import {
   deleteSession,
-  markCachedPrReviewRequestsCleared,
   mergedSessionTranscriptAsync,
   removeTombstonedSessionArtifacts,
 } from "../sessions";
-import { githubLoginFor } from "../shared/user-mappings";
 import { publicSessionSafety } from "../session-safety";
 import type { DurableSessionQuarantine } from "../session-kernel/store";
 import {
@@ -139,8 +125,7 @@ import {
   peekWorkspace,
   workspaceNameSnapshot,
 } from "../workspaces";
-import { prHostFor } from "../pr-host";
-import { getRepo, NO_REPO, removeWorktree, repoForPath } from "../worktree";
+import { NO_REPO, removeWorktree, repoForPath } from "../worktree";
 import { preparingWorkspaces } from "../ws-hub";
 import {
   existsSync,
@@ -152,10 +137,7 @@ import {
 } from "fs";
 import { statePath } from "../paths";
 import { writeFileAtomic } from "../shared/atomic-write";
-import {
-  githubCredentialRequiredResponse,
-  githubMutationCredential,
-} from "./github-credential";
+import { githubMutationCredential } from "./github-credential";
 import { defaultRepo } from "../config";
 import type { UnifiedSession } from "../types";
 import {
@@ -1862,179 +1844,22 @@ export async function handleSessionsRoutes(
       return Response.json({ error: "Session not found" }, { status: 404 });
     const body = await req.json().catch(() => ({}));
     const by = requestUser(ctx, body?.by).slice(0, 40);
-    // A unified session can inherit a request stored before deduplication under
-    // one of its historical ids. Every mutation must resolve and remove those
-    // keys too, or clearing the canonical id leaves the sidebar request alive.
-    const reviewAliases = [
-      ...(session.aliasIds || []),
-      ...(session.id === sessionId ? [] : [sessionId]),
-    ];
-
-    // Accept / reopen the current request (the reviewer signing off). Keeps
-    // the reviewer assignment intact but flips it to a "Reviewed" state that
-    // the asker sees in their sidebar. Distinct from setting/clearing a
-    // reviewer below, so it never touches GitHub's Reviewers list.
-    if (typeof body?.accept === "boolean") {
-      const existing = getReviewRequest(session.id, reviewAliases);
-      if (!existing)
-        return Response.json(
-          { error: "No review request to accept" },
-          { status: 400 },
-        );
-      setReviewAccepted(
-        session.id,
-        body.accept
-          ? { by: by || "someone", at: new Date().toISOString() }
-          : null,
-        reviewAliases,
-      );
-      await publishSessionChange(session.id);
-      // Buzz whoever asked for the review that it landed (not on self-review).
-      if (
-        body.accept &&
-        existing.by &&
-        existing.by.toLowerCase() !== (by || "").toLowerCase()
-      ) {
-        void (async () => {
-          try {
-            const { notifyUser, sessionSubject, sessionUrl } =
-              await import("../../server/notifications");
-            await notifyUser(existing.by, {
-              kind: "review_done",
-              subject: sessionSubject(sessionId, session),
-              reason: `${by || "Someone"} reviewed it`,
-              actor: by || undefined,
-              url: sessionUrl(sessionId),
-            });
-          } catch {}
-        })();
-      }
-      return Response.json({ ok: true });
-    }
-
-    const reviewer =
-      typeof body?.reviewer === "string"
-        ? body.reviewer.trim().slice(0, 120)
-        : "";
-    const prevReviewer = getReviewRequest(session.id, reviewAliases)?.to;
-    const reviewTeam = reviewTeamFor(reviewer);
-    const previousReviewTeam = reviewTeamFor(prevReviewer);
-    // Mirror the request onto GitHub's own Reviewers list before committing the
-    // local assignment, so an auth/API failure cannot leave the two disagreeing.
-    // setting a reviewer adds them, re-assigning swaps, clearing removes.
-    // Only for sessions with a branch/PR whose reviewer maps to a GitHub
-    // login — a phone buzz always fires below regardless.
-    const addLogin = reviewer
-      ? reviewTeam?.github || githubLoginFor(reviewer)
-      : null;
-    const removeLogin =
-      prevReviewer && prevReviewer !== reviewer
-        ? previousReviewTeam?.github ||
-          (/^[\w.-]+\/[\w.-]+$/.test(prevReviewer)
-            ? prevReviewer
-            : githubLoginFor(prevReviewer))
-        : null;
-    const target = resolvePrTarget(session, body?.repo);
-    // Hosts without a reviewer concept (code.storage) have nothing to mirror
-    // onto — the internal review request stands on its own there instead of
-    // dying on the host round-trip. GitHub repos are unaffected (always true).
-    const hostReviewers = target
-      ? prHostFor(getRepo(target.repoId)).capabilities.reviewers
-      : false;
-    // Whether the reviewer actually reached GitHub's list — false when there
-    // was no PR to mirror onto, which the push marker below depends on.
-    let mirroredToGithub = false;
-    // What has to change on GitHub's Reviewers list. Clearing a session with
-    // no request of its own withdraws GitHub's own pending requests instead:
-    // the chip reports those as the same "somebody is waiting on you" state
-    // (WorkspaceInfo's ReviewerChip falls back to them), and this is the only
-    // way to take one down from here. Read as the service identity, so a clear
-    // with nothing on GitHub to remove never demands a personal credential.
-    const removeSpecs = new Set(removeLogin ? [removeLogin] : []);
-    if (!reviewer && !prevReviewer && target && hostReviewers) {
-      const specs = await prReviewerSpecs(target.branch, target.ghRepo).catch(
-        () => null,
-      );
-      for (const spec of specs || []) removeSpecs.add(spec);
-    }
-    if (target && hostReviewers && (addLogin || removeSpecs.size)) {
-      const credential = githubMutationCredential(ctx);
-      // No personal credential only actually blocks this when there is a PR
-      // to mirror onto: `target` comes from branch metadata alone, so most
-      // sessions reaching here have nothing on GitHub to change. Ask (as the
-      // service identity — a read) before refusing, so an expired GitHub
-      // connection can't take the internal review request down with it.
-      // Fails closed: if we can't establish there's no PR, we still refuse.
-      if (!credential) {
-        const existing = await prMetaForBranch(
-          target.branch,
-          target.ghRepo,
-        ).catch(() => "unknown" as const);
-        if (existing !== null) return githubCredentialRequiredResponse();
-      } else {
-        const mirrored = await editPrReviewers(
-          target.branch,
-          { add: addLogin, remove: [...removeSpecs] },
-          target.ghRepo,
-          credential,
-        ).catch((e: any) => ({ error: e?.message || String(e) }));
-        // Same reasoning the other way round: `gh pr edit` answering "no
-        // pull requests found" is an answer, not a failure — nothing to
-        // mirror, so the local request stands on its own. Every other
-        // error still blocks, so a PR that DOES exist can never silently
-        // disagree with the request stored here.
-        if ("error" in mirrored) {
-          if (!isNoPrError(mirrored.error))
-            return Response.json(mirrored, { status: 502 });
-        } else mirroredToGithub = true;
-      }
-    }
-    await executeSessionProjection(sessionId, "review_request", () =>
-      setReviewRequest(
-        session.id,
-        reviewer
-          ? {
-              to: reviewTeam?.github || reviewer,
-              ...(reviewTeam ? { recipients: reviewTeam.members } : {}),
-              by: by || "someone",
-              at: new Date().toISOString(),
-            }
-          : null,
-        reviewAliases,
-      ),
-    );
-    // The chip's GitHub fallback reads the bulk PR cache, which the throttled
-    // sweep only refills every 10-30 minutes. Without a write-through, a clear
-    // that did reach GitHub still leaves the reviewers on screen.
-    if (!reviewer && mirroredToGithub && target)
-      markCachedPrReviewRequestsCleared(target.ghRepo, target.branch);
-    await publishSessionChange(session.id);
-    if (reviewer) {
-      // Only suppress the watcher's own push when the request really landed on
-      // GitHub; marking a skipped mirror would swallow a later genuine one.
-      if (mirroredToGithub && target && addLogin) {
-        for (const recipient of reviewTeam?.members || [reviewer])
-          markPrReviewNotified(target.ghRepo, target.branch, recipient);
-      }
-      // Best-effort phone buzz — never let a push hiccup fail the request.
-      void (async () => {
-        try {
-          const { notifyUser, sessionSubject, sessionUrl } =
-            await import("../../server/notifications");
-          await Promise.all(
-            (reviewTeam?.members || [reviewer]).map((recipient) =>
-              notifyUser(recipient, {
-                kind: "review_requested",
-                subject: sessionSubject(sessionId, session),
-                reason: `${by || "Someone"} asked for your review`,
-                actor: by || undefined,
-                url: sessionUrl(sessionId),
-              }),
-            ),
-          );
-        } catch {}
-      })();
-    }
+    const result =
+      typeof body?.accept === "boolean"
+        ? await acceptSessionReview(session, sessionId, body.accept, by)
+        : await setSessionReviewer({
+            session,
+            sessionId,
+            reviewer:
+              typeof body?.reviewer === "string"
+                ? body.reviewer.trim().slice(0, 120)
+                : "",
+            by,
+            repo: body?.repo,
+            credential: githubMutationCredential(ctx),
+          });
+    if (!result.ok)
+      return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ ok: true });
   }
 

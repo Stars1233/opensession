@@ -12,11 +12,13 @@
  * be able to puppet other sessions).
  *
  * Gating: the read tools (list/get) are available to any whitelisted user who
- * can talk to the bot; the control tools (answer/send/cancel/create, and the
- * spawn_task/task_status/cancel_task task primitives) are gated to the trusted
- * user via `isAdmin`, matching opensession-admin.
+ * can talk to the bot; the control tools (answer/send/cancel/create, the
+ * spawn_task/task_status/cancel_task task primitives, and the reviewer and
+ * collaborator tools in collaboration-tools.ts) are gated to the trusted user
+ * via `isAdmin`, matching opensession-admin.
  */
 import { audit } from "../../server/audit";
+import { collaborationTools } from "./collaboration-tools";
 import {
   cancelAgentWait,
   getAgentWait,
@@ -1591,6 +1593,11 @@ export function createSessionsMcpServer(
             ),
           ),
       ),
+      // Reviewers and workspace collaborators: they notify other people.
+      ...collaborationTools({
+        createdBy: ctx.createdBy,
+        currentSessionId: ctx.currentSessionId,
+      }),
     );
   }
 
