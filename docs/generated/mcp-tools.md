@@ -40,7 +40,7 @@ touches an in-process tool:
 
 | Server | Tools | Runs | Condition |
 | --- | --- | --- | --- |
-| [`opensession-sessions`](#opensession-sessions) | 16 | interactive, Slack loop, automation | Automation runs get it ONLY with the human-set `selfImprove` flag, and then in the `automationSelf` build below. |
+| [`opensession-sessions`](#opensession-sessions) | 23 | interactive, Slack loop, automation | Automation runs get it ONLY with the human-set `selfImprove` flag, and then in the `automationSelf` build below. |
 | [`opensession-admin`](#opensession-admin) | 14 | interactive, Slack loop | – |
 | [`opensession-runners`](#opensession-runners) | 5 | interactive | – |
 | [`opensession-goals`](#opensession-goals) | 8 | interactive | – |
@@ -74,7 +74,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-33 servers, 150 tools.
+33 servers, 157 tools.
 
 ## opensession-sessions
 
@@ -182,9 +182,51 @@ Status of a spawned task (or any session id): running / waiting (blocked on a qu
 
 Cancel a spawned task's in-flight run (drops queued messages too). Only runs this server owns.
 
+### `get_session_reviewer`
+
+`mcp__opensession-sessions__get_session_reviewer` · input: `session_id` (string)
+
+Show who is asked to review a session, who asked, and whether they signed off. Also lists everyone a review can be requested from.
+
+### `set_session_reviewer`
+
+`mcp__opensession-sessions__set_session_reviewer` · input: `session_id` (string), `reviewer` (string, required), `repo` (string)
+
+Ask a teammate or review team to review a session, replacing any current reviewer. It lands in their sidebar's Needs review band and sends them a notification. When the session has a GitHub pull request, the reviewer is also requested there (and a replaced reviewer removed) with the acting person's GitHub connection.
+
+### `remove_session_reviewer`
+
+`mcp__opensession-sessions__remove_session_reviewer` · input: `session_id` (string), `repo` (string)
+
+Clear a session's reviewer and withdraw the request from its GitHub pull request. With no reviewer set here, withdraws the pull request's pending GitHub review requests instead.
+
+### `accept_session_review`
+
+`mcp__opensession-sessions__accept_session_review` · input: `session_id` (string), `accept` (boolean)
+
+Mark a session's review request as reviewed (the reviewer signs off), or reopen it with accept false. Keeps the reviewer and does not touch GitHub. Accepting notifies whoever asked.
+
+### `list_collaborators`
+
+`mcp__opensession-sessions__list_collaborators` · input: `workspace_id` (string), `session_id` (string)
+
+List a workspace's creator and collaborators. Collaborators see the workspace in their own sidebar like its creator does.
+
+### `add_collaborator`
+
+`mcp__opensession-sessions__add_collaborator` · input: `name` (string, required), `workspace_id` (string), `session_id` (string)
+
+Add a teammate to a workspace so it shows in their sidebar. The first add notifies them; adding someone already listed changes nothing.
+
+### `remove_collaborator`
+
+`mcp__opensession-sessions__remove_collaborator` · input: `name` (string, required), `workspace_id` (string), `session_id` (string)
+
+Remove a teammate from a workspace's collaborators. Removing someone who is not listed changes nothing. The creator cannot be removed.
+
 ### Variant · selfImprove automation (isAdmin: false, automationSelf: true)
 
-Built for: automation. 6 tools, without `wait_for`, `wait_status`, `cancel_wait`, `answer_session_question`, `send_to_session`, `send_file_to_session`, `cancel_session`, `reparent_session`, `create_session`, `migrate_session_engine`.
+Built for: automation. 13 tools, without `wait_for`, `wait_status`, `cancel_wait`, `answer_session_question`, `send_to_session`, `send_file_to_session`, `cancel_session`, `reparent_session`, `create_session`, `migrate_session_engine`.
 
 ## opensession-admin
 
