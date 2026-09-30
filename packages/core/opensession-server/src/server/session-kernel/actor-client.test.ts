@@ -160,6 +160,33 @@ describe("asynchronous session kernel actor boundary", () => {
     expect(worker.posts).toHaveLength(1);
   });
 
+  test("a mutation refused before execution waits out backpressure", async () => {
+    let attempts = 0;
+    const worker = new FakeWorker((message, emit) => {
+      attempts += 1;
+      if (attempts < 3) {
+        queueMicrotask(() =>
+          emit({
+            t: "error",
+            rpcId: message.rpcId,
+            error: "Session kernel transport is full",
+            retryable: true,
+            notExecuted: true,
+          }),
+        );
+      } else queueMicrotask(() => emit(callResult(message.rpcId, undefined)));
+    });
+    const host = new SessionKernelActorClient(worker as unknown as Worker);
+    client = host;
+    await host.decideGatewayAsync({
+      op: "request",
+      sessionId: "backpressured",
+      requestId: "stable-request",
+      operation: "websocket_command",
+    });
+    expect(worker.posts).toHaveLength(3);
+  });
+
   test("replay-safe retries retain one command identity", async () => {
     let attempts = 0;
     const worker = new FakeWorker((message, emit) => {

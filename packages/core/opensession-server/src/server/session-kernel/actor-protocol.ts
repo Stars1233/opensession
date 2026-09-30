@@ -76,6 +76,10 @@ export type KernelActorAsyncResponse =
       rpcId: string;
       error: string;
       retryable?: boolean;
+      /** The request was refused before any actor turn could run (admission,
+       * a full mailbox or lane, a stale incarnation). Replaying it is safe even
+       * for a mutation because nothing executed. */
+      notExecuted?: boolean;
       fatal?: boolean;
     };
 
