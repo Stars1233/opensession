@@ -29,7 +29,20 @@ const booleanUnfurlProperties = {
   },
 } as const;
 
-const tools = [
+/** Most files one Slack message carries through files.completeUploadExternal. */
+export const MAX_MESSAGE_IMAGES = 10;
+
+const imagesProperty = {
+  images: {
+    type: "array",
+    items: { type: "string" },
+    maxItems: MAX_MESSAGE_IMAGES,
+    description:
+      "Optional absolute paths of images (a PNG chart, a screenshot) to attach to this message, posted immediately with no review. Only files inside /tmp/slack-uploads are accepted: copy them there first (mkdir -p /tmp/slack-uploads). When the person should review the post first, use compose_message instead.",
+  },
+} as const;
+
+export const tools = [
   {
     name: "slack_list_channels",
     description:
@@ -52,7 +65,8 @@ const tools = [
   },
   {
     name: "slack_post_message",
-    description: "Post a new message to a Slack channel",
+    description:
+      "Post a new message to a Slack channel right away, with optional image attachments (images). Use it only when posting without review is intended.",
     inputSchema: {
       type: "object",
       properties: {
@@ -61,6 +75,7 @@ const tools = [
           description: "The ID of the channel to post to",
         },
         text: { type: "string", description: "The message text to post" },
+        ...imagesProperty,
         ...booleanUnfurlProperties,
       },
       required: ["channel_id", "text"],
@@ -68,7 +83,8 @@ const tools = [
   },
   {
     name: "slack_reply_to_thread",
-    description: "Reply to a specific message thread in Slack",
+    description:
+      "Reply to a specific message thread in Slack, with optional image attachments (images).",
     inputSchema: {
       type: "object",
       properties: {
@@ -81,6 +97,7 @@ const tools = [
           description: "The timestamp of the parent message",
         },
         text: { type: "string", description: "The reply text" },
+        ...imagesProperty,
         ...booleanUnfurlProperties,
       },
       required: ["channel_id", "thread_ts", "text"],
@@ -219,6 +236,17 @@ function optionalString(args: ToolArguments, name: string): string | undefined {
   if (value === undefined || value === "") return undefined;
   if (typeof value !== "string") throw new Error(`${name} must be a string`);
   return value;
+}
+
+function optionalStrings(args: ToolArguments, name: string): string[] {
+  const value = args[name];
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
+    throw new Error(`${name} must be an array of file paths`);
+  const paths = [...new Set(value as string[])];
+  if (paths.length > MAX_MESSAGE_IMAGES)
+    throw new Error(`${name} takes at most ${MAX_MESSAGE_IMAGES} files`);
+  return paths;
 }
 
 function optionalBoolean(
@@ -392,19 +420,11 @@ export class SlackClient {
     return response.json();
   }
 
-  /**
-   * Slack retired files.upload; external uploads reserve a URL, receive the
-   * bytes there, and are shared by files.completeUploadExternal.
-   */
-  async uploadFile(
-    channel: string,
-    path: string,
-    options: UploadOptions = {},
-  ): Promise<unknown> {
+  /** Reserve an upload URL for one file and send its bytes there. */
+  private async reserveAndSend(path: string): Promise<string> {
     const file = await resolveUploadFile(path, this.uploadRoot);
-    const filename = basename(file.path);
     const reserved = await this.postForm("files.getUploadURLExternal", {
-      filename,
+      filename: basename(file.path),
       length: String(file.size),
     });
     if (!reserved?.ok || !reserved.upload_url || !reserved.file_id)
@@ -417,11 +437,29 @@ export class SlackClient {
     });
     if (!uploaded.ok)
       throw new Error(`Slack file upload failed: HTTP ${uploaded.status}`);
+    return reserved.file_id;
+  }
 
+  /**
+   * Slack retired files.upload; external uploads reserve a URL, receive the
+   * bytes there, and are shared by files.completeUploadExternal. Every file
+   * is checked before any byte leaves, so a bad path uploads nothing.
+   */
+  private async shareFiles(
+    channel: string,
+    paths: string[],
+    options: UploadOptions,
+  ): Promise<Array<{ id: string; title: string }>> {
+    for (const path of paths) await resolveUploadFile(path, this.uploadRoot);
+    const files = [];
+    for (const path of paths) {
+      files.push({
+        id: await this.reserveAndSend(path),
+        title: (paths.length === 1 && options.title) || basename(path),
+      });
+    }
     const completed = await this.postForm("files.completeUploadExternal", {
-      files: JSON.stringify([
-        { id: reserved.file_id, title: options.title || filename },
-      ]),
+      files: JSON.stringify(files),
       channel_id: channel,
       ...(options.threadTs ? { thread_ts: options.threadTs } : {}),
       ...(options.initialComment
@@ -429,16 +467,109 @@ export class SlackClient {
         : {}),
     });
     if (!completed?.ok) throw slackError("upload completion", completed);
+    return files;
+  }
 
+  async uploadFile(
+    channel: string,
+    path: string,
+    options: UploadOptions = {},
+  ): Promise<unknown> {
+    const [file] = await this.shareFiles(channel, [path], options);
     const info = (await this.get(
       "files.info",
-      new URLSearchParams({ file: reserved.file_id }),
+      new URLSearchParams({ file: file!.id }),
     ).catch(() => undefined)) as any;
     return {
       ok: true,
-      file_id: reserved.file_id,
-      title: options.title || filename,
+      file_id: file!.id,
+      title: file!.title,
       ...(info?.file?.permalink ? { permalink: info.file.permalink } : {}),
+    };
+  }
+
+  /**
+   * The message Slack shared `fileId` in. completeUploadExternal answers
+   * without it, and files.info would need files:read, which the generated
+   * manifest does not grant, so the message is found in the conversation the
+   * upload went to, with the history scopes the bot already has.
+   */
+  private async findFileMessage(
+    channel: string,
+    fileId: string,
+    since: number,
+    threadTs?: string,
+  ): Promise<{ ts?: string; error?: string }> {
+    const params = new URLSearchParams({
+      channel,
+      oldest: since.toFixed(6),
+      limit: "50",
+    });
+    if (threadTs) params.set("ts", threadTs);
+    const found = (await this.get(
+      threadTs ? "conversations.replies" : "conversations.history",
+      params,
+    ).catch(() => undefined)) as any;
+    if (!found?.ok) return { error: found?.error || "invalid response" };
+    const message = (found.messages ?? []).find((candidate: any) =>
+      (candidate?.files ?? []).some((file: any) => file?.id === fileId),
+    );
+    return { ts: typeof message?.ts === "string" ? message.ts : undefined };
+  }
+
+  /**
+   * One message carrying `text` and the images, answered like
+   * chat.postMessage (`ok`, `channel`, `ts` first) so callers that link a
+   * post to its thread read an image post the same way. Slack shares an
+   * upload asynchronously, so the message is looked up with a short, bounded
+   * retry. The post has already succeeded by then, so a lookup that fails
+   * says why in `warning` rather than failing the call.
+   */
+  async postWithImages(
+    channel: string,
+    text: string,
+    images: string[],
+    threadTs?: string,
+    shareWaitMs = 500,
+  ): Promise<unknown> {
+    // A second of slack for clock skew between this host and Slack.
+    const since = Date.now() / 1000 - 1;
+    const files = await this.shareFiles(channel, images, {
+      threadTs,
+      initialComment: text,
+    });
+    let ts: string | undefined;
+    let error: string | undefined;
+    for (let attempt = 0; attempt < 6 && !ts && !error; attempt++) {
+      if (attempt > 0) await Bun.sleep(shareWaitMs);
+      ({ ts, error } = await this.findFileMessage(
+        channel,
+        files[0]!.id,
+        since,
+        threadTs,
+      ));
+    }
+    let permalink: string | undefined;
+    if (ts) {
+      const link = (await this.get(
+        "chat.getPermalink",
+        new URLSearchParams({ channel, message_ts: ts }),
+      ).catch(() => undefined)) as any;
+      if (typeof link?.permalink === "string") permalink = link.permalink;
+    }
+    const warning = ts
+      ? undefined
+      : error === "missing_scope"
+        ? `Posted, but the message could not be looked up: the bot token is missing history scope for this conversation (channels:history, groups:history, im:history or mpim:history).`
+        : `Posted, but the message could not be looked up${error ? `: ${error}` : " yet"}.`;
+    return {
+      ok: true,
+      channel,
+      ...(ts ? { ts } : {}),
+      ...(threadTs ? { thread_ts: threadTs } : {}),
+      ...(permalink ? { permalink } : {}),
+      files: files.map((file) => file.id),
+      ...(warning ? { warning } : {}),
     };
   }
 
@@ -512,21 +643,38 @@ async function main(): Promise<void> {
             args.cursor as string | undefined,
           );
           break;
-        case "slack_post_message":
-          result = await client.postMessage(
-            requiredString(args, "channel_id"),
-            requiredString(args, "text"),
-            options,
-          );
+        case "slack_post_message": {
+          const images = optionalStrings(args, "images");
+          result = images.length
+            ? await client.postWithImages(
+                requiredString(args, "channel_id"),
+                requiredString(args, "text"),
+                images,
+              )
+            : await client.postMessage(
+                requiredString(args, "channel_id"),
+                requiredString(args, "text"),
+                options,
+              );
           break;
-        case "slack_reply_to_thread":
-          result = await client.postReply(
-            requiredString(args, "channel_id"),
-            requiredString(args, "thread_ts"),
-            requiredString(args, "text"),
-            options,
-          );
+        }
+        case "slack_reply_to_thread": {
+          const images = optionalStrings(args, "images");
+          result = images.length
+            ? await client.postWithImages(
+                requiredString(args, "channel_id"),
+                requiredString(args, "text"),
+                images,
+                requiredString(args, "thread_ts"),
+              )
+            : await client.postReply(
+                requiredString(args, "channel_id"),
+                requiredString(args, "thread_ts"),
+                requiredString(args, "text"),
+                options,
+              );
           break;
+        }
         case "slack_upload_file":
           result = await client.uploadFile(
             requiredString(args, "channel_id"),
