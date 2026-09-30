@@ -62,6 +62,7 @@ import {
 } from "./sandbox/config";
 import { isShuttingDown } from "./shutdown-state";
 import { resolveInteractiveSandbox } from "./sandbox/defaults";
+import { sessionSpeed } from "@tellahq/opensession-protocol/session";
 import {
   findSession,
   getCachedSessions,
@@ -70,6 +71,7 @@ import {
   publishSessionChange,
   touchNativeSession,
   touchNativeSessionStrict,
+  requestedSpeed,
 } from "./session-cache";
 import { nameKnownSessionReferencesForTitle } from "./session-reference-title";
 import { validateSessionReparent } from "./session-parenting";
@@ -704,6 +706,7 @@ registerSessionControl({
       effort: effortInput,
       autoFallback: autoFallbackInput,
       fastMode: fastModeInput,
+      speed: speedInput,
       pstackMode: pstackModeInput,
       images: imageUrls,
       files: rawFiles,
@@ -810,9 +813,9 @@ registerSessionControl({
           )
         ? (effortInput.trim().toLowerCase() as SessionEffort)
         : undefined;
-    const createFastMode = fork
-      ? fork.source.fastMode === true
-      : fastModeInput === true;
+    const createSpeed = fork
+      ? sessionSpeed(fork.source)
+      : (requestedSpeed(speedInput, fastModeInput) ?? "standard");
     const createPstackMode = fork
       ? fork.source.pstackMode === true
       : pstackModeInput === true;
@@ -1316,7 +1319,9 @@ ${createMentionsNote}`;
       model,
       effort: createEffort,
       autoFallback: fork ? fork.source.autoFallback : autoFallbackInput,
-      fastMode: createFastMode || undefined,
+      ...(createSpeed === "standard"
+        ? {}
+        : { fastMode: true, speed: createSpeed }),
       pstackMode: createPstackMode || undefined,
       accountId: createAccountId,
       images,

@@ -1,4 +1,5 @@
 /** Explain the configuration that will apply to a session's next Pi turn. */
+import { sessionSpeed } from "@tellahq/opensession-protocol/session";
 import type { UnifiedSession } from "./types";
 import {
   resolveSessionRunInputs,
@@ -370,6 +371,7 @@ export async function buildSessionEffectiveConfig(
     ),
     effort: row(session.effort ?? null, "session file effort"),
     fastMode: row(session.fastMode ?? false, "session file fastMode"),
+    speed: row(sessionSpeed(session), "session file speed (fastMode fallback)"),
     fallbackModel: row(
       interactiveFallbackModel(session.model) ?? null,
       "models.ts interactiveFallbackModel",

@@ -1,3 +1,4 @@
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import { AnimatePresence, motion } from "motion/react";
 import type { ModelOption, ProviderAccountOption } from "../../lib/api";
 import {
@@ -24,8 +25,8 @@ interface ModelRowProps {
   onEffortChange?: (effort: string) => void;
   autoFallback?: boolean;
   onAutoFallbackChange?: (enabled: boolean) => void;
-  fastMode?: boolean;
-  onFastModeChange?: (fastMode: boolean) => void;
+  speed?: SessionSpeed;
+  onSpeedChange?: (speed: SessionSpeed) => void;
   accounts?: ProviderAccountOption[];
   accountId?: string;
   onAccountChange?: (accountId: string) => void;
@@ -50,8 +51,8 @@ export function ModelRow({
   onEffortChange,
   autoFallback,
   onAutoFallbackChange,
-  fastMode,
-  onFastModeChange,
+  speed,
+  onSpeedChange,
   accounts,
   accountId,
   onAccountChange,
@@ -80,7 +81,7 @@ export function ModelRow({
               modelTitle,
               effort,
               autoFallback,
-              fastMode,
+              speed,
               accounts,
               accountId,
               usage,
@@ -105,7 +106,7 @@ export function ModelRow({
               setAsDefault: onSetAsDefault,
               changeEffort: onEffortChange,
               changeAutoFallback: onAutoFallbackChange,
-              changeFastMode: onFastModeChange,
+              changeSpeed: onSpeedChange,
               changeAccount: onAccountChange,
               changeOpen: onOpenChange,
             }}

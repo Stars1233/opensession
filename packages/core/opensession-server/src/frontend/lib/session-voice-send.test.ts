@@ -57,7 +57,7 @@ test("voice uses the existing durable queue without consuming the composer's dra
       runtime: {
         isBusy: true,
         effort: "high",
-        fastMode: true,
+        speed: "fast",
         pendingRef: { current: [] },
         setPending() {},
         dispatch() {},
@@ -81,6 +81,7 @@ test("voice uses the existing durable queue without consuming the composer's dra
         user: "Alice",
         effort: "high",
         fastMode: true,
+        speed: "fast",
         busyMode: "queue",
         transcriptAfterEntryId: null,
         transcriptAfterSeq: 3,

@@ -25,6 +25,27 @@ import type { AnsweredAskData, EntryNotice, NoticeKind } from "./notices";
 import type { ToolPresentation } from "./tool-presentation";
 
 /** The complete set of managed Executor providers. */
+/** Service speed for ChatGPT subscription runs. "fast" is OpenAI's priority
+ * tier; "ultrafast" is GPT-6 Astra only and needs a Pro $500 login. */
+export const SESSION_SPEEDS = ["standard", "fast", "ultrafast"] as const;
+export type SessionSpeed = (typeof SESSION_SPEEDS)[number];
+
+export function isSessionSpeed(value: unknown): value is SessionSpeed {
+  return (
+    typeof value === "string" &&
+    (SESSION_SPEEDS as readonly string[]).includes(value)
+  );
+}
+
+/** A session's speed. Records and clients from before `speed` existed carry
+ * only the `fastMode` boolean, which still means "fast". */
+export function sessionSpeed(value: {
+  speed?: SessionSpeed;
+  fastMode?: boolean;
+}): SessionSpeed {
+  return value.speed ?? (value.fastMode ? "fast" : "standard");
+}
+
 export const EXECUTOR_PROVIDERS = ["box", "daytona", "modal"] as const;
 export type ExecutorProvider = (typeof EXECUTOR_PROVIDERS)[number];
 
@@ -324,6 +345,8 @@ export type ProtocolClientMessage =
       /** Reasoning effort — persisted on the session and enforced per run. */
       effort?: "low" | "medium" | "high" | string;
       fastMode?: boolean;
+      /** Wins over fastMode. Clients that omit it send only the legacy boolean. */
+      speed?: SessionSpeed;
       /** Sibling-session ids whose transcripts ride along as context. */
       contextSessions?: string[];
       /** @deprecated Use contextSessions. */
@@ -340,6 +363,8 @@ export type ProtocolClientMessage =
       pastedTexts?: string[];
       effort?: "low" | "medium" | "high" | string;
       fastMode?: boolean;
+      /** Wins over fastMode. Clients that omit it send only the legacy boolean. */
+      speed?: SessionSpeed;
     }
   | {
       type: "delete_queued_prompt";
@@ -439,6 +464,8 @@ export type ProtocolClientMessage =
       autoFallback?: boolean;
       /** OpenAI priority service tier for the opening and later turns. */
       fastMode?: boolean;
+      /** Wins over fastMode. */
+      speed?: SessionSpeed;
       /** Start in pstack mode: the pstack skill family loads for every turn. */
       pstackMode?: boolean;
       /** Start the repository's first Portal once the workspace is ready. */

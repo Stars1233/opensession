@@ -1,3 +1,4 @@
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import React, {
   useCallback,
   useEffect,
@@ -460,7 +461,7 @@ export function NewSession({
     }
   }
   const [autoFallback, setAutoFallback] = useState(true);
-  const [fastMode, setFastMode] = useState(false);
+  const [speed, setSpeed] = useState<SessionSpeed>("standard");
   // Pstack mode: the pstack playbooks and skills load for every turn. Off by
   // default so an ordinary session never sees them.
   const [pstackMode, setPstackMode] = useState(false);
@@ -1138,9 +1139,11 @@ export function NewSession({
     // This assignment replaces `selectedPullRequest ? { fromPr: true } : {}`.
     if (selectedPullRequest) createMessage.fromPr = true;
     if (model) createMessage.model = model;
-    // This assignment replaces `...(fastMode ? { fastMode: true } : {})`.
     createMessage.autoFallback = autoFallback;
-    if (fastMode) createMessage.fastMode = true;
+    if (speed !== "standard") {
+      createMessage.fastMode = true;
+      createMessage.speed = speed;
+    }
     if (pstackMode) createMessage.pstackMode = true;
     if (repoPortal && startPortal) createMessage.startPortal = true;
     if (accountProvider && accountId) createMessage.accountId = accountId;
@@ -1959,7 +1962,7 @@ export function NewSession({
                   preferredDefaultModel,
                   effort,
                   autoFallback,
-                  fastMode,
+                  speed,
                   accounts,
                   accountId,
                 }}
@@ -1973,7 +1976,7 @@ export function NewSession({
                   setAsDefault: setPreferredDefaultModel,
                   changeEffort: setEffort,
                   changeAutoFallback: setAutoFallback,
-                  changeFastMode: setFastMode,
+                  changeSpeed: setSpeed,
                   changeAccount: setAccountId,
                 }}
               />

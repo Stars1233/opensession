@@ -4,6 +4,7 @@
  * agent-runner.resumeInterruptedRuns resumes on boot. All engines journal
  * through these functions.
  */
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import type { McpScope } from "./runner-shared";
 import type { RemoteWorkspaceSpec } from "@tellahq/opensession-protocol/runner";
 import { existsSync, readFileSync } from "fs";
@@ -92,6 +93,7 @@ export interface ActiveRunRecord {
   transientFallback?: boolean; // model must not replace selectedModel in session state
   effort?: string; // reasoning effort, preserved across resume
   fastMode?: boolean; // OpenAI priority service tier, preserved across resume
+  speed?: SessionSpeed; // unset falls back to fastMode; "ultrafast" needs GPT-6 Astra and a Pro $500 login
   pstackMode?: boolean; // pstack skill family visible to the model, preserved across resume
   accountId?: string; // pinned provider account, preserved across resume
   accountStrict?: boolean; // hard pin: never rotate into the pool (automation cost cap)

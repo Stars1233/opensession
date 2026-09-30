@@ -21,6 +21,7 @@ import { chmodSync, existsSync, readFileSync, readdirSync } from "fs";
 import { writeFileAtomic } from "./shared/atomic-write";
 import { stateDir } from "./paths";
 import { userMatchesAny } from "./shared/user-mappings";
+import { chatgptPlanFromJwt } from "./openai-service-tier";
 import {
   clearCodexUsage,
   codexUsageFor,
@@ -69,6 +70,8 @@ export interface CodexAccountPublic {
   name: string;
   /** ChatGPT identity read from the login's ID token. API-key accounts have none. */
   email?: string;
+  /** ChatGPT plan from the login ("pro", "promax" for Pro $500, ...). */
+  plan?: string;
   kind: "api_key" | "home";
   valueMasked: string;
   owner?: string;
@@ -165,28 +168,51 @@ function maskValue(account: CodexAccount): string {
 /** Read the signed-in ChatGPT identity without persisting another copy of it.
  * Existing accounts pick this up immediately, and token refreshes can replace
  * auth.json without leaving stale account metadata behind. */
-function emailFromAuthPath(path: string): string | undefined {
+/** The login's email and ChatGPT plan, from one read of auth.json. The plan
+ * prefers the access token, which a refresh reissues after a plan change. */
+function identityFromAuthPath(path: string): {
+  email?: string;
+  plan?: string;
+} {
   try {
-    const auth = JSON.parse(readFileSync(path, "utf-8"));
-    const token = auth?.tokens?.id_token;
-    if (typeof token !== "string") return undefined;
-    const payload = token.split(".")[1];
-    if (!payload) return undefined;
-    const claims = JSON.parse(
-      Buffer.from(payload, "base64url").toString("utf-8"),
-    );
-    return typeof claims?.email === "string" && claims.email.trim()
-      ? claims.email.trim()
+    const tokens = JSON.parse(readFileSync(path, "utf-8"))?.tokens;
+    const payload =
+      typeof tokens?.id_token === "string"
+        ? tokens.id_token.split(".")[1]
+        : undefined;
+    const id = payload
+      ? JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"))
       : undefined;
+    return {
+      email:
+        typeof id?.email === "string" && id.email.trim()
+          ? id.email.trim()
+          : undefined,
+      plan:
+        chatgptPlanFromJwt(tokens?.access_token) ??
+        chatgptPlanFromJwt(tokens?.id_token),
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
-function accountEmail(account: CodexAccount): string | undefined {
+function emailFromAuthPath(path: string): string | undefined {
+  return identityFromAuthPath(path).email;
+}
+
+/** ChatGPT plan of a subscription account ("promax" is Pro $500). */
+export function codexAccountPlan(account: CodexAccount): string | undefined {
+  return accountIdentity(account).plan;
+}
+
+function accountIdentity(account: CodexAccount): {
+  email?: string;
+  plan?: string;
+} {
   return account.kind === "home"
-    ? emailFromAuthPath(`${account.value}/auth.json`)
-    : undefined;
+    ? identityFromAuthPath(`${account.value}/auth.json`)
+    : {};
 }
 
 function exhaustionKey(id: string, model?: string): string {
@@ -212,10 +238,12 @@ function isExhausted(id: string, model?: string): boolean {
 
 function toPublic(a: CodexAccount): CodexAccountPublic {
   const until = exhaustedUntil.get(a.id);
+  const identity = accountIdentity(a);
   return {
     id: a.id,
     name: a.name,
-    email: accountEmail(a),
+    email: identity.email,
+    ...(identity.plan ? { plan: identity.plan } : {}),
     kind: a.kind,
     valueMasked: maskValue(a),
     owner: a.owner,

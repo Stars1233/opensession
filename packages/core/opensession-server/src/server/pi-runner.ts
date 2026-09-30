@@ -82,6 +82,12 @@ import {
   buildSeededOpenaiAuth,
   maskOpenaiAccount,
 } from "./openai-auth";
+import { sessionSpeed } from "@tellahq/opensession-protocol/session";
+import {
+  openaiServiceTier,
+  supportsOpenaiUltrafast,
+  ULTRAFAST_CHATGPT_PLAN,
+} from "./openai-service-tier";
 import {
   INTERACTIVE_KINDS,
   isUnattendedKind,
@@ -2234,6 +2240,8 @@ async function* runPiAttempt(
    *  API-key accounts are executable. A STRICT pin never rotates: excluding
    *  the pinned id would make the picker skip its pin branch and widen into
    *  the pool, which is the one thing a hard pin exists to prevent. */
+  // Runs journaled before `speed` existed carry only fastMode.
+  const speed = sessionSpeed(opts);
   const nextPoolAccount = (): PoolAccountRef | undefined => {
     if (!pickedAccount) return undefined;
     if (opts.accountStrict && opts.accountId) return undefined;
@@ -2249,6 +2257,9 @@ async function* runPiAttempt(
         opts.accountId,
         opts.accountStrict,
         excluded,
+        speed === "ultrafast" && supportsOpenaiUltrafast(parsed.modelID)
+          ? ULTRAFAST_CHATGPT_PLAN
+          : undefined,
       );
       return "error" in next ? undefined : codexPoolRef(next);
     }
@@ -2331,6 +2342,7 @@ async function* runPiAttempt(
           model,
           effort: opts.effort,
           fastMode: opts.fastMode,
+          speed: opts.speed,
           pstackMode: opts.pstackMode,
           accountId: opts.accountId,
           accountStrict: opts.accountStrict,
@@ -2443,6 +2455,7 @@ async function* runPiAttempt(
       accountId: opts.accountId,
       accountStrict: opts.accountStrict,
       usageCredits: opts.usageCredits,
+      speed,
       excludedOpenaiAccountIds: walk.excluded,
       onAccountEvidence: (evidence) => {
         pickedAccount = evidence.pickedOpenai
@@ -2999,8 +3012,28 @@ async function* runPiAttempt(
     // payload instead. Restrict this to seeded ChatGPT OAuth credentials: API
     // key accounts use ordinary OpenAI billing and are not the subscription
     // fast mode exposed by the clients.
-    if (opts.fastMode && binding.usesOpenaiOAuth) {
-      enableOpenaiFastMode(session.agent);
+    // Ultrafast additionally needs GPT-6 Astra and a Pro $500 login; any
+    // other account the picker had to fall back to still runs at Fast.
+    const serviceTier = binding.usesOpenaiOAuth
+      ? openaiServiceTier({
+          speed,
+          model: parsed.modelID,
+          plan: binding.openaiPlan,
+        })
+      : undefined;
+    if (serviceTier) {
+      enableOpenaiFastMode(session.agent, serviceTier);
+      if (speed === "ultrafast") {
+        audit({
+          msg: "openai_service_tier",
+          run_kind: journal?.kind,
+          session_id: journal?.osSessionId,
+          model: parsed.modelID,
+          service_tier: serviceTier,
+          plan: binding.openaiPlan,
+          engine: "pi",
+        });
+      }
     }
     // SuperGrok turns ride the cli-chat-proxy, which rejects several stock
     // Responses fields (xai-payload.ts). Same hook, no host extension.
@@ -3063,6 +3096,7 @@ async function* runPiAttempt(
           model,
           effort: opts.effort,
           fastMode: opts.fastMode,
+          speed: opts.speed,
           pstackMode: opts.pstackMode,
           accountId: opts.accountId,
           accountStrict: opts.accountStrict,

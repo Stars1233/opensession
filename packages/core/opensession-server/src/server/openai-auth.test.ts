@@ -40,4 +40,13 @@ describe("OpenAI auth", () => {
     });
     expect(payload).toEqual({ model: "gpt-5.6-sol", stream: true });
   });
+
+  test("sends the ultrafast service tier when asked", async () => {
+    const agent: { onPayload?: (payload: unknown) => unknown } = {};
+    enableOpenaiFastMode(agent, "ultrafast");
+    expect(await agent.onPayload!({ model: "gpt-6-astra" })).toEqual({
+      model: "gpt-6-astra",
+      service_tier: "ultrafast",
+    });
+  });
 });

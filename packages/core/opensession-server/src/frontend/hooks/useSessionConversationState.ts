@@ -1,3 +1,7 @@
+import {
+  sessionSpeed,
+  type SessionSpeed,
+} from "@tellahq/opensession-protocol/session";
 import { z } from "zod";
 import type { ComposerPrefill } from "../lib/composer-types";
 import {
@@ -592,7 +596,7 @@ function parsePromptOutboxFiles(
 
 interface SendComposerOptions {
   setEffort: (effort: string) => void;
-  setFastMode: (fast: boolean) => void;
+  setSpeed: (speed: SessionSpeed) => void;
   setPrefill: Dispatch<SetStateAction<ComposerPrefill | null>>;
   hasDraft: () => boolean;
   settersRef: ConversationActionRuntime["composerSettersRef"];
@@ -625,14 +629,8 @@ export function useSessionSendController({
   queue: SendQueueOptions;
   conversation: ConversationProjectionOptions;
 }) {
-  const {
-    setEffort,
-    setFastMode,
-    setPrefill,
-    hasDraft,
-    settersRef,
-    prefillRef,
-  } = composer;
+  const { setEffort, setSpeed, setPrefill, hasDraft, settersRef, prefillRef } =
+    composer;
   const stableSettersRef = useRef(settersRef);
   const stablePrefillRef = useRef(prefillRef);
   function handleSend(
@@ -660,7 +658,8 @@ export function useSessionSendController({
     message.draft.setFiles(files);
     message.draft.setContextSessions(item.contextSessions ?? []);
     if (item.effort) setEffort(item.effort);
-    if (item.fastMode !== undefined) setFastMode(item.fastMode);
+    if (item.speed !== undefined || item.fastMode !== undefined)
+      setSpeed(sessionSpeed(item));
     setPrefill((current) => {
       const prefill: ComposerPrefill = {
         seq: (current?.seq ?? 0) + 1,
@@ -772,7 +771,7 @@ interface HeaderActionModel {
   accountId: string;
   accounts: ProviderAccountOption[];
   setAccountId: Dispatch<SetStateAction<string>>;
-  setFastMode: Dispatch<SetStateAction<boolean>>;
+  setSpeed: Dispatch<SetStateAction<SessionSpeed>>;
   setGoalOverride: Dispatch<SetStateAction<string | null | undefined>>;
   setPstackOverride: Dispatch<SetStateAction<boolean | undefined>>;
 }
@@ -864,7 +863,10 @@ export function useSessionHeaderActions({
     const target = next
       ? model.accounts.find((account) => account.id === next)
       : null;
-    if (target?.kind === "api_key") model.setFastMode(false);
+    if (target?.kind === "api_key") model.setSpeed("standard");
+    // Only a Pro $500 login serves Ultrafast; another pin keeps Fast.
+    else if (target && target.plan !== "promax")
+      model.setSpeed((current) => (current === "ultrafast" ? "fast" : current));
     runtime.send({
       type: "prompt",
       sessionId: identity.session.id,

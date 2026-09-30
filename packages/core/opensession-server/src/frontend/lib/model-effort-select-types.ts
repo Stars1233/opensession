@@ -1,3 +1,4 @@
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import type { ModelOption, ProviderAccountOption } from "./api";
 import type { SessionUsage } from "./types";
 
@@ -14,7 +15,7 @@ export interface ModelEffortSelection {
   /** When effort isn't wired, the menu is just the model list. */
   effort?: string;
   autoFallback?: boolean;
-  fastMode?: boolean;
+  speed?: SessionSpeed;
   /**
    * Pinnable provider accounts. The menu filters these to the active model's
    * Claude or Codex pool; "" = auto (personal-first, pool fallback).
@@ -44,7 +45,7 @@ export interface ModelEffortActions {
   setAsDefault?: (model: string) => void;
   changeEffort?: (effort: string) => void;
   changeAutoFallback?: (enabled: boolean) => void;
-  changeFastMode?: (fastMode: boolean) => void;
+  changeSpeed?: (speed: SessionSpeed) => void;
   changeAccount?: (accountId: string) => void;
   /** Fires as the menu opens/closes. The phone composer needs it: the popup
    * takes focus (blurring the textarea), and the composer must stay expanded

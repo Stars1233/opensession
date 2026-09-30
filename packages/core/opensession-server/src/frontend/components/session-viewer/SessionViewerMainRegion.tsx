@@ -607,8 +607,8 @@ export function SessionViewerMainRegion({
   const {
     effort,
     setEffort,
-    fastMode,
-    setFastMode,
+    speed,
+    setSpeed,
     autoFallback,
     changeAutoFallback,
   } = runPreferences;
@@ -1384,7 +1384,7 @@ export function SessionViewerMainRegion({
                         : "Set the model from the owning agent (its session file is agent-owned)",
                     effort,
                     autoFallback,
-                    fastMode,
+                    speed,
                     // Account pinning is a backstage-session affordance. The
                     // picker filters the combined pool by the active model.
                     accounts:
@@ -1413,7 +1413,7 @@ export function SessionViewerMainRegion({
                     onModelChange: handleModelChange,
                     onEffortChange: setEffort,
                     onAutoFallbackChange: changeAutoFallback,
-                    onFastModeChange: setFastMode,
+                    onSpeedChange: setSpeed,
                     onAccountChange:
                       session.source === "opensession"
                         ? handleAccountChange

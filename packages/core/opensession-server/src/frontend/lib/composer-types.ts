@@ -1,3 +1,4 @@
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import type { RefObject } from "react";
 import type { FileMention, ModelOption, ProviderAccountOption } from "./api";
 import type { StagingCount } from "./attachments";
@@ -51,7 +52,7 @@ export interface ComposerConfig {
    */
   effort?: string;
   autoFallback?: boolean;
-  fastMode?: boolean;
+  speed?: SessionSpeed;
   /** Pinnable provider accounts plus the current pin for the model pill's
    * account submenu. Empty or omitted hides it. */
   accounts?: ProviderAccountOption[];
@@ -150,7 +151,7 @@ export interface ComposerActions {
   onModelChange: (model: string) => void;
   onEffortChange?: (effort: string) => void;
   onAutoFallbackChange?: (enabled: boolean) => void;
-  onFastModeChange?: (fastMode: boolean) => void;
+  onSpeedChange?: (speed: SessionSpeed) => void;
   onAccountChange?: (accountId: string) => void;
   /** Sets or clears the session goal from the inline target control. */
   onSetGoal?: (goal: string | null) => void;

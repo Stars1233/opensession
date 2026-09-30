@@ -36,7 +36,10 @@ import {
 import { type Sandbox } from "../sandbox";
 import { suggestBranchName } from "../suggest-branch";
 import { MAX_AUDIO_BYTES, transcribeAudio } from "../transcribe";
-import { supportsOpenaiFastMode } from "../openai-auth";
+import {
+  supportsOpenaiFastMode,
+  supportsOpenaiUltrafast,
+} from "../openai-service-tier";
 import { getWorkspace, workspaceModelSettings } from "../workspaces";
 
 const availableEngines = () => [
@@ -182,6 +185,7 @@ export async function handleModelsRoutes(
       efforts: modelEfforts(model.id, providers),
       accountProvider: accountProviderForModel(model.id),
       fastModeSupported: supportsOpenaiFastMode(toPiModel(model.id)),
+      ultrafastSupported: supportsOpenaiUltrafast(toPiModel(model.id)),
     }));
     const routedDefault = pickerModelId(interactiveDefault);
     const catalogDefault = catalogModels.some(

@@ -26,6 +26,8 @@ export interface ModelOption {
   composition?: string[];
   /** This model has subscription-backend priority-tier variants configured. */
   fastModeSupported?: boolean;
+  /** GPT-6 Astra: the ChatGPT backend also serves the ultrafast tier. */
+  ultrafastSupported?: boolean;
 }
 
 type ModelCatalog = { models: ModelOption[]; default: string };
@@ -95,6 +97,8 @@ export interface ProviderAccountOption {
   usable: boolean;
   /** Credential mechanism; Fast mode is unavailable for direct API keys. */
   kind?: string;
+  /** ChatGPT plan of a Codex login; "promax" (Pro $500) serves Ultrafast. */
+  plan?: string;
   /** The limits the account last reported, for the model menu's weekly
    * overview. Absent when usage is unknown. */
   limits?: AccountLimit[];
@@ -107,6 +111,7 @@ const providerAccountRecordSchema = z.object({
   owner: z.string().optional(),
   usable: z.boolean().optional(),
   kind: z.string().optional(),
+  plan: z.string().optional(),
   usage: accountUsageSchema,
 });
 
@@ -135,6 +140,7 @@ export async function fetchProviderAccounts(options?: {
           usable: account.usable !== false,
           kind: account.kind,
         };
+        if (account.plan) option.plan = account.plan;
         const limits = accountLimitsFromUsage(provider, account.usage);
         if (limits.length > 0) option.limits = limits;
         return option;

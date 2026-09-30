@@ -1,3 +1,7 @@
+import {
+  SESSION_SPEEDS,
+  type SessionSpeed,
+} from "@tellahq/opensession-protocol/session";
 import { z } from "zod";
 import { deliverSessionPrompt, type PromptDelivery } from "./api/sessions";
 import { BASE } from "./api/request";
@@ -17,6 +21,7 @@ export interface PromptOutboxItem {
   pastedTexts?: string[];
   effort?: string;
   fastMode?: boolean;
+  speed?: SessionSpeed;
   busyMode?: "queue" | "steer";
   contextSessions?: string[];
   user?: string;
@@ -46,6 +51,7 @@ const promptOutboxItemSchema: z.ZodType<PromptOutboxItem> = z.looseObject({
   files: z.array(z.unknown()).optional(),
   effort: z.string().optional(),
   fastMode: z.boolean().optional(),
+  speed: z.enum(SESSION_SPEEDS).optional(),
   busyMode: z.enum(["queue", "steer"]).optional(),
   contextSessions: z.array(z.string()).optional(),
   user: z.string().optional(),

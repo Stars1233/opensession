@@ -1139,6 +1139,7 @@ export function nativeSessionRow(data: NativeSessionFile): UnifiedSession {
     effort: data.effort,
     autoFallback: data.autoFallback,
     fastMode: data.fastMode,
+    speed: data.speed,
     pstackMode: data.pstackMode,
     accountId: data.accountId,
     codexThreadId: data.codexThreadId,

@@ -15,7 +15,7 @@ test("the top-level model menu exposes three recent choices with their settings"
     source.indexOf("// Engine stays sticky"),
   );
   expect(recentSettings).toContain("nextModelInfo?.fastModeSupported === true");
-  expect(recentSettings).toContain('? "Fast"');
+  expect(recentSettings).toContain("? SPEED_LABELS[");
   expect(recentSettings).not.toContain('"Standard"');
   expect(recentSettings).toContain(
     "EFFORTS.find((e) => e.id === nextEffort)?.label",

@@ -1,3 +1,4 @@
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { getCurrentUser } from "../components/UserPicker";
 import type { SessionSocketSend } from "../hooks/useSessionSocket";
@@ -46,7 +47,7 @@ interface SendDraft {
 interface SendRuntime {
   isBusy: boolean;
   effort: string;
-  fastMode: boolean;
+  speed: SessionSpeed;
   pendingRef: MutableRefObject<OptimisticPendingPrompt[]>;
   setPending: Dispatch<SetStateAction<OptimisticPendingPrompt[]>>;
   dispatch: Dispatch<SessionRuntimeAction>;
@@ -208,7 +209,9 @@ export function sendSessionMessage(
       content: text,
       user,
       effort: runtime.effort,
-      fastMode: runtime.fastMode,
+      // fastMode keeps older servers and the outbox's legacy readers working.
+      fastMode: runtime.speed !== "standard",
+      speed: runtime.speed,
       busyMode: runtime.isBusy ? (steerNow ? "steer" : "queue") : undefined,
       transcriptAfterEntryId,
       transcriptAfterSeq,

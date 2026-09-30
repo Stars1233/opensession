@@ -573,8 +573,10 @@ export interface UnifiedSession {
   effort?: string;
   /** Allow automatic model switching when the selected model is unavailable. Defaults to true. */
   autoFallback?: boolean;
-  /** OpenAI priority service tier for ChatGPT OAuth Codex runs. */
+  /** Legacy mirror of speed !== "standard"; older records carry only this. */
   fastMode?: boolean;
+  /** ChatGPT subscription speed; read it through sessionSpeed(). */
+  speed?: "fast" | "ultrafast";
   /** Pstack mode: the pstack skill family loads for this session's runs. */
   pstackMode?: boolean;
   /** Pinned account in the active model provider's pool; unset = auto. */

@@ -396,6 +396,7 @@ export function createWorkflowSessionController(
         model: parent.model,
         effort: parent.effort,
         fastMode: parent.fastMode,
+        speed: parent.speed,
         accountId: parent.accountId,
         mcpServers: inheritedMcp,
         runner: input.runner,

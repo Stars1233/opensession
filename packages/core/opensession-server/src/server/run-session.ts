@@ -2237,6 +2237,7 @@ export async function maybeLaunchSandboxedRun(
         : interactiveFallbackModel(session.model, session.autoFallback),
       effort: session.effort,
       fastMode: session.fastMode,
+      speed: session.speed,
       pstackMode: session.pstackMode,
       // A disposable automation resume carries the automation's hard pin for
       // its own turns; a person's takeover turn carries none (runAccountSpec).
@@ -3337,6 +3338,7 @@ async function runSessionPromptInner(
           ),
           effort: session.effort,
           fastMode: session.fastMode,
+          speed: session.speed,
           pstackMode: session.pstackMode,
           // Session pin, except for a person's turn in an automation-owned
           // session: they pay personal-first with the pool as backup.
@@ -3382,6 +3384,7 @@ async function runSessionPromptInner(
       // Reasoning effort from the composer pill, persisted on the session.
       effort: session.effort,
       fastMode: session.fastMode,
+      speed: session.speed,
       pstackMode: session.pstackMode,
       // Pinned subscription for this session (claude-runner prefers it, pool
       // fallback on exhaustion). Ignored by Codex models. A person's turn in

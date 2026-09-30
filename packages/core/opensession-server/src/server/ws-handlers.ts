@@ -96,7 +96,7 @@ import {
   findSessionAsync,
   publishSessionChange,
   maybePersistEffort,
-  maybePersistFastMode,
+  maybePersistSpeed,
 } from "./session-cache";
 import {
   mergedSessionTranscript,
@@ -1375,7 +1375,7 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
           // The composer's effort pill rides every send; persist a change so
           // this and future runs (queue drains, resumes) honor it.
           maybePersistEffort(session, msg.effort);
-          maybePersistFastMode(session, msg.fastMode);
+          maybePersistSpeed(session, msg.speed, msg.fastMode);
 
           // Slash commands are handled by opensession itself
           const notice = await handleSlashCommand(
@@ -1594,7 +1594,7 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
           }
           await unarchiveForHumanTurn(session);
           maybePersistEffort(session, msg.effort);
-          maybePersistFastMode(session, msg.fastMode);
+          maybePersistSpeed(session, msg.speed, msg.fastMode);
           await liftUserStop(sessionId);
           await enqueuePrompt(sessionId, {
             id: msg.requestId,

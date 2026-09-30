@@ -26,6 +26,7 @@
  * into the gateway control-plane cgroup; old hosts finish normally.
  */
 
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import type { McpScope } from "./runner-shared";
 import { audit } from "./audit";
 import {
@@ -261,6 +262,7 @@ export interface HostedRunOpts {
    *  matching RunHostSpec fields). */
   effort?: string;
   fastMode?: boolean;
+  speed?: SessionSpeed; // unset falls back to fastMode; "ultrafast" needs GPT-6 Astra and a Pro $500 login
   pstackMode?: boolean;
   accountId?: string;
   accountStrict?: boolean;
@@ -507,6 +509,7 @@ async function* runAgentInProcess(
       accountAffinityKey: opts.accountAffinityKey,
       effort: opts.effort,
       fastMode: opts.fastMode,
+      speed: opts.speed,
       pstackMode: opts.pstackMode,
       accountId: opts.accountId,
       accountStrict: opts.accountStrict,
@@ -647,6 +650,7 @@ function hostedRunRecord(spec: RunHostSpec): ActiveRunRecord {
     transientFallback: spec.transientFallback,
     effort: spec.effort,
     fastMode: spec.fastMode,
+    speed: spec.speed,
     pstackMode: spec.pstackMode,
     accountId: spec.accountId,
     accountStrict: spec.accountStrict,
@@ -723,6 +727,7 @@ async function spawnHostRun(
     accountAffinityKey: opts.accountAffinityKey,
     effort: opts.effort,
     fastMode: opts.fastMode,
+    speed: opts.speed,
     pstackMode: opts.pstackMode,
     accountId: opts.accountId,
     accountStrict: opts.accountStrict,

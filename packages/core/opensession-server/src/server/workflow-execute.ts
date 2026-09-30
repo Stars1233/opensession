@@ -559,6 +559,7 @@ function detachedWorkflowRunner(
       accountAffinityKey: opts.accountAffinityKey,
       effort: opts.effort,
       fastMode: opts.fastMode,
+      speed: opts.speed,
       accountId: opts.accountId,
       accountStrict: opts.accountStrict,
       usageCredits: opts.usageCredits,

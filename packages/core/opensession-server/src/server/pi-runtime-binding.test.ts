@@ -168,6 +168,37 @@ describe("createPiRuntimeBinding", () => {
     });
   });
 
+  test("asks for a Pro $500 account on ultrafast Astra turns and reports the login's plan", async () => {
+    const plans: Array<string | undefined> = [];
+    const access = `h.${Buffer.from(
+      JSON.stringify({
+        "https://api.openai.com/auth": { chatgpt_plan_type: "promax" },
+      }),
+    ).toString("base64url")}.s`;
+    const bind = async (modelID: string, speed: "fast" | "ultrafast") => {
+      const h = harness({ account: oauth });
+      h.deps.pickOpenaiAccount = ((...args: any[]) => {
+        plans.push(args[8]);
+        return oauth;
+      }) as any;
+      h.deps.buildSeededOpenaiAuth = () => ({
+        seeded: {
+          openai: {
+            type: "oauth" as const,
+            access,
+            refresh: "no-refresh",
+            expires: 2_000_000,
+          },
+        },
+      });
+      return createPiRuntimeBinding(input("openai", modelID, h, { speed }));
+    };
+    expect((await bind("gpt-6-astra", "ultrafast")).openaiPlan).toBe("promax");
+    await bind("gpt-6.1-sol", "ultrafast");
+    await bind("gpt-6-astra", "fast");
+    expect(plans).toEqual(["promax", undefined, undefined]);
+  });
+
   test("binds an OpenAI API key to the standard provider without credential seeding", async () => {
     const h = harness({ account: apiKey });
     const binding = await createPiRuntimeBinding(

@@ -1,3 +1,4 @@
+import { SESSION_SPEEDS } from "@tellahq/opensession-protocol/session";
 import { z } from "zod";
 import type { WSClientMessage } from "./types";
 
@@ -46,6 +47,7 @@ const mutationMessageSchema = z.discriminatedUnion("type", [
       busyMode: z.enum(["queue", "steer"]).optional(),
       effort: z.string().optional(),
       fastMode: z.boolean().optional(),
+      speed: z.enum(SESSION_SPEEDS).optional(),
       contextSessions: z.array(z.string()).optional(),
       contextChats: z.array(z.string()).optional(),
     })
@@ -60,6 +62,7 @@ const mutationMessageSchema = z.discriminatedUnion("type", [
       files: jsonValueSchema.optional(),
       effort: z.string().optional(),
       fastMode: z.boolean().optional(),
+      speed: z.enum(SESSION_SPEEDS).optional(),
     })
     .catchall(jsonValueSchema),
   z
@@ -151,6 +154,7 @@ const mutationMessageSchema = z.discriminatedUnion("type", [
         .optional(),
       autoFallback: z.boolean().optional(),
       fastMode: z.boolean().optional(),
+      speed: z.enum(SESSION_SPEEDS).optional(),
       pstackMode: z.boolean().optional(),
       accountId: z.string().optional(),
       forkFrom: z

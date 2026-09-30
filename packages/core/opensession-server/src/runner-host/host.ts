@@ -603,6 +603,7 @@ try {
     accountAffinityKey: spec.accountAffinityKey,
     effort: spec.effort,
     fastMode: spec.fastMode,
+    speed: spec.speed,
     accountId: spec.accountId,
     accountStrict: spec.accountStrict,
     usageCredits: spec.usageCredits,

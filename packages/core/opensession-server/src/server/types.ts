@@ -22,7 +22,10 @@ export interface ExternalRef {
  */
 // Moved to the protocol package; re-exported for existing import sites.
 export type { SessionUsage } from "@tellahq/opensession-protocol/session";
-import type { SessionUsage } from "@tellahq/opensession-protocol/session";
+import type {
+  SessionSpeed,
+  SessionUsage,
+} from "@tellahq/opensession-protocol/session";
 
 /**
  * What the last automated (os-review) run concluded about a PR, as the UI needs
@@ -234,6 +237,7 @@ export interface UnifiedSession {
   autoFallback?: boolean;
   /** Use OpenAI's priority service tier for ChatGPT OAuth Codex runs. */
   fastMode?: boolean;
+  speed?: SessionSpeed; // unset falls back to fastMode; "ultrafast" needs GPT-6 Astra and a Pro $500 login
   /**
    * Pinned provider account for runs in this session. The id belongs to the
    * active model's Claude or Codex pool. Unset = auto (personal-first, shared
@@ -657,6 +661,7 @@ export interface NativeSessionFile {
   /** Allow automatic model switching when the selected model is unavailable. Defaults to true. */
   autoFallback?: boolean;
   fastMode?: boolean; // OpenAI priority service tier for ChatGPT OAuth Codex runs
+  speed?: SessionSpeed; // unset falls back to fastMode; "ultrafast" needs GPT-6 Astra and a Pro $500 login
   accountId?: string; // pinned Claude/Codex provider account; unset = auto pool
   codexThreadId?: string; // codex thread id once the session has run on a codex model
   piSessionId?: string; // pi engine session id (uuid) once the session has run on a pi/* model

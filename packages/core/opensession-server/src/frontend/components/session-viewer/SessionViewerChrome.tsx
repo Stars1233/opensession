@@ -415,8 +415,8 @@ export function SessionViewerChrome({
   const {
     effort,
     setEffort,
-    fastMode,
-    setFastMode,
+    speed,
+    setSpeed,
     autoFallback,
     changeAutoFallback,
   } = runPreferences;
@@ -1355,8 +1355,8 @@ export function SessionViewerChrome({
                                 onEffortChange={setEffort}
                                 autoFallback={autoFallback}
                                 onAutoFallbackChange={changeAutoFallback}
-                                fastMode={fastMode}
-                                onFastModeChange={setFastMode}
+                                speed={speed}
+                                onSpeedChange={setSpeed}
                                 accounts={accounts}
                                 accountId={accountId}
                                 onAccountChange={handleAccountChange}

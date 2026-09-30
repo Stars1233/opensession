@@ -18,6 +18,7 @@ import { cn } from "../ui/cn";
 import { Tooltip } from "../ui/tooltip";
 import {
   IconBolt,
+  IconRocket,
   IconChevronRight,
   IconPeople,
   IconSparkle,
@@ -30,6 +31,16 @@ import { useCurrentUser } from "./UserPicker";
 import { useNavigation } from "../hooks/useNavigation";
 import { usePeople } from "../lib/people";
 import type { ModelEffortSelectProps } from "../lib/model-effort-select-types";
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
+
+/** ChatGPT plan with Ultrafast access (Pro $500). */
+const ULTRAFAST_PLAN = "promax";
+
+const SPEED_LABELS: Record<SessionSpeed, string> = {
+  standard: "Standard",
+  fast: "Fast",
+  ultrafast: "Ultrafast",
+};
 import {
   weeklyRemainingReadout,
   weeklyRemainingRows,
@@ -358,7 +369,7 @@ export function ModelEffortSelect({
     modelTitle,
     effort,
     autoFallback = true,
-    fastMode,
+    speed,
     accounts,
     accountId,
     usage,
@@ -376,7 +387,7 @@ export function ModelEffortSelect({
     setAsDefault: onSetAsDefault,
     changeEffort: onEffortChange,
     changeAutoFallback: onAutoFallbackChange,
-    changeFastMode: onFastModeChange,
+    changeSpeed: onSpeedChange,
     changeAccount: onAccountChange,
     changeOpen: onOpenChange,
   } = actions;
@@ -451,14 +462,29 @@ export function ModelEffortSelect({
     modelInfo?.fastModeSupported === true &&
     currentAccount?.kind !== "api_key" &&
     !!(currentAccount || subscriptionAccount);
-  const hasFastMode = !!onFastModeChange;
-  const effectiveFastMode = fastModeAvailable && !!fastMode;
-  const speedOptions = fastModeAvailable
-    ? [
-        { fast: false, label: "Standard" },
-        { fast: true, label: "Fast" },
-      ]
-    : [{ fast: false, label: "Standard" }];
+  // Ultrafast is GPT-6 Astra on a Pro $500 login: the pinned account, or on
+  // auto any usable one, which the server routes ultrafast turns to.
+  const ultrafastAccount = providerAccounts.find(
+    (a) => a.plan === ULTRAFAST_PLAN && a.kind !== "api_key" && a.usable,
+  );
+  const ultrafastAvailable =
+    fastModeAvailable &&
+    modelInfo?.ultrafastSupported === true &&
+    (currentAccount
+      ? currentAccount.plan === ULTRAFAST_PLAN
+      : !!ultrafastAccount);
+  const hasSpeed = !!onSpeedChange;
+  const effectiveSpeed: SessionSpeed =
+    speed === "ultrafast" && ultrafastAvailable
+      ? "ultrafast"
+      : speed && speed !== "standard" && fastModeAvailable
+        ? "fast"
+        : "standard";
+  const speedOptions: SessionSpeed[] = [
+    "standard",
+    ...(fastModeAvailable ? (["fast"] as const) : []),
+    ...(ultrafastAvailable ? (["ultrafast"] as const) : []),
+  ];
   const accountLabel = currentAccount
     ? providerAccountLabel(currentAccount)
     : "Auto";
@@ -516,14 +542,14 @@ export function ModelEffortSelect({
   const atDefault =
     (modelDisabled || model === "" || model === defaultModel) &&
     (!hasEffort || !defaultEffort || effectiveEffort === defaultEffort) &&
-    (!hasFastMode || !effectiveFastMode) &&
+    (!hasSpeed || effectiveSpeed === "standard") &&
     (!hasAccount || !accountId) &&
     (!onAutoFallbackChange || autoFallback);
   const resetToDefault = () => {
     if (!modelDisabled) onModelChange("");
     if (onEffortChange && defaultEffort) onEffortChange(defaultEffort);
     onAutoFallbackChange?.(true);
-    if (onFastModeChange) onFastModeChange(false);
+    if (onSpeedChange) onSpeedChange("standard");
     if (onAccountChange) onAccountChange("");
   };
 
@@ -704,10 +730,15 @@ export function ModelEffortSelect({
           : nextEfforts[0]);
     const recentSettings = standalone
       ? [
-          onFastModeChange &&
-          effectiveFastMode &&
+          onSpeedChange &&
+          effectiveSpeed !== "standard" &&
           nextModelInfo?.fastModeSupported === true
-            ? "Fast"
+            ? SPEED_LABELS[
+                effectiveSpeed === "ultrafast" &&
+                nextModelInfo.ultrafastSupported === true
+                  ? "ultrafast"
+                  : "fast"
+              ]
             : undefined,
           onEffortChange
             ? EFFORTS.find((e) => e.id === nextEffort)?.label
@@ -733,8 +764,17 @@ export function ModelEffortSelect({
           ) {
             onEffortChange(nextEffort);
           }
-          if (onFastModeChange && nextModelInfo?.fastModeSupported !== true) {
-            onFastModeChange(false);
+          // Ultrafast exists only on GPT-6 Astra; other models keep Fast
+          // where they have it.
+          if (onSpeedChange && speed && speed !== "standard") {
+            if (nextModelInfo?.fastModeSupported !== true) {
+              onSpeedChange("standard");
+            } else if (
+              speed === "ultrafast" &&
+              nextModelInfo.ultrafastSupported !== true
+            ) {
+              onSpeedChange("fast");
+            }
           }
         }}
         disabled={disabled}
@@ -820,7 +860,7 @@ export function ModelEffortSelect({
         title={title}
         disabled={
           disabled ||
-          (!!modelDisabled && !hasEffort && !hasFastMode && !hasAccount)
+          (!!modelDisabled && !hasEffort && !hasSpeed && !hasAccount)
         }
         aria-label={
           hasAccount
@@ -850,10 +890,16 @@ export function ModelEffortSelect({
             {/* `data-effort` is a styling hook for the caller, not state: the
 						    new-session footer hides the suffix on ultra-narrow screens so the
 						    model name keeps the room, and the composer toolbar does not. */}
-            {hasFastMode && effectiveFastMode && (
+            {hasSpeed && effectiveSpeed === "fast" && (
               <>
                 <IconBolt className="flex-none text-faint" size={20} />
                 <span className="sr-only">Fast mode</span>
+              </>
+            )}
+            {hasSpeed && effectiveSpeed === "ultrafast" && (
+              <>
+                <IconRocket className="flex-none text-faint" size={20} />
+                <span className="sr-only">Ultrafast mode</span>
               </>
             )}
             <span className="truncate">{modelLabel}</span>
@@ -1098,35 +1144,40 @@ export function ModelEffortSelect({
             </Menu.Popup>
           </Menu.SubmenuRoot>
         )}
-        {hasFastMode && (
+        {hasSpeed && (
           <Menu.SubmenuRoot>
             <Menu.SubmenuTrigger className="justify-between gap-3">
               <span className="min-w-0 truncate">Speed</span>
               <span className="flex flex-none items-center gap-1 text-dim">
-                {effectiveFastMode ? "Fast" : "Standard"}
+                {SPEED_LABELS[effectiveSpeed]}
                 <IconChevronRight className="shrink-0 text-dim" size={17} />
               </span>
             </Menu.SubmenuTrigger>
             <Menu.Popup className="max-w-[min(360px,calc(100vw-1rem))]">
               {speedOptions.map((o) => {
-                const selected = effectiveFastMode === o.fast;
+                const selected = effectiveSpeed === o;
                 return (
                   <Menu.Item
-                    key={o.label}
+                    key={o}
                     onClick={() => {
-                      // Fast mode runs on a subscription account, so picking it
-                      // while on auto pins the one it will actually use.
-                      if (o.fast && !currentAccount && subscriptionAccount) {
-                        onAccountChange?.(subscriptionAccount.id);
+                      // Faster tiers run on a subscription account, so picking
+                      // one while on auto pins the account it will actually
+                      // use: a Pro $500 login for Ultrafast.
+                      const pin =
+                        o === "ultrafast"
+                          ? ultrafastAccount
+                          : subscriptionAccount;
+                      if (o !== "standard" && !currentAccount && pin) {
+                        onAccountChange?.(pin.id);
                       }
-                      onFastModeChange!(o.fast);
+                      onSpeedChange!(o);
                     }}
                     className={cn(
                       "justify-between gap-3",
                       selected && "bg-hover",
                     )}
                   >
-                    <span className="min-w-0 truncate">{o.label}</span>
+                    <span className="min-w-0 truncate">{SPEED_LABELS[o]}</span>
                     <Menu.Check on={selected} className="text-dim" />
                   </Menu.Item>
                 );

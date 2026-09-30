@@ -1,3 +1,4 @@
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import { ApiError, BASE, request } from "./request";
 import type { SessionNote, TranscriptEntry, UnifiedSession } from "../types";
 import { resolveAnonymousUserPath } from "../auth-ready";
@@ -91,6 +92,7 @@ export async function deliverSessionPrompt(
     pastedTexts?: string[];
     effort?: string;
     fastMode?: boolean;
+    speed?: SessionSpeed;
     busyMode?: "queue" | "steer";
     contextSessions?: string[];
     user?: string;

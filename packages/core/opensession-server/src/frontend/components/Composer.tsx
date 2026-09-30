@@ -192,7 +192,7 @@ export function Composer({
     modelTitle,
     effort,
     autoFallback,
-    fastMode,
+    speed,
     accounts,
     accountId,
     goal,
@@ -218,7 +218,7 @@ export function Composer({
     onModelChange,
     onEffortChange,
     onAutoFallbackChange,
-    onFastModeChange,
+    onSpeedChange,
     onAccountChange,
     onSetGoal,
     onPstackModeChange,
@@ -1771,8 +1771,8 @@ export function Composer({
             onEffortChange={onEffortChange}
             autoFallback={autoFallback}
             onAutoFallbackChange={onAutoFallbackChange}
-            fastMode={fastMode}
-            onFastModeChange={onFastModeChange}
+            speed={speed}
+            onSpeedChange={onSpeedChange}
             accounts={accounts}
             accountId={accountId}
             onAccountChange={onAccountChange}

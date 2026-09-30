@@ -4,6 +4,11 @@
  * in opensession.ts now calls invalidateSessionsCache().
  */
 
+import {
+  isSessionSpeed,
+  sessionSpeed,
+  type SessionSpeed,
+} from "@tellahq/opensession-protocol/session";
 import { readFile } from "fs/promises";
 import { OPENSESSION_SESSIONS_DIR } from "./paths";
 import {
@@ -1504,20 +1509,43 @@ export function maybePersistEffort(
   session.effort = e; // keep the in-hand snapshot current for this turn
 }
 
-/** Persist a composer-sent OpenAI priority-tier change on a opensession session. */
-export function maybePersistFastMode(
+/** Session-file fields for a speed. `fastMode` stays as a mirror for
+ * clients and records that predate `speed`. */
+export function speedFields(speed: SessionSpeed): {
+  speed?: SessionSpeed;
+  fastMode?: boolean;
+} {
+  return speed === "standard"
+    ? { speed: undefined, fastMode: false }
+    : { speed, fastMode: true };
+}
+
+/** The speed a client asked for. `speed` wins; a client that only knows the
+ * `fastMode` boolean turns Fast off, or on without downgrading Ultrafast. */
+export function requestedSpeed(
+  speed: unknown,
+  fastMode: unknown,
+  current: SessionSpeed = "standard",
+): SessionSpeed | undefined {
+  if (isSessionSpeed(speed)) return speed;
+  if (typeof fastMode !== "boolean") return undefined;
+  if (!fastMode) return "standard";
+  return current === "standard" ? "fast" : current;
+}
+
+/** Persist a composer-sent speed change on a opensession session. */
+export function maybePersistSpeed(
   session: UnifiedSession | undefined,
-  fastMode?: boolean,
+  speed: unknown,
+  fastMode: unknown,
 ): void {
-  if (
-    !session ||
-    session.source !== "opensession" ||
-    typeof fastMode !== "boolean" ||
-    session.fastMode === fastMode
-  )
-    return;
-  touchNativeSession(session.id, { fastMode });
-  session.fastMode = fastMode;
+  if (!session || session.source !== "opensession") return;
+  const current = sessionSpeed(session);
+  const next = requestedSpeed(speed, fastMode, current);
+  if (!next || next === current) return;
+  const fields = speedFields(next);
+  touchNativeSession(session.id, fields);
+  Object.assign(session, fields);
 }
 
 // Sessions whose LAST run died on a terminal failure (usage limits exhausted on

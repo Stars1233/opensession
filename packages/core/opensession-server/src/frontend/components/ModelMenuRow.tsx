@@ -1,3 +1,4 @@
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import type { ModelOption, ProviderAccountOption } from "../lib/api";
 import { useDefaultModelPreference } from "../hooks/useDefaultModelPreference";
 import type { SessionUsage } from "../lib/types";
@@ -18,8 +19,8 @@ export function ModelMenuRow({
   onEffortChange,
   autoFallback,
   onAutoFallbackChange,
-  fastMode,
-  onFastModeChange,
+  speed,
+  onSpeedChange,
   accounts,
   accountId,
   onAccountChange,
@@ -37,8 +38,8 @@ export function ModelMenuRow({
   onEffortChange: (effort: string) => void;
   autoFallback?: boolean;
   onAutoFallbackChange?: (enabled: boolean) => void;
-  fastMode: boolean;
-  onFastModeChange: (fastMode: boolean) => void;
+  speed: SessionSpeed;
+  onSpeedChange: (speed: SessionSpeed) => void;
   accounts: ProviderAccountOption[];
   accountId: string;
   onAccountChange: (accountId: string) => void;
@@ -57,7 +58,7 @@ export function ModelMenuRow({
         preferredDefaultModel,
         effort,
         autoFallback,
-        fastMode,
+        speed,
         accounts,
         accountId,
         usage,
@@ -73,7 +74,7 @@ export function ModelMenuRow({
         setAsDefault: setPreferredDefaultModel,
         changeEffort: onEffortChange,
         changeAutoFallback: onAutoFallbackChange,
-        changeFastMode: onFastModeChange,
+        changeSpeed: onSpeedChange,
         changeAccount: onAccountChange,
       }}
     />

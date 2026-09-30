@@ -1,6 +1,7 @@
 /** ChatGPT subscription account selection and Pi credential seeding. */
 import { existsSync, readFileSync } from "fs";
 import {
+  codexAccountPlan,
   getCodexAccountById,
   getUsableCodexAccountById,
   pickCodexAccount,
@@ -8,6 +9,12 @@ import {
   type CodexAccount,
 } from "./codex-accounts";
 import { userMatchesAny } from "./shared/user-mappings";
+import type { OpenaiServiceTier } from "./openai-service-tier";
+
+export {
+  supportsOpenaiFastMode,
+  supportsOpenaiUltrafast,
+} from "./openai-service-tier";
 
 function jwtExpMs(jwt: string): number | null {
   try {
@@ -35,12 +42,33 @@ export function pickOpenaiAccount(
   pinnedId?: string,
   strict?: boolean,
   exclude?: ReadonlySet<string>,
+  preferPlan?: string,
 ): CodexAccount | { error: string } {
   const all = listCodexAccounts();
   if (!all.length) {
     return {
       error: "no ChatGPT subscription or API-key accounts are configured",
     };
+  }
+  // Ultrafast turns try accounts on the plan that serves it first, with the
+  // same owner, designation, and affinity rules. A pin still wins, and an
+  // empty plan pool falls through to the ordinary pick at a slower tier.
+  if (preferPlan && !pinnedId) {
+    const otherPlans = new Set(exclude);
+    for (const account of all) {
+      if (codexAccountPlan(account) !== preferPlan) otherPlans.add(account.id);
+    }
+    const preferred = pickOpenaiAccount(
+      model,
+      ids,
+      sessionKey,
+      out,
+      user,
+      undefined,
+      false,
+      otherPlans,
+    );
+    if (!("error" in preferred)) return preferred;
   }
   const allowedOwner = (account: CodexAccount) =>
     !account.owner || (!!user && userMatchesAny(user, [account.owner]));
@@ -146,27 +174,13 @@ export function buildSeededOpenaiAuth(
   };
 }
 
-const OPENAI_FAST_MODE_MODELS = new Set([
-  "gpt-6-astra",
-  "gpt-6.1-sol",
-  "gpt-6-sol",
-  "gpt-6-luna",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-]);
-
-/** ChatGPT subscription models whose backend accepts the priority service tier. */
-export function supportsOpenaiFastMode(model?: string): boolean {
-  if (!model) return false;
-  const id = model.replace(/^pi\/openai\//, "").replace(/^openai\//, "");
-  return OPENAI_FAST_MODE_MODELS.has(id);
-}
-
-/** Make Pi's final ChatGPT Codex payload use the priority service tier. */
-export function enableOpenaiFastMode<TModel>(agent: {
-  onPayload?: (payload: unknown, model: TModel) => unknown | Promise<unknown>;
-}): void {
+/** Make Pi's final ChatGPT Codex payload use a faster service tier. */
+export function enableOpenaiFastMode<TModel>(
+  agent: {
+    onPayload?: (payload: unknown, model: TModel) => unknown | Promise<unknown>;
+  },
+  serviceTier: OpenaiServiceTier = "priority",
+): void {
   const baseOnPayload = agent.onPayload;
   agent.onPayload = async (payload, model) => {
     const transformed = await baseOnPayload?.(payload, model);
@@ -178,7 +192,7 @@ export function enableOpenaiFastMode<TModel>(agent: {
     ) {
       return finalPayload;
     }
-    return { ...finalPayload, service_tier: "priority" };
+    return { ...finalPayload, service_tier: serviceTier };
   };
 }
 

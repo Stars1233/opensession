@@ -23,6 +23,7 @@
  * there the transcript is NOT host-visible, so a flaky link would otherwise
  * lose mid-run events for good.
  */
+import type { SessionSpeed } from "./session";
 import type { StreamEvent, ImageInput, PromptFile } from "./events";
 import type { GitIdentity } from "./identity";
 import type { TranscriptEntry } from "./session";
@@ -144,6 +145,7 @@ export interface RunHostSpec {
   effort?: string;
   /** OpenAI priority service tier for ChatGPT OAuth Codex runs. */
   fastMode?: boolean;
+  speed?: SessionSpeed; // unset falls back to fastMode; "ultrafast" needs GPT-6 Astra and a Pro $500 login
   /** Pstack mode: the pstack skill family is visible to the model. */
   pstackMode?: boolean;
   /** Pinned account in the active model provider's pool; pool fallback applies. */

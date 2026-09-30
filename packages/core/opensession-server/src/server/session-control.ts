@@ -14,6 +14,7 @@
  * A future autonomous monitor (src/agents/loops) can call the same
  * getSessionControl() surface directly, no MCP involved.
  */
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
 import type { ImageInput } from "./run-events";
 import type {
   AutomationDescendantPolicy,
@@ -116,6 +117,7 @@ export interface CreateSessionOpts {
   autoFallback?: boolean;
   /** OpenAI fast-mode flag persisted on the session. */
   fastMode?: boolean;
+  speed?: SessionSpeed; // unset falls back to fastMode; "ultrafast" needs GPT-6 Astra and a Pro $500 login
   /** Pstack mode persisted on the session: the pstack skill family loads for its runs. */
   pstackMode?: boolean;
   /** Composer image attachments as `data:image/...;base64,` URLs. */

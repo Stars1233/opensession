@@ -72,14 +72,14 @@ test("the new composer uses the shared model settings component with every axis"
   expect(pickerStart).toBeGreaterThan(-1);
   expect(picker).toContain("effort,");
   expect(picker).toContain("changeEffort: setEffort");
-  expect(picker).toContain("fastMode,");
-  expect(picker).toContain("changeFastMode: setFastMode");
+  expect(picker).toContain("speed,");
+  expect(picker).toContain("changeSpeed: setSpeed");
   expect(picker).toContain("accounts,");
   expect(picker).toContain("accountId,");
   expect(picker).toContain("changeAccount: setAccountId");
 });
 
-test("the new session payload persists fast mode", async () => {
+test("the new session payload persists its speed", async () => {
   const source = await Bun.file(
     new URL("./NewSession.tsx", import.meta.url),
   ).text();
@@ -89,7 +89,9 @@ test("the new session payload persists fast mode", async () => {
 
   expect(createStart).toBeGreaterThan(-1);
   expect(createEnd).toBeGreaterThan(createStart);
-  expect(createPayload).toContain("...(fastMode ? { fastMode: true } : {})");
+  // fastMode stays beside speed for servers that predate the enum.
+  expect(createPayload).toContain("createMessage.fastMode = true;");
+  expect(createPayload).toContain("createMessage.speed = speed;");
 });
 
 test("a new session sends the person's checkout preference", async () => {

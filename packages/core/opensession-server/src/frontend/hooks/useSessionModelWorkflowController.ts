@@ -1,3 +1,7 @@
+import {
+  sessionSpeed,
+  type SessionSpeed,
+} from "@tellahq/opensession-protocol/session";
 import { useEffect, useState } from "react";
 import type { Dispatch } from "react";
 import { useSessionSocket } from "./useSessionSocket";
@@ -37,7 +41,7 @@ export function useSessionModelWorkflowController(
   const [autoFallback, setAutoFallback] = useState(
     session.autoFallback !== false,
   );
-  const [fastMode, setFastMode] = useState(session.fastMode || false);
+  const [speed, setSpeed] = useState<SessionSpeed>(() => sessionSpeed(session));
   // Optimistic goal: reflects a just-set/cleared goal instantly (the /goal
   // command persists server-side but doesn't broadcast a live session update).
   // `undefined` = defer to session.goal; a string/null = the pending override.
@@ -85,8 +89,10 @@ export function useSessionModelWorkflowController(
     setAutoFallback(session.autoFallback !== false);
   }, [session.id, session.autoFallback]);
   useEffect(() => {
-    setFastMode(session.fastMode || false);
-  }, [session.id, session.fastMode]);
+    setSpeed(
+      sessionSpeed({ speed: session.speed, fastMode: session.fastMode }),
+    );
+  }, [session.id, session.speed, session.fastMode]);
   useEffect(() => {
     dispatchSessionRuntime({ type: "sync_usage", usage: session.usage });
   }, [dispatchSessionRuntime, session.id, session.usage]);
@@ -170,17 +176,17 @@ export function useSessionModelWorkflowController(
       runPreferences: {
         effort,
         setEffort,
-        fastMode,
-        setFastMode,
+        speed,
+        setSpeed,
         autoFallback,
         changeAutoFallback,
       },
-      fastMode,
+      speed,
       goalOverride,
       currentGoal,
       pstackMode,
       setEffort,
-      setFastMode,
+      setSpeed,
       setAccountId,
       setGoalOverride,
       setPstackOverride,

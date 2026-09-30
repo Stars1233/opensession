@@ -64,7 +64,8 @@ import {
   invalidateSessionsCache,
   publishSessionChange,
   maybePersistEffort,
-  maybePersistFastMode,
+  maybePersistSpeed,
+  requestedSpeed,
   runErrors,
   sessionRuntimeSnapshot,
   type SessionRuntimeSnapshot,
@@ -644,6 +645,7 @@ export function sessionListRow(
   if (row.startedBy == null) delete row.startedBy;
   if (row.workspaceId == null) delete row.workspaceId;
   if (!row.fastMode) delete row.fastMode;
+  if (!row.speed) delete row.speed;
   if (!row.prIsDraft) delete row.prIsDraft;
   if (!row.prReviewDecision) delete row.prReviewDecision;
   if (!row.prReviewRequested?.length) delete row.prReviewRequested;
@@ -1013,6 +1015,7 @@ export async function handleSessionsRoutes(
       effort?: unknown;
       autoFallback?: unknown;
       fastMode?: unknown;
+      speed?: unknown;
       images?: unknown;
       files?: unknown;
       pastedTexts?: unknown;
@@ -1107,6 +1110,7 @@ export async function handleSessionsRoutes(
       const actorScope = ctx.authUser?.login || actor || "anonymous";
       const targetId = sessionIdForRequest(actorScope, requestId);
       const duplicate = !!(await sessionKernel(targetId).creationState());
+      const createSpeed = requestedSpeed(body?.speed, body?.fastMode);
       const created = await getSessionControl().createSession({
         id: targetId,
         requestId,
@@ -1125,7 +1129,9 @@ export async function handleSessionsRoutes(
           ? { effort: body.effort }
           : {}),
         ...(body?.autoFallback === false ? { autoFallback: false } : {}),
-        ...(body?.fastMode === true ? { fastMode: true } : {}),
+        ...(createSpeed && createSpeed !== "standard"
+          ? { fastMode: true, speed: createSpeed }
+          : {}),
         // Where the session runs, as the native composer's sandbox chip
         // names it ("local" is the host, chosen explicitly). Omitted, the
         // instance's own default still decides — which is what every
@@ -1291,6 +1297,7 @@ export async function handleSessionsRoutes(
         images?: unknown;
         effort?: unknown;
         fastMode?: unknown;
+        speed?: unknown;
         busyMode?: unknown;
         files?: unknown;
         pastedTexts?: unknown;
@@ -1362,10 +1369,7 @@ export async function handleSessionsRoutes(
           session,
           typeof body?.effort === "string" ? body.effort : undefined,
         );
-        maybePersistFastMode(
-          session,
-          typeof body?.fastMode === "boolean" ? body.fastMode : undefined,
-        );
+        maybePersistSpeed(session, body?.speed, body?.fastMode);
       }
       let result: Awaited<
         ReturnType<ReturnType<typeof getSessionControl>["deliverToSession"]>

@@ -820,9 +820,9 @@ export function SessionViewer({
   });
   const workspaceModel = workspaceTools.model;
   const { models, defaultModel, accounts } = workspaceModel;
-  const { accountId, effort, fastMode, goalOverride, runPreferences } =
+  const { accountId, effort, speed, goalOverride, runPreferences } =
     workspaceModel;
-  const { currentGoal, setEffort, setFastMode } = workspaceModel;
+  const { currentGoal, setEffort, setSpeed } = workspaceModel;
   const { setAccountId, setGoalOverride } = workspaceModel;
   const { pstackMode, setPstackOverride } = workspaceModel;
   const { workflowRuns, workflowsLoaded, workflowAction, setWorkflowRuns } =
@@ -1107,7 +1107,7 @@ export function SessionViewer({
       runtime: {
         isBusy,
         effort,
-        fastMode,
+        speed,
         pendingRef,
         setPending,
         dispatch: dispatchSessionRuntime,
@@ -1124,7 +1124,7 @@ export function SessionViewer({
     },
     composer: {
       setEffort,
-      setFastMode,
+      setSpeed,
       setPrefill: setComposerPrefill,
       hasDraft: composerHasDraft,
       settersRef: composerSettersRef,
@@ -1231,7 +1231,7 @@ export function SessionViewer({
       accountId: accountId || "",
       accounts,
       setAccountId,
-      setFastMode,
+      setSpeed,
       setGoalOverride,
       setPstackOverride,
     },

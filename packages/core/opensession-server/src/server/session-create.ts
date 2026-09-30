@@ -1,3 +1,7 @@
+import {
+  sessionSpeed,
+  type SessionSpeed,
+} from "@tellahq/opensession-protocol/session";
 import { canJoinCreateWorkspace } from "../shared/session-create-workspace";
 /**
  * Session creation — the ONE create path shared by the web UI and the
@@ -134,6 +138,7 @@ import {
   recordRunOutcome,
   touchNativeSession,
   updateSessionFile,
+  requestedSpeed,
 } from "./session-cache";
 import {
   attachRepo,
@@ -260,6 +265,7 @@ export interface CreateSessionMessage {
   effort?: unknown;
   autoFallback?: unknown;
   fastMode?: unknown;
+  speed?: unknown;
   pstackMode?: unknown;
   startPortal?: unknown;
   accountId?: string;
@@ -425,6 +431,7 @@ export interface ResolvedCreate {
   presetNote?: string;
   autoFallback?: boolean;
   fastMode?: boolean;
+  speed?: SessionSpeed; // unset falls back to fastMode; "ultrafast" needs GPT-6 Astra and a Pro $500 login
   /** Pstack mode from the palette toggle; `/pstack <task>` as the opening prompt also enables it. */
   pstackMode?: boolean;
   /** Start the repository's first Portal once the workspace is ready. */
@@ -747,6 +754,7 @@ function createdSessionFileDefaults(spec: ResolvedCreate): NativeSessionFile {
     ...(specPstackMode(spec) ? { pstackMode: true } : {}),
     ...(spec.autoFallback === false ? { autoFallback: false } : {}),
     ...(spec.fastMode ? { fastMode: true } : {}),
+    ...(spec.speed && spec.speed !== "standard" ? { speed: spec.speed } : {}),
     ...(spec.accountId ? { accountId: spec.accountId } : {}),
     ...(spec.slackOrigin
       ? {
@@ -1991,6 +1999,7 @@ export async function openCreatedSession(
               model: spec.model,
               effort: spec.effort,
               fastMode: spec.fastMode,
+              speed: spec.speed,
               pstackMode,
               accountId: spec.accountId,
               fallbackModel: interactiveFallbackModel(
@@ -2535,9 +2544,9 @@ export async function handleCreateSessionMessage(
   const createAutoFallback = forkSource
     ? forkSource.autoFallback !== false
     : msg.autoFallback !== false;
-  const createFastMode = forkSource
-    ? forkSource.fastMode
-    : msg.fastMode === true;
+  const createSpeed = forkSource
+    ? sessionSpeed(forkSource)
+    : (requestedSpeed(msg.speed, msg.fastMode) ?? "standard");
   // Pstack mode from the palette's More options (forks inherit).
   const createPstackMode = forkSource
     ? forkSource.pstackMode
@@ -3136,7 +3145,8 @@ export async function handleCreateSessionMessage(
       effort: createEffort,
       presetNote: workspacePreset?.note,
       autoFallback: createAutoFallback,
-      fastMode: createFastMode,
+      fastMode: createSpeed !== "standard",
+      speed: createSpeed,
       pstackMode: createPstackMode,
       ...(msg.startPortal === true && !forkSource ? { startPortal: true } : {}),
       accountId: createAccountId,

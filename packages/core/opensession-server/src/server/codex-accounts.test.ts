@@ -241,3 +241,106 @@ describe("pickOpenaiAccount pins", () => {
     });
   });
 });
+
+describe("pickOpenaiAccount ultrafast routing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "codex-ultrafast-"));
+  const store = join(dir, "accounts.json");
+  let previousStore: string;
+
+  const jwt = (claims: object) =>
+    `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
+  const planClaims = (plan: string) => ({
+    "https://api.openai.com/auth": { chatgpt_plan_type: plan },
+  });
+  const home = (
+    id: string,
+    tokens: { access?: string; id?: string },
+    owner?: string,
+  ) => {
+    const path = join(dir, id);
+    mkdirSync(path, { recursive: true });
+    writeFileSync(
+      join(path, "auth.json"),
+      JSON.stringify({
+        tokens: { access_token: tokens.access, id_token: tokens.id },
+      }),
+    );
+    return {
+      id,
+      name: id,
+      kind: "home",
+      value: path,
+      ...(owner ? { owner } : {}),
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+  };
+
+  beforeAll(() => {
+    previousStore = __setCodexAccountsPathForTest(store);
+    writeFileSync(
+      store,
+      JSON.stringify({
+        accounts: [
+          home("pro", { access: jwt(planClaims("pro")) }),
+          // A refreshed access token outranks a stale ID token.
+          home("promax", {
+            access: jwt(planClaims("promax")),
+            id: jwt(planClaims("pro")),
+          }),
+          home("alex-pro", { access: jwt(planClaims("pro")) }, "Alex"),
+        ],
+      }),
+    );
+  });
+
+  afterAll(() => {
+    __setCodexAccountsPathForTest(previousStore);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const pick = (
+    session: string,
+    user?: string,
+    pinned?: string,
+    ultrafast = true,
+  ) => {
+    const picked = pickOpenaiAccount(
+      "gpt-6-astra",
+      undefined,
+      session,
+      undefined,
+      user,
+      pinned,
+      false,
+      undefined,
+      ultrafast ? "promax" : undefined,
+    );
+    return "error" in picked ? picked.error : picked.id;
+  };
+
+  test("exposes each login's ChatGPT plan", () => {
+    const plans = Object.fromEntries(
+      listCodexAccountsPublic().map((account) => [account.id, account.plan]),
+    );
+    expect(plans).toEqual({ pro: "pro", promax: "promax", "alex-pro": "pro" });
+  });
+
+  test("routes every session to the Pro $500 account, even over a personal one", () => {
+    for (const session of ["s1", "s2", "s3", "s4", "s5"]) {
+      expect(pick(session)).toBe("promax");
+      expect(pick(session, "Alex")).toBe("promax");
+    }
+    // Without the preference, Alex keeps using a personal account first.
+    expect(pick("s1", "Alex", undefined, false)).toBe("alex-pro");
+  });
+
+  test("keeps an explicit pin", () => {
+    expect(pick("s1", undefined, "pro")).toBe("pro");
+  });
+
+  test("falls back to the ordinary pool when no Pro $500 account is usable", () => {
+    markCodexExhausted("promax", "gpt-6-astra");
+    expect(pick("s1")).toBe("pro");
+    expect(pick("s1", "Alex")).toBe("alex-pro");
+  });
+});

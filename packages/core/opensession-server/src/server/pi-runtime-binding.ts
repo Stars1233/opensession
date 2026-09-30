@@ -2,6 +2,12 @@ import { buildPiAnthropicModels } from "./pi-anthropic-models";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { CodexAccount } from "./codex-accounts";
 import type { SeededOpenaiAuth } from "./openai-auth";
+import type { SessionSpeed } from "@tellahq/opensession-protocol/session";
+import {
+  chatgptPlanFromJwt,
+  supportsOpenaiUltrafast,
+  ULTRAFAST_CHATGPT_PLAN,
+} from "./openai-service-tier";
 import type { ModelProviderConfig } from "./model-providers";
 import type { XaiAccount, bindXaiAccount } from "./xai-accounts";
 import { XAI_OAUTH_PROVIDER } from "./xai-provider-id";
@@ -49,6 +55,8 @@ export interface PiRuntimeBinding extends PiRuntimeAccountEvidence {
   runtime: ModelRuntime;
   model: PiModel;
   usesOpenaiOAuth: boolean;
+  /** ChatGPT plan of the seeded login, which gates the ultrafast tier. */
+  openaiPlan?: string;
   /** A SuperGrok turn: requests need the cli-chat-proxy payload shaping. */
   usesXaiProxy: boolean;
 }
@@ -76,6 +84,7 @@ export interface PiRuntimeBindingDependencies {
     accountId?: string,
     accountStrict?: boolean,
     excluded?: ReadonlySet<string>,
+    preferPlan?: string,
   ) => OpenaiPick;
   buildSeededOpenaiAuth: (account: CodexAccount) => SeededAuthResult;
   anthropicTransport: () => "inprocess" | "bridge";
@@ -111,6 +120,8 @@ export interface CreatePiRuntimeBindingInput {
   accountId?: string;
   accountStrict?: boolean;
   usageCredits?: boolean;
+  /** Ultrafast turns prefer accounts on the plan that serves it. */
+  speed?: SessionSpeed;
   /** Accounts already burned by this turn's walk (Codex and SuperGrok pools). */
   excludedOpenaiAccountIds: ReadonlySet<string>;
   /** Publishes evidence immediately so a later throw can still rotate safely. */
@@ -239,6 +250,9 @@ export async function createPiRuntimeBinding(
       input.accountId,
       input.accountStrict,
       input.excludedOpenaiAccountIds,
+      input.speed === "ultrafast" && supportsOpenaiUltrafast(input.modelID)
+        ? ULTRAFAST_CHATGPT_PLAN
+        : undefined,
     );
     if ("error" in picked) {
       const error = new Error(`pi/openai: ${picked.error}`) as Error & {
@@ -401,6 +415,7 @@ export async function createPiRuntimeBinding(
     model,
     ...evidence,
     usesOpenaiOAuth: seededOpenaiCredential !== undefined,
+    openaiPlan: chatgptPlanFromJwt(seededOpenaiCredential?.access),
     usesXaiProxy: xaiBinding !== undefined,
   };
 }

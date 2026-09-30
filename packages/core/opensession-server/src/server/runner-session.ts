@@ -176,6 +176,7 @@ export async function maybeLaunchRunnerRun(
     model: session.model,
     effort: session.effort,
     fastMode: session.fastMode,
+    speed: session.speed,
     // A person's turn in an automation-owned session carries no pin, so the
     // Runner tries their own subscription before the automation's account.
     ...runAccountSpec(session, runInputs),
@@ -236,6 +237,7 @@ export async function maybeLaunchRunnerRun(
     model: session.model,
     effort: session.effort,
     fastMode: session.fastMode,
+    speed: session.speed,
     accountId: session.accountId,
     fallbackModel: interactiveFallbackModel(session.model),
     deniedTools: runInputs.deniedTools,
