@@ -52,7 +52,7 @@ const PRIMARY_MODEL_IDS = [
   "claude-sonnet-5-5",
   "claude-haiku-4-5",
   "gpt-6-astra",
-  "gpt-6-sol",
+  "gpt-6.1-sol",
   "gpt-5.6-terra",
   "gpt-6-luna",
 ] as const;
@@ -245,7 +245,7 @@ const MODEL_TAIL_ORDER = [
   "claude-sonnet-4-6",
   "claude-haiku-4-5",
   "gpt-6-astra",
-  "gpt-6-sol",
+  "gpt-6.1-sol",
   "gpt-5.6-terra",
   "gpt-6-luna",
   "kimi-k3",

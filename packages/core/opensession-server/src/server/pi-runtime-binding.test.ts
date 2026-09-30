@@ -181,7 +181,10 @@ describe("createPiRuntimeBinding", () => {
 
   for (const account of [oauth, apiKey]) {
     for (const [modelID, rates] of [
-      ["gpt-6-sol", { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }],
+      [
+        "gpt-6.1-sol",
+        { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+      ],
       [
         "gpt-6-luna",
         { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
@@ -225,9 +228,9 @@ describe("createPiRuntimeBinding", () => {
     }
   }
 
-  test("the bundled Pi runtime resolves GPT-6 Sol and Luna for both account types", async () => {
+  test("the bundled Pi runtime resolves GPT-6.1 Sol and Luna for both account types", async () => {
     for (const account of [oauth, apiKey]) {
-      for (const modelID of ["gpt-6-sol", "gpt-6-luna"]) {
+      for (const modelID of ["gpt-6.1-sol", "gpt-6-luna"]) {
         const h = harness({ account });
         h.deps.loadSdk = prewarmPiSdk;
         const binding = await createPiRuntimeBinding(
@@ -243,7 +246,7 @@ describe("createPiRuntimeBinding", () => {
         expect(binding.model.maxTokens).toBe(128_000);
         expect(binding.model.thinkingLevelMap?.max).toBe("max");
         expect(binding.model.cost.input).toBe(
-          modelID === "gpt-6-sol" ? 2 : 0.1,
+          modelID === "gpt-6.1-sol" ? 2 : 0.1,
         );
         expect(binding.model.cost.tiers?.[0].inputTokensAbove).toBe(272_000);
       }

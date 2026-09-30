@@ -93,7 +93,7 @@ export const DEFAULT_WORKSPACE_MODEL_SETTINGS: WorkspaceModelSettings = {
       lead: { model: "pi/anthropic/claude-fable-5-1", effort: "high" },
       supporting: [
         {
-          model: "pi/openai/gpt-6-sol",
+          model: "pi/openai/gpt-6.1-sol",
           effort: "xhigh",
           role: "Read-only oracle",
         },
@@ -105,7 +105,7 @@ export const DEFAULT_WORKSPACE_MODEL_SETTINGS: WorkspaceModelSettings = {
       id: "dial-high",
       label: "Dial · High",
       group: "dial",
-      lead: { model: "pi/openai/gpt-6-sol", effort: "xhigh" },
+      lead: { model: "pi/openai/gpt-6.1-sol", effort: "xhigh" },
       supporting: [
         {
           model: "pi/anthropic/claude-fable-5-1",
@@ -120,10 +120,10 @@ export const DEFAULT_WORKSPACE_MODEL_SETTINGS: WorkspaceModelSettings = {
       id: "dial-medium",
       label: "Dial · Medium",
       group: "dial",
-      lead: { model: "pi/openai/gpt-6-sol", effort: "high" },
+      lead: { model: "pi/openai/gpt-6.1-sol", effort: "high" },
       supporting: [
         {
-          model: "pi/openai/gpt-6-sol",
+          model: "pi/openai/gpt-6.1-sol",
           effort: "xhigh",
           role: "Read-only oracle",
         },
@@ -138,7 +138,7 @@ export const DEFAULT_WORKSPACE_MODEL_SETTINGS: WorkspaceModelSettings = {
       lead: { model: "pi/openai/gpt-6-luna", effort: "high" },
       supporting: [
         {
-          model: "pi/openai/gpt-6-sol",
+          model: "pi/openai/gpt-6.1-sol",
           effort: "xhigh",
           role: "Read-only oracle",
         },
@@ -207,7 +207,7 @@ export const DEFAULT_WORKSPACE_MODEL_SETTINGS: WorkspaceModelSettings = {
       id: "orchestrator-sol",
       label: "Orchestrator · Sol",
       group: "orchestrator",
-      lead: { model: "pi/openai/gpt-6-sol", effort: "xhigh" },
+      lead: { model: "pi/openai/gpt-6.1-sol", effort: "xhigh" },
       supporting: [
         {
           model: "pi/openai/gpt-5.6-terra",

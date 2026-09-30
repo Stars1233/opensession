@@ -105,10 +105,10 @@ test("conversation target resolves the session's stored model and effort like di
   });
   expect(
     await sessionConversationModel({
-      model: "pi/openai/gpt-6-sol",
+      model: "pi/openai/gpt-6.1-sol",
       effort: "",
     }),
-  ).toEqual({ model: "pi/openai/gpt-6-sol" });
+  ).toEqual({ model: "pi/openai/gpt-6.1-sol" });
   // Unknown effort strings never reach the one-shot options.
   expect(
     await sessionConversationModel({
@@ -191,7 +191,7 @@ test("helper endpoint requires human authentication and the exact target allowli
     ["luna", false, 401],
     ["conversation", false, 401],
     ["other-model", true, 400],
-    ["gpt-6-sol", true, 400],
+    ["gpt-6.1-sol", true, 400],
     ["session_agent", true, 400],
   ] as const) {
     const req = new Request(

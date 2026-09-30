@@ -70,16 +70,16 @@ describe("oneShot", () => {
       oneShotFallbackModels(
         "pi/anthropic/claude-fable-5-1",
         "no usable Claude account in the pool (all exhausted or sidelined)",
-        ["gpt-6-astra", "gpt-6-sol"],
+        ["gpt-6-astra", "gpt-6.1-sol"],
       ),
-    ).toEqual(["pi/openai/gpt-6-astra", "pi/openai/gpt-6-sol"]);
+    ).toEqual(["pi/openai/gpt-6-astra", "pi/openai/gpt-6.1-sol"]);
   });
 
   test("skips fallbacks on the primary's own provider and the primary itself", () => {
     expect(
       oneShotFallbackModels("pi/openai/gpt-6-astra", "usage limit reached", [
         "gpt-6-astra",
-        "gpt-6-sol",
+        "gpt-6.1-sol",
         "claude-opus-5-5",
       ]),
     ).toEqual(["pi/anthropic/claude-opus-5-5"]);

@@ -109,7 +109,10 @@ export function modelEfforts(
       : id.slice(0, slash);
   const slug = slash === -1 ? id : id.slice(slash + 1);
 
-  if (provider === "openai" && /^(?:gpt-6-sol|gpt-6-luna)$/.test(slug))
+  if (
+    provider === "openai" &&
+    /^(?:gpt-6\.1-sol|gpt-6-sol|gpt-6-luna)$/.test(slug)
+  )
     return [...OPENAI_EFFORTS, "max"];
   if (
     provider === "openai" &&
@@ -178,7 +181,7 @@ export const DEFAULT_BRIDGE_PICKER_MODELS = [
   "claude-sonnet-5-5",
   "claude-haiku-4-5",
   "gpt-6-astra",
-  "gpt-6-sol",
+  "gpt-6.1-sol",
   "gpt-5.6-terra",
   "gpt-6-luna",
 ] as const;
@@ -255,10 +258,18 @@ export const KNOWN_MODELS: ModelInfo[] = [
     aliases: ["astra", "gpt6"],
   },
   {
+    id: "gpt-6.1-sol",
+    provider: "codex",
+    label: "GPT-6.1 Sol",
+    aliases: ["sol", "sol6.1", "codex", "gpt"],
+  },
+  // Superseded by GPT-6.1 Sol. Kept resolvable for persisted sessions;
+  // dispatch upgrades it through RETIRED_CODEX_REROUTE.
+  {
     id: "gpt-6-sol",
     provider: "codex",
     label: "GPT-6 Sol",
-    aliases: ["sol", "sol6", "codex", "gpt"],
+    aliases: ["sol6"],
   },
   {
     id: "gpt-5.6-sol",
@@ -366,11 +377,11 @@ export const DIAL_ORACLE_AGENTS: Record<
       "architecture decisions, deep debugging, reviewing significant work. Read-only advisor.",
   },
   "oracle-sol": {
-    model: "openai/gpt-6-sol",
+    model: "openai/gpt-6.1-sol",
     variant: "xhigh",
-    label: "GPT-6 Sol",
+    label: "GPT-6.1 Sol",
     description:
-      "Oracle: senior-engineer second opinion on GPT-6 Sol at extra-high reasoning — " +
+      "Oracle: senior-engineer second opinion on GPT-6.1 Sol at extra-high reasoning — " +
       "plan review, architecture decisions, deep debugging, reviewing significant work. " +
       "Read-only advisor.",
   },
@@ -450,7 +461,7 @@ export const DIAL_PRESETS: DialPreset[] = [
     label: "Dial · High",
     description:
       "Deep reasoning for hard tasks — Sol at extra-high effort with a Fable 5.1-high oracle",
-    model: "gpt-6-sol",
+    model: "gpt-6.1-sol",
     effort: "xhigh",
     oracleAgent: "oracle-fable",
   },
@@ -459,7 +470,7 @@ export const DIAL_PRESETS: DialPreset[] = [
     label: "Dial · Medium",
     description:
       "Balanced depth and speed for everyday work — Sol-high with a Sol-xhigh oracle",
-    model: "gpt-6-sol",
+    model: "gpt-6.1-sol",
     effort: "high",
     oracleAgent: "oracle-sol",
   },
@@ -661,7 +672,7 @@ export const ORCHESTRATOR_PRESETS: OrchestratorPreset[] = [
     id: "orchestrator/sol",
     label: "Orchestrator · Sol",
     description: "Sol xhigh leads planning, review, and integration",
-    model: "gpt-6-sol",
+    model: "gpt-6.1-sol",
     effort: "xhigh",
     workerAgents: ["worker", "worker-fast"],
   },
@@ -818,8 +829,8 @@ export function refreshPickerModels(): void {
       ...piPickerModels(),
       ...configuredPickerModels(),
     ];
-    // Deduplicate after routing: the seeded native id `gpt-6-sol` and a
-    // retained compatibility id `pi/openai/gpt-6-sol` are different input
+    // Deduplicate after routing: the seeded native id `gpt-6.1-sol` and a
+    // retained compatibility id `pi/openai/gpt-6.1-sol` are different input
     // strings, but both become the same picker row.
     const ids = new Set<string>();
     for (const configured of configuredModels) {
@@ -837,12 +848,12 @@ export function refreshPickerModels(): void {
 }
 refreshPickerModels();
 
-/** Per-provider defaults: claude-fable-5-1 for Anthropic, gpt-6-sol for OpenAI. */
+/** Per-provider defaults: claude-fable-5-1 for Anthropic, gpt-6.1-sol for OpenAI. */
 export const DEFAULT_CLAUDE_MODEL = "claude-fable-5-1";
-export const DEFAULT_CODEX_MODEL = "gpt-6-sol";
+export const DEFAULT_CODEX_MODEL = "gpt-6.1-sol";
 export const BEST_AVAILABLE_CODEX_MODEL = "codex-best-available";
 
-const CODEX_MODEL_ORDER = ["gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna"];
+const CODEX_MODEL_ORDER = ["gpt-6.1-sol", "gpt-5.6-terra", "gpt-6-luna"];
 
 /**
  * Fallback ROUTING tiers (higher = smarter). NOT an absolute capability
@@ -858,6 +869,7 @@ const CODEX_MODEL_ORDER = ["gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna"];
 const FALLBACK_TIER: Record<string, number> = {
   "claude-fable-5-1": 3,
   "gpt-6-astra": 3,
+  "gpt-6.1-sol": 3,
   "gpt-6-sol": 3,
   "claude-opus-5-5": 3,
   "claude-opus-5": 3,
@@ -885,7 +897,7 @@ const FALLBACK_TIER: Record<string, number> = {
  */
 const FALLBACK_DESTINATIONS = [
   "gpt-6-astra",
-  "gpt-6-sol",
+  "gpt-6.1-sol",
   // Prefer Opus before Terra/Luna once Sol is unavailable.
   "claude-opus-5-5",
   // Terra/Luna remain automatic top-tier fallbacks after Opus.
@@ -1119,10 +1131,11 @@ export function interactiveFallbackModel(
 
 /** Retired OpenAI slugs map onto their current equivalents. */
 const RETIRED_CODEX_REROUTE: Record<string, string> = {
-  "gpt-5.6-sol": "gpt-6-sol",
+  "gpt-6-sol": "gpt-6.1-sol",
+  "gpt-5.6-sol": "gpt-6.1-sol",
   "gpt-5.6-luna": "gpt-6-luna",
-  "gpt-5.5": "gpt-6-sol",
-  "gpt-5.4": "gpt-6-sol",
+  "gpt-5.5": "gpt-6.1-sol",
+  "gpt-5.4": "gpt-6.1-sol",
   "gpt-5.4-mini": "gpt-6-luna",
   "gpt-5.3-codex-spark": "gpt-6-luna",
 };
@@ -1273,7 +1286,7 @@ export function interactiveDefaultModel(): string {
   return toPiModel(configured) || toPiModel(getDefaultModel())!;
 }
 
-/** Strip the engine prefix so a mapped id ("Pi/openai/gpt-6-sol",
+/** Strip the engine prefix so a mapped id ("Pi/openai/gpt-6.1-sol",
  *  "pi/anthropic/claude-opus-5", "claude/anthropic/claude-opus-5") resolves to
  *  its native key for tier lookup. Native ids pass through unchanged. */
 function nativeModelId(id: string | undefined | null): string {
@@ -1481,6 +1494,7 @@ const CONTEXT_WINDOWS: Record<string, number> = {
   "claude-sonnet-5": 1_000_000,
   "claude-sonnet-4-6": 1_000_000,
   "claude-haiku-4-5": 200_000,
+  "gpt-6.1-sol": 1_050_000,
   "gpt-6-sol": 1_050_000,
   "gpt-6-luna": 1_050_000,
   // Older Codex/GPT — approximate.

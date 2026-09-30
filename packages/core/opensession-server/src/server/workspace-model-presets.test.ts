@@ -98,14 +98,14 @@ describe("workspace preset catalog resolution", () => {
           {
             id: "custom",
             label: "Acme lead",
-            lead: { model: "pi/openai/gpt-6-sol", effort: "high" },
+            lead: { model: "pi/openai/gpt-6.1-sol", effort: "high" },
           },
         ],
       },
     };
     await catalogDocuments("workspaces").set(workspace.id, workspace);
     expect(await resolveWorkspaceModelPreset(id)).toMatchObject({
-      model: "pi/openai/gpt-6-sol",
+      model: "pi/openai/gpt-6.1-sol",
     });
     workspace.modelSettings.presets[0].lead.model =
       "pi/anthropic/claude-fable-5-1";
@@ -239,7 +239,7 @@ describe("workspace preset catalog resolution", () => {
           {
             id: "custom",
             label: "Acme lead",
-            lead: { model: "pi/openai/gpt-6-sol" },
+            lead: { model: "pi/openai/gpt-6.1-sol" },
             instructions: "Keep the captured review plan.",
           },
         ],
@@ -276,7 +276,7 @@ describe("workspace preset catalog resolution", () => {
         });
         expect(opts.remoteWorkspace).toBe(remoteWorkspace);
         expect(opts.selectedModel).toBe(model);
-        expect(opts.model).toBe("pi/openai/gpt-6-sol");
+        expect(opts.model).toBe("pi/openai/gpt-6.1-sol");
         expect(opts.reposNote).toBe(reposNote);
         expect(
           opts.reposNote?.match(/## Workspace model preset/g),
