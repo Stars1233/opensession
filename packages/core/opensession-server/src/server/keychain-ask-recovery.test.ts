@@ -55,6 +55,35 @@ mock.module("../agents/slack/slack-api", () => ({
   updateSlackBlocks: async () => ({ ok: true }),
 }));
 
+// One web session driven by the credential's owner; every other id is unknown.
+const DRIVEN = "os-driven-by-owner";
+const realCache = await import("./session-cache");
+mock.module("./session-cache", () => ({
+  ...realCache,
+  findSession: (id: string) =>
+    id === DRIVEN
+      ? { id, source: "opensession", startedBy: "Alex" }
+      : undefined,
+}));
+
+// Session question cards: keep the answer callback instead of broadcasting.
+const cards: Array<{
+  sessionId: string;
+  answer: (answers: Record<string, string> | null) => void;
+}> = [];
+const realAsks = await import("./asks");
+mock.module("./asks", () => ({
+  ...realAsks,
+  offerAskCard: async (
+    sessionId: string,
+    _questions: unknown,
+    answer: (answers: Record<string, string> | null) => void,
+  ) => {
+    cards.push({ sessionId, answer });
+    return { close: async () => {} };
+  },
+}));
+
 // Delivery normally runs as a durable session-kernel effect; deliver inline.
 const realKernel = await import("./session-kernel");
 mock.module("./session-kernel", () => ({
@@ -83,6 +112,7 @@ beforeEach(() => {
   resetKeychain();
   slackPosts.length = 0;
   duringReply = null;
+  cards.length = 0;
   kc.addCredential({
     owner: "Alex",
     service: "acme-prod",
@@ -340,6 +370,42 @@ describe("a request_credential call that timed out on the client", () => {
       kc.listKeychainAsks({ sessionId: SESSION }).find((a) => a.id === ask.id)
         ?.status,
     ).toBe("cancelled");
+  });
+});
+
+describe("an ask to the owner who is driving the session", () => {
+  test("goes up as a card in the session first, not as a Slack DM", async () => {
+    const server = createKeychainMcpServer({ sessionId: DRIVEN, user: "Alex" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "1.0.0" });
+    await server.instance.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const call = client.callTool({
+      name: "request_credential",
+      arguments: {
+        credential: "acme-prod",
+        purpose: "read the latest invoice",
+      },
+    });
+    for (let i = 0; i < 100 && !cards.length; i++) await Bun.sleep(5);
+    const ask = kc.listKeychainAsks({ sessionId: DRIVEN })[0]!;
+    const transport = humanAsks.getAsk(ask.humanAskId!)!;
+    expect(transport.uiFirst).toBe(true);
+    // The delivery effect runs the UI-first path: a card, no DM.
+    await deliver(ask.humanAskId!);
+    for (let i = 0; i < 100 && !cards.length; i++) await Bun.sleep(5);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.sessionId).toBe(DRIVEN);
+    expect(slackPosts).toHaveLength(0);
+
+    cards[0]!.answer({ q: "Approve once" });
+    const answer = textOf(await call);
+    const grant = kc.listGrants({ sessionId: DRIVEN })[0]!;
+    expect(grant.mode).toBe("once");
+    expect(answer).toContain(grant.id);
+    expect(slackPosts).toHaveLength(0);
   });
 });
 

@@ -122,7 +122,7 @@ export function createHumansMcpServer(ctx: HumansToolContext) {
           "- 'block' — you NEED the answer to keep going right now. Your turn pauses (up to ~20 min) until they reply, then this tool returns their answer and you continue. The question also shows as a card in the session UI, so whoever is watching can answer (or confirm an out-of-band action, like completing a login you asked for) without waiting on Slack. If nobody replies in time it returns empty and the ask becomes async, so a later reply still resumes the session. Use for 'ask Grant for the copy' when you can't proceed without it.",
           "- 'async' (default) — you DON'T need it right now. Returns immediately so you keep working; when they reply, the answer is delivered into this session as a new message. Use for 'get John's review' etc.",
           "",
-          "Where an async question lands: if you're asking the person who is driving THIS session, it goes up as a card in the session first and only becomes a Slack DM if nobody answers it there within a few minutes — they're already looking at the session, so that's where the question belongs. Asks aimed at anyone else are DM'd straight away. Either way the reply comes back into this session; you don't have to think about it.",
+          "Where a question lands: if you're asking the person who is driving THIS session, it goes up as a card in the session first and only becomes a Slack DM if nobody answers it there within a few minutes — they're already looking at the session, so that's where the question belongs. Asks aimed at anyone else are DM'd straight away. Either way the reply comes back into this session; you don't have to think about it.",
           "",
           "deliver_when (async only — when the teammate is actually pinged):",
           "- 'now' (default) — ping immediately.",
@@ -229,28 +229,32 @@ export function createHumansMcpServer(ctx: HumansToolContext) {
             // Whoever answers first wins: a UI answer resolves the ask, which
             // settles the await below; the card is retracted once the wait
             // ends either way.
-            const card = await offerAskCard(
-              ctx.sessionId,
-              [
-                {
-                  question:
-                    `Waiting on **${person.name}** (asked over Slack): ${args.question.trim()}\n\n` +
-                    `If you know the answer — or already handled it out-of-band — answer here to unblock the session immediately.`,
-                  header: "Human ask",
-                  options: args.options?.map((label) => ({ label })),
-                },
-              ],
-              (answers) => {
-                if (!answers) return;
-                const v = Object.values(answers).filter(Boolean).join("\n");
-                if (v)
-                  resolveAskFromUI(
-                    ask.id,
-                    v,
-                    ctx.createdBy || "the session driver",
-                  );
-              },
-            );
+            // A uiFirst ask already put its own card up for this driver; a
+            // second "asked over Slack" card would be a duplicate and untrue.
+            const card = ask.uiFirst
+              ? { close: async () => {} }
+              : await offerAskCard(
+                  ctx.sessionId,
+                  [
+                    {
+                      question:
+                        `Waiting on **${person.name}** (asked over Slack): ${args.question.trim()}\n\n` +
+                        `If you know the answer — or already handled it out-of-band — answer here to unblock the session immediately.`,
+                      header: "Human ask",
+                      options: args.options?.map((label) => ({ label })),
+                    },
+                  ],
+                  (answers) => {
+                    if (!answers) return;
+                    const v = Object.values(answers).filter(Boolean).join("\n");
+                    if (v)
+                      resolveAskFromUI(
+                        ask.id,
+                        v,
+                        ctx.createdBy || "the session driver",
+                      );
+                  },
+                );
             try {
               const answer = await awaitBlockingAnswer(ask.id);
               if (answer === null) {

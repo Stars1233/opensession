@@ -10,9 +10,9 @@
  *  - deliver: "now" pings immediately; "when_done" / "on_pr" hold the ping until the
  *    session next goes idle / has opened a PR; { atIso } fires at a scheduled time.
  *
- * Slack is the *fallback* channel, not always the first one: an async ask aimed
- * at the person already driving a web session (see shouldAskInUiFirst) is posed
- * as a question card in that session first, and only DM'd if it goes unanswered
+ * Slack is the *fallback* channel, not always the first one: an ask (async or
+ * block, e.g. a keychain approval) aimed at the person already driving a web
+ * session (see shouldAskInUiFirst) is posed as a question card in that session first, and only DM'd if it goes unanswered
  * for UI_FIRST_WINDOW_MS — the same "OS1 first, Slack after 4 minutes" shape the
  * AskUserQuestion path uses (src/server/asks.ts). The card stays live in
  * parallel once the DM goes out; whoever answers first wins.
@@ -170,8 +170,8 @@ export function initHumanAsks(): void {
           const t = new Date(a.answeredAt || a.createdAt).getTime();
           if (t && t < cutoff) continue; // prune
         }
-        // A delivered block ask can't resume its held turn after a restart.
-        if (a.state === "delivered" && a.mode === "block") a.mode = "async";
+        // A live block ask can't resume its held turn after a restart.
+        if (isLiveBlock(a)) a.mode = "async";
         asks.set(a.id, a);
       }
     } catch (e) {
@@ -310,17 +310,27 @@ function applyDomainHandler(a: HumanAsk, answer: string): string {
   }
 }
 
+/** A block ask that is in front of its person (DM sent, or card up in the
+ *  session) and so may still hold an awaiting tool call. */
+function isLiveBlock(a: HumanAsk): boolean {
+  if (a.mode !== "block") return false;
+  return (
+    a.state === "delivered" || (a.state === "scheduled" && !!a.uiOfferedAt)
+  );
+}
+
 /**
  * True when an ask belongs in the session's own UI before it belongs in Slack:
- * an async ask, raised by a web-driven session, aimed at the very person driving
- * that session. They're sitting in front of the session — putting the question
+ * any ask (async or block, e.g. a keychain approval), raised by a web-driven
+ * session, aimed at the very person driving that session. They're sitting in front of the session — putting the question
  * there first is both faster and less noisy than a DM, and Slack still catches
  * them if they've wandered off. Deliberately narrow: an ask aimed at a third
  * party ("get John's review") still pings Slack straight away, because John
  * isn't watching this session and shouldn't wait on a window for our benefit.
+ * A block ask's card answers the awaiting tool call directly, and the Slack
+ * fallback fires well inside BLOCK_TIMEOUT_MS.
  */
 function shouldAskInUiFirst(input: CreateAskInput): boolean {
-  if (input.mode !== "async") return false; // a blocking ask needs the DM now
   try {
     const session = findSession(input.sessionId);
     // Slack/Linear/CLI-driven sessions: their driver lives in that channel, so
@@ -658,9 +668,9 @@ export async function deliverAsk(
     channel,
     ui_first: !!a.uiFirst,
   });
-  // Keep the session honest about where the question went. Block asks already
-  // say it on their own card (humans-tools.ts), so they stay quiet here.
-  if (a.mode === "async") {
+  // Keep the session honest about where the question went. Other block asks
+  // already say it on their own card (humans-tools.ts), so they stay quiet here.
+  if (a.mode === "async" || a.uiFirst) {
     broadcastToSession(a.sessionId, {
       type: "notice",
       message: a.uiFirst
@@ -973,12 +983,7 @@ export function onSessionIdle(sessionId: string): void {
   // later Slack reply would have been silently eaten by the orphaned
   // resolver).
   for (const a of asks.values()) {
-    if (
-      a.sessionId !== sessionId ||
-      a.state !== "delivered" ||
-      a.mode !== "block"
-    )
-      continue;
+    if (a.sessionId !== sessionId || !isLiveBlock(a)) continue;
     const resolver = resolvers.get(a.id);
     if (resolver) resolver(null); // settles the orphaned await; its tool is dead
     a.mode = "async";
