@@ -1062,6 +1062,91 @@ describe("session kernel actor service", () => {
     }
   });
 
+  test("an abandoned queued turn releases admission and never runs", async () => {
+    const sessionId = "abandoned-queue-session";
+    const setRunState = (rpcId: string, event: string, runId: string) => ({
+      t: "call" as const,
+      rpcId,
+      outputBytes: 256 * 1024,
+      request: {
+        t: "store" as const,
+        method: "setRunState",
+        args: [{ sessionId, state: "running", event, currentRunId: runId }],
+      },
+    });
+    const transport = async () =>
+      ((await (await fetch(`${service.url}/ready`)).json()) as any)
+        .transport as { admitted: number; abandoned: number };
+    expect(
+      await rpc({
+        t: "call",
+        rpcId: "abandon-seed",
+        outputBytes: 256 * 1024,
+        request: {
+          t: "store",
+          method: "setRunState",
+          args: [{ sessionId, state: "idle", event: "seed" }],
+        },
+      }),
+    ).toMatchObject({ t: "call_result", status: 1 });
+    const lock = new Database(
+      sessionKernelSessionDbPath(
+        sessionId,
+        join(stateDir, "sessions", "session-kernel-sessions"),
+      ),
+    );
+    lock.exec("PRAGMA busy_timeout = 50; BEGIN IMMEDIATE;");
+    try {
+      const baseline = await transport();
+      const blocked = rpc(setRunState("abandon-blocked", "blocked", "kept"));
+      const controller = new AbortController();
+      const abandoned = fetch(`${service.url}/rpc`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          version: SESSION_KERNEL_TRANSPORT_VERSION,
+          actorVersion: SESSION_KERNEL_ACTOR_VERSION,
+          serviceEpoch,
+          request: setRunState("abandon-queued", "abandoned", "dropped"),
+        }),
+        signal: controller.signal,
+      }).catch(() => undefined);
+      const deadline = Date.now() + 500;
+      while ((await transport()).admitted < baseline.admitted + 2) {
+        expect(Date.now()).toBeLessThan(deadline);
+        await Bun.sleep(5);
+      }
+      controller.abort();
+      await abandoned;
+      const afterAbort = Date.now() + 500;
+      while ((await transport()).admitted > baseline.admitted + 1) {
+        expect(Date.now()).toBeLessThan(afterAbort);
+        await Bun.sleep(5);
+      }
+      expect((await transport()).abandoned).toBe(baseline.abandoned + 1);
+
+      lock.exec("COMMIT;");
+      expect(await blocked).toMatchObject({ t: "call_result", status: 1 });
+      const state = await rpc({
+        t: "call",
+        rpcId: "abandon-read",
+        outputBytes: 256 * 1024,
+        request: { t: "store", method: "runState", args: [sessionId] },
+      });
+      expect(JSON.parse(state.body).result).toMatchObject({
+        currentRunId: "kept",
+      });
+    } finally {
+      try {
+        lock.exec("ROLLBACK;");
+      } catch {}
+      lock.close();
+    }
+  });
+
   test("Stop keeps reserved capacity and passes queued ordinary turns", async () => {
     const sessionId = "priority-stop-session";
     await rpc({

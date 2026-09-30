@@ -30,6 +30,8 @@ class RetryableTransportError extends Error {
   constructor(
     message: string,
     readonly incarnationChanged = false,
+    /** Refused before any actor turn ran; safe to replay even a mutation. */
+    readonly notExecuted = false,
   ) {
     super(message);
     this.name = "RetryableTransportError";
@@ -43,7 +45,11 @@ async function exchange(
   epoch: string | undefined,
 ): Promise<KernelActorServiceResponse> {
   if (inFlight >= SESSION_KERNEL_MAX_TRANSPORT_REQUESTS)
-    throw new RetryableTransportError("Session kernel transport is full");
+    throw new RetryableTransportError(
+      "Session kernel transport is full",
+      false,
+      true,
+    );
   const envelope: KernelActorTransportEnvelope = {
     version: SESSION_KERNEL_TRANSPORT_VERSION,
     actorVersion: SESSION_KERNEL_ACTOR_VERSION,
@@ -68,13 +74,22 @@ async function exchange(
     const text = await response.text();
     if (!response.ok) {
       let message = `Session kernel service returned ${response.status}`;
+      let notExecuted = false;
       try {
-        const parsed = JSON.parse(text) as { error?: string };
+        const parsed = JSON.parse(text) as {
+          error?: string;
+          notExecuted?: boolean;
+        };
         if (parsed.error) message = parsed.error;
+        notExecuted = parsed.notExecuted === true;
       } catch {}
       if (response.status === 401 || response.status === 413)
         throw new Error(message);
-      throw new RetryableTransportError(message, response.status === 409);
+      throw new RetryableTransportError(
+        message,
+        response.status === 409,
+        notExecuted,
+      );
     }
     let result: KernelActorServiceResponse;
     try {
@@ -150,7 +165,12 @@ async function rpc(
   try {
     return await exchange(request, expectedEpoch);
   } catch (error) {
-    if (error instanceof RetryableTransportError) {
+    // Backpressure from a live, current incarnation keeps its fence; only an
+    // ambiguous or fenced exchange forces a new handshake.
+    if (
+      error instanceof RetryableTransportError &&
+      (error.incarnationChanged || !error.notExecuted)
+    ) {
       serviceEpoch = undefined;
       // Re-establish transport for unrelated future work. The failed mutation
       // itself is not replayed here because its physical outcome may be ambiguous.
@@ -158,6 +178,17 @@ async function rpc(
     }
     throw error;
   }
+}
+
+function errorFlags(error: unknown): {
+  retryable: boolean;
+  notExecuted?: true;
+} {
+  const flags = (error ?? {}) as { retryable?: boolean; notExecuted?: boolean };
+  return {
+    retryable: flags.retryable === true,
+    ...(flags.notExecuted === true ? { notExecuted: true as const } : {}),
+  };
 }
 
 self.onmessage = (event: MessageEvent<KernelActorClientRequest>) => {
@@ -195,10 +226,7 @@ self.onmessage = (event: MessageEvent<KernelActorClientRequest>) => {
             t: "error",
             rpcId,
             error: error instanceof Error ? error.message : String(error),
-            retryable:
-              !!error &&
-              typeof error === "object" &&
-              (error as { retryable?: boolean }).retryable === true,
+            ...errorFlags(error),
           });
         });
       return;
@@ -211,10 +239,7 @@ self.onmessage = (event: MessageEvent<KernelActorClientRequest>) => {
         t: "error",
         rpcId: request.rpcId,
         error: error instanceof Error ? error.message : String(error),
-        retryable:
-          !!error &&
-          typeof error === "object" &&
-          (error as { retryable?: boolean }).retryable === true,
+        ...errorFlags(error),
       };
       self.postMessage(reply);
     },

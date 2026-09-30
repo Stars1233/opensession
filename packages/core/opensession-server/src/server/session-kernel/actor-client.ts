@@ -57,6 +57,9 @@ export class SessionKernelActorError extends Error {
   constructor(
     message: string,
     readonly retryable = false,
+    /** Refused before any actor turn ran (transport admission, a full
+     * mailbox or lane, a stale incarnation), so replay cannot duplicate it. */
+    readonly notExecuted = false,
   ) {
     super(message);
     this.name = "SessionKernelActorError";
@@ -100,7 +103,11 @@ export class SessionKernelActorClient {
       this.pending.delete(response.rpcId);
       if (response.t === "error")
         pending.reject(
-          new SessionKernelActorError(response.error, response.retryable),
+          new SessionKernelActorError(
+            response.error,
+            response.retryable,
+            response.notExecuted === true,
+          ),
         );
       else pending.resolve(response);
     });
@@ -235,14 +242,21 @@ export class SessionKernelActorClient {
           Math.max(1, deadline - Date.now()),
         );
       } catch (error) {
+        // Reads replay on any retryable failure. A mutation replays only when
+        // the actor never ran it: transport backpressure is a reason to wait,
+        // not to fail the caller (a run-host projection, a transcript append).
         if (
-          !retryableRead ||
           !(error instanceof SessionKernelActorError) ||
           !error.retryable ||
+          !(retryableRead || error.notExecuted) ||
           Date.now() + delayMs >= deadline
         )
           throw error;
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        // Jitter keeps callers refused by the same saturation from returning
+        // in lockstep.
+        await new Promise((resolve) =>
+          setTimeout(resolve, delayMs * (0.5 + Math.random())),
+        );
         delayMs = Math.min(delayMs * 2, 250);
       }
     }
