@@ -185,9 +185,11 @@ export function buildBranchNote(session: {
       `You are working in \`${session.worktreeDir}\` on branch \`${session.branch}\`. Sibling sessions share this worktree and branch; preserve all their commits and uncommitted work. Stay on this branch, never switch or create branches, reset, stash, or cherry-pick around sibling commits.`,
       `Repository \`${repo.id}\` defaults to publishing directly to \`${repo.defaultBranch}\` without a pull request. This publication preference is independent of checkout isolation. If the user explicitly requests a PR, or this branch already has an open PR, use the PR workflow instead; never merge that PR without explicit user approval for that specific PR.`,
       `Before publishing, inspect the complete diff against \`origin/${repo.defaultBranch}\`, including sibling commits. Stop if unfinished or unrelated work would land. Stage only your own changes, inspect the staged diff, and run the repository's required checks before committing.`,
-      `Fetch with \`git fetch origin\`. Before integrating upstream, check for rebase-merge, rebase-apply, or MERGE_HEAD under \`git rev-parse --git-dir\` and coordinate with sibling sessions. If \`git merge-base --is-ancestor origin/${repo.defaultBranch} HEAD\` fails, merge \`origin/${repo.defaultBranch}\` into this branch without rewriting its history, only with a clean index and worktree. If another session has uncommitted work, stop and coordinate; never stash or discard it. Resolve conflicts and rerun all required checks on the final candidate.`,
+      `Fetch with \`git fetch origin\`. Before integrating upstream, check for rebase-merge, rebase-apply, or MERGE_HEAD under \`git rev-parse --git-dir\` and coordinate with sibling sessions. If \`git merge-base --is-ancestor origin/${repo.defaultBranch} HEAD\` fails, merge \`origin/${repo.defaultBranch}\` into this branch without rewriting its history, only with a clean index. Never stash or discard another session's uncommitted work. Resolve conflicts and rerun all required checks on the final candidate.`,
       `Publish the checked commit with a normal fast-forward push: \`git push origin HEAD:refs/heads/${repo.defaultBranch}\`. Never force-push or delete the default branch. If the push is rejected because the remote advanced, fetch, integrate, review, and check again; do not blindly retry. Keep this worktree's upstream on its own branch, not the default branch.`,
       "This preference grants no additional credentials or permissions. If server policy or branch protection refuses direct publication, report the blocker; never bypass it. Automations and their descendants keep their existing publication restrictions.",
+      "",
+      buildConflictNote(repo.defaultBranch),
     ].join("\n");
   }
   return [
@@ -201,6 +203,30 @@ export function buildBranchNote(session: {
     repo.host === "codestorage"
       ? "Only deviate from this (a separate branch) when the user explicitly asks for it."
       : "Only deviate from this (separate branch or separate PR) when the user explicitly asks for it.",
+    // A stacked branch follows its base branch, not the trunk (buildStackNote).
+    ...(session.stackedOn ? [] : ["", buildConflictNote(repo.defaultBranch)]),
+  ].join("\n");
+}
+
+/** Claim file, under the shared git dir, naming the session resolving an
+ * upstream merge. Sibling sessions share one worktree, so git's own MERGE_HEAD
+ * already serializes the merge; the claim adds WHO owns it, so a sibling can
+ * tell a live merge from one abandoned by a session that stopped. */
+export const MERGE_CLAIM_FILE = "opensession-merge-owner";
+
+/**
+ * Conflicts with the trunk are always this workspace's job, never something to
+ * report and leave: an unresolved conflict blocks every sibling's next publish.
+ * Exactly one session resolves at a time, coordinated through the claim file.
+ */
+function buildConflictNote(defaultBranch: string): string {
+  return [
+    "## Merge conflicts after the default branch moves",
+    `When \`origin/${defaultBranch}\` has moved and conflicts with this branch (a merge stops on conflicts, a push is rejected and integrating conflicts, or you are told this branch's PR now has merge conflicts), resolving them is part of your task. Do not stop at reporting them, and do not leave them for the user. Merge \`origin/${defaultBranch}\` into this branch (no rebase, no force-push), keep the intent of both sides, rerun the required checks, commit, and push. Ask the user only when the two sides make incompatible product decisions.`,
+    `Sibling sessions share this worktree, so exactly one session resolves at a time. Coordinate through \`$(git rev-parse --git-dir)/${MERGE_CLAIM_FILE}\`:`,
+    `- Before merging, read that file and check for \`MERGE_HEAD\`. If neither exists, write your Open Session id to the file and start the merge. You own it until the merge commit is pushed; then delete the file.`,
+    "- If the file names another session, check it with `get_session`. While it is running, queued, or waiting on a question, it owns the conflict: do not start a second merge or edit conflicted files. Keep working on unrelated files and check again before you publish. If it is idle, archived, or unknown, or `MERGE_HEAD` exists with no claim, take over: write your id to the file and finish the merge in progress.",
+    "- If git refuses the merge because a sibling's uncommitted edits would be overwritten, ask the sessions working on those files with `send_to_session` to commit them, wait for their reply, then merge. Tell the user which files block the merge only when no session owns them.",
   ].join("\n");
 }
 

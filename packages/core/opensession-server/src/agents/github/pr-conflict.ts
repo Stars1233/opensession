@@ -19,8 +19,11 @@
  *    stays quiet. Once a real transition is observed, its delivery intent is
  *    persisted until SessionControl durably admits it, including across restarts.
  *
- * Delivery goes to exactly ONE session, and only tells it what happened. The
- * session decides when (and whether) to resolve. Nothing here touches git.
+ * Delivery goes to exactly ONE session, which is how sibling sessions on the
+ * same branch agree on who handles it: the notice names that session as the
+ * one assigned. The procedure (merge the base branch, claim the shared
+ * worktree's merge, resolve, check, push) lives in the branch discipline note
+ * (session-repos.ts buildConflictNote), not here. Nothing here touches git.
  */
 import type { UnifiedSession } from "../../server/types";
 import type { PrInfo } from "../../server/pr-cache";
@@ -149,7 +152,7 @@ export function scanConflictTransitions(
 }
 
 export function conflictMessage(event: PrConflictEvent): string {
-  return `PR #${event.number} “${event.title}” now has merge conflicts with its base branch. ${event.url}`;
+  return `PR #${event.number} “${event.title}” now has merge conflicts with its base branch. ${event.url} This session is assigned to handle it.`;
 }
 
 export function isCurrentConflictIntent(event: PrConflictEvent): boolean {

@@ -7,6 +7,7 @@ import {
   buildBranchNote,
   buildReposNote,
   ghPrView,
+  MERGE_CLAIM_FILE,
   planCreateAttachRepos,
   resolvePrTarget,
   resolveSessionRepoContext,
@@ -91,7 +92,8 @@ describe("buildBranchNote", () => {
     expect(note).toContain("## Branch discipline (direct publication)");
     expect(note).toContain("git push origin HEAD:refs/heads/trunk");
     expect(note).toContain("git merge-base --is-ancestor origin/trunk HEAD");
-    expect(note).toContain("clean index and worktree");
+    expect(note).toContain("only with a clean index");
+    expect(note).not.toContain("stop and coordinate");
     expect(note).toContain("rebase-merge, rebase-apply, or MERGE_HEAD");
     expect(note).toContain("rerun all required checks on the final candidate");
     expect(note).toContain("Never force-push or delete the default branch");
@@ -243,6 +245,36 @@ describe("buildBranchNote", () => {
     expect(note).toContain("git push --force-with-lease origin tweet-media");
     expect(note).toContain("rebase-merge");
     expect(note).not.toContain("never rebase away");
+  });
+
+  test.each([
+    ["direct publication", {}],
+    ["shared worktree", { prNumber: 1 }],
+  ])(
+    "%s: conflicts with the trunk are always resolved by one claimed session",
+    (_, extra) => {
+      const note = buildBranchNote({ ...directSession(), ...extra });
+      expect(note).toContain(
+        "## Merge conflicts after the default branch moves",
+      );
+      expect(note).toContain("resolving them is part of your task");
+      expect(note).toContain("Merge `origin/trunk` into this branch");
+      expect(note).toContain(`$(git rev-parse --git-dir)/${MERGE_CLAIM_FILE}`);
+      expect(note).toContain("write your Open Session id to the file");
+      expect(note).toContain("do not start a second merge");
+      expect(note).toContain("take over");
+      expect(note).toContain("send_to_session");
+    },
+  );
+
+  test("a stacked branch gets no trunk-merge duty", () => {
+    const note = buildBranchNote({
+      ...directSession(),
+      stackedOn: { repo: "direct", branch: "base" },
+    });
+    expect(note).not.toContain(
+      "## Merge conflicts after the default branch moves",
+    );
   });
 });
 

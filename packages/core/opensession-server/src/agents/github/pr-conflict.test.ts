@@ -200,9 +200,10 @@ describe("conflictMessage", () => {
     expect(msg).toContain("https://github.com/tellahq/tella-fusion/pull/42");
   });
 
-  test("notifies without prescribing what to do about it", () => {
-    // It is an event, not a briefing: no procedure, no priority call, no
-    // repetition of git rules the agent already has.
+  test("assigns the conflict without repeating the procedure", () => {
+    // Delivery reaches exactly one session, so the notice says it owns the
+    // conflict. The procedure lives in the branch discipline note.
+    expect(msg).toContain("This session is assigned to handle it.");
     expect(msg.length).toBeLessThan(160);
     for (const instruction of [
       "git ",
