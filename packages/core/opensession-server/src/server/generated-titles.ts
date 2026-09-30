@@ -7,9 +7,9 @@
  *
  * Generation is a one-shot Haiku call (see generateSessionTitle), fired in the
  * background at session creation so it never blocks the create path. Later
- * prompts go through refreshGeneratedTitle, which asks the same cheap model
- * whether the conversation moved on to a different task and only then
- * replaces the title (a manual rename always wins).
+ * prompts go through refreshGeneratedTitle, which occasionally asks the same
+ * cheap model whether the conversation moved on to an unrelated task and only
+ * then replaces the title (a manual rename always wins).
  *
  * Reads stay on the legacy synchronous registry cache (getAllSessions calls
  * getGeneratedTitle once per row). Every mutation is asynchronous.
@@ -188,7 +188,11 @@ export async function ensureGeneratedTitle(
     const title = sanitizeTitle(out);
     if (!title || (await getTitleOverrideAsync(id))) return null; // renamed while in flight
     const stored = await persistTitle(id, title);
-    if (stored) await applyPendingWorkspaceTitle(id, stored);
+    if (stored) {
+      // A fresh title is not re-judged by the prompts right behind it.
+      startRefreshCooldown(id);
+      await applyPendingWorkspaceTitle(id, stored);
+    }
     return stored;
   });
 }
@@ -216,10 +220,11 @@ async function persistTitle(id: string, title: string): Promise<string | null> {
 }
 
 /* ------------------------------------------------------------------ *
- * Refresh on a later prompt. Most later prompts continue the same work, so
- * the refresh is biased towards keeping: conversational shapes are filtered
- * here without a model call, and the model answers KEEP unless the message
- * clearly starts different work.
+ * Refresh on a later prompt. Almost every later prompt continues the same
+ * work, so the refresh is rare and biased towards keeping: short and
+ * conversational messages are filtered here without a model call, a session
+ * is judged at most once per cooldown window, and the model answers KEEP
+ * unless the message starts unrelated work.
  * ------------------------------------------------------------------ */
 
 /** The session fields that pin a title regardless of what is prompted. */
@@ -244,12 +249,50 @@ export function isFollowUpShapedPrompt(message: string): boolean {
   return FOLLOW_UP_RE.test(message);
 }
 
+/** A new task comes with some description. Shorter messages ("Now fix
+ * uploads", "How does login work?") are nearly always steering the current
+ * one, so they never buy a model call. */
+export const REFRESH_MIN_WORDS = 8;
+
+function tooShortToRetitle(message: string): boolean {
+  return message.split(/\s+/).filter(Boolean).length < REFRESH_MIN_WORDS;
+}
+
+/** One judgment (or first title) per session per window. In memory: a
+ * restart only costs one extra judgment per active session. */
+export const REFRESH_COOLDOWN_MS = 30 * 60 * 1000;
+let now = () => Date.now();
+
+/** Test seam: swap the refresh clock. Returns a restore function. */
+export function __setGeneratedTitleClockForTest(fn: () => number): () => void {
+  const previous = now;
+  now = fn;
+  return () => {
+    now = previous;
+  };
+}
+
+// Per-session memory is bounded; insertion order evicts.
+const JUDGED_MAX = 1000;
+const lastJudgedAt = new Map<string, number>();
+function startRefreshCooldown(id: string): void {
+  lastJudgedAt.delete(id);
+  lastJudgedAt.set(id, now());
+  if (lastJudgedAt.size > JUDGED_MAX)
+    lastJudgedAt.delete(lastJudgedAt.keys().next().value as string);
+}
+
+function inRefreshCooldown(id: string): boolean {
+  const at = lastJudgedAt.get(id);
+  return at !== undefined && now() - at < REFRESH_COOLDOWN_MS;
+}
+
 function refreshPrompt(current: string, source: string): string {
   return (
     `A conversation with a coding agent is titled "${current}". The person just sent the message below.\n\n` +
-    `Decide whether the message starts a meaningfully different task from the title, or continues the same work (a follow-up, an answer, a correction, a refinement, a review of the result, or a next step of the same task).\n\n` +
+    `Decide whether the message starts an unrelated task that the title no longer describes at all. Everything else continues the same work: a follow-up, an answer, a question about the work, a correction, a refinement, a review of the result, a next step, a related bug or edge case, publishing or deploying the result, or another part of the same feature.\n\n` +
     `If it continues the same work, output exactly: KEEP\n` +
-    `If it starts a different task, output ONLY a new title of 3 to 6 words for that task, phrased as an imperative like a git branch or PR title (e.g. "Add onboarding flow", "Fix layout thumbnails"). Sentence case, no trailing punctuation, no quotes, no code. When in doubt, output KEEP.\n\n` +
+    `Only if the title would clearly mislead someone about what the conversation is now doing, output ONLY a new title of 3 to 6 words for the new task, phrased as an imperative like a git branch or PR title (e.g. "Add onboarding flow", "Fix layout thumbnails"). Sentence case, no trailing punctuation, no quotes, no code. When in doubt, output KEEP.\n\n` +
     `Message:\n"""\n${source}\n"""`
   );
 }
@@ -260,9 +303,8 @@ function saidKeep(out: string): boolean {
 }
 
 // Remember only the latest judgment per session: suppress redelivery without
-// preventing a return to an earlier task. Bounded; insertion order evicts.
+// preventing a return to an earlier task.
 const judged = new Map<string, string>();
-const JUDGED_MAX = 1000;
 function rememberJudged(id: string, key: string): void {
   judged.delete(id);
   judged.set(id, key);
@@ -274,8 +316,9 @@ function rememberJudged(id: string, key: string): void {
  * Re-judge a session's title against a later prompt. Resolves with the new
  * title when the prompt started a different task and it was stored, else
  * null. Never throws. A manual rename, a fixed-title session (desk, goal,
- * automation), a machine-sent prompt, a follow-up shaped message and a
- * session without any title yet are all left alone without a model call.
+ * automation), a machine-sent prompt, a short or follow-up shaped message, a
+ * session judged or titled within the cooldown and a session without any
+ * title yet are all left alone without a model call.
  */
 export async function refreshGeneratedTitle(
   id: string,
@@ -288,7 +331,9 @@ export async function refreshGeneratedTitle(
   if (isMachineActor(user)) return null;
   const message = stripContext(prompt).trim();
   if (!message || message.startsWith("<!--os:")) return null;
-  if (isFollowUpShapedPrompt(message)) return null;
+  if (isFollowUpShapedPrompt(message) || tooShortToRetitle(message))
+    return null;
+  if (inRefreshCooldown(id)) return null;
   const source = message.slice(0, 2000);
 
   return scheduleTitleJob(id, async () => {
@@ -301,9 +346,12 @@ export async function refreshGeneratedTitle(
     ).trim();
     if (PLACEHOLDER_TITLES.has(current.toLowerCase())) return null;
     const judgedKey = `${current}\n${source}`;
+    // Parked behind a judgment that just ran: that one covers this window.
+    if (inRefreshCooldown(id)) return null;
     if (judged.get(id) === judgedKey || (await getTitleOverrideAsync(id)))
       return null;
 
+    startRefreshCooldown(id);
     const out = await oneShot(refreshPrompt(current, source), {
       user,
       label: "generated-titles-refresh",

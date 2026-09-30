@@ -1,7 +1,8 @@
 /**
  * Title refresh on later prompts: manual renames and fixed-title sessions are
- * never touched, follow-up shaped prompts never buy a model call, KEEP leaves
- * the title alone, concurrent prompts coalesce onto one lane per session,
+ * never touched, short and follow-up shaped prompts never buy a model call, a
+ * session is judged at most once per cooldown window, KEEP leaves the title
+ * alone, concurrent prompts coalesce onto one lane per session,
  * failures are soft, and the first generated title names a pending workspace
  * once. The registry path is pinned at module load, so the scratch store env
  * is set before the import.
@@ -34,6 +35,11 @@ function waitForCalls(count: number): Promise<void> {
 }
 let answer: (call: Call) => Promise<string | null> = async () => null;
 const restores: Array<() => void> = [];
+let clock = 0;
+/** Step past the refresh cooldown. */
+function later(): void {
+  clock += titles.REFRESH_COOLDOWN_MS;
+}
 
 beforeAll(async () => {
   titles = await import("./generated-titles");
@@ -50,6 +56,7 @@ beforeAll(async () => {
       });
       return result;
     }),
+    titles.__setGeneratedTitleClockForTest(() => clock),
   );
 });
 afterEach(() => {
@@ -98,6 +105,7 @@ test("follow-up shaped prompts keep the title without a model call", async () =>
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   calls = [];
   for (const prompt of [
     "yes",
@@ -114,24 +122,66 @@ test("follow-up shaped prompts keep the title without a model call", async () =>
     ).toBeNull();
   }
   expect(calls.length).toBe(0);
-  // Short tasks and questions are not follow-ups by shape: the model judges.
-  answer = async () => "KEEP";
+  // Short tasks and questions steer the current task: no model call either.
+  answer = async () => "Fix login tests";
   for (const prompt of [
     "OK now fix uploads",
     "Please add dark mode",
     "How does login work?",
     "Fix login tests",
+    "Can you also handle the empty state?",
   ]) {
-    await titles.refreshGeneratedTitle(id, prompt, { user: "ada", session });
+    expect(
+      await titles.refreshGeneratedTitle(id, prompt, { user: "ada", session }),
+    ).toBeNull();
   }
-  expect(calls.length).toBe(4);
+  expect(calls.length).toBe(0);
+  // A described task is long enough for the model to judge.
+  answer = async () => "KEEP";
+  await titles.refreshGeneratedTitle(
+    id,
+    "Please also add a skip button to every step of the flow",
+    { user: "ada", session },
+  );
+  expect(calls.length).toBe(1);
   expect(titles.getGeneratedTitle(id)).toBe("Add onboarding flow");
+});
+
+test("a fresh title and each judgment start a cooldown", async () => {
+  const id = sessionId();
+  answer = async () => "Add onboarding flow";
+  await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  calls = [];
+  const prompt = (n: number) =>
+    `Message number ${n} describes some work that the model could judge`;
+  answer = async () => "KEEP";
+  // Right behind the first title: not judged.
+  expect(
+    await titles.refreshGeneratedTitle(id, prompt(1), { user: "ada", session }),
+  ).toBeNull();
+  expect(calls.length).toBe(0);
+  later();
+  await titles.refreshGeneratedTitle(id, prompt(2), { user: "ada", session });
+  expect(calls.length).toBe(1);
+  // Judged a moment ago, even though it said KEEP.
+  clock += titles.REFRESH_COOLDOWN_MS - 1;
+  answer = async () => "Fix flaky login test";
+  expect(
+    await titles.refreshGeneratedTitle(id, prompt(3), { user: "ada", session }),
+  ).toBeNull();
+  expect(calls.length).toBe(1);
+  clock += 1;
+  expect(
+    await titles.refreshGeneratedTitle(id, prompt(4), { user: "ada", session }),
+  ).toBe("Fix flaky login test");
+  expect(calls.length).toBe(2);
 });
 
 test("a KEEP verdict leaves the title alone and is not asked again for the same prompt", async () => {
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   answer = async () => "KEEP";
   const prompt = "Now also cover the returning-user case in the same flow";
   expect(
@@ -141,7 +191,8 @@ test("a KEEP verdict leaves the title alone and is not asked again for the same 
   expect(calls[1]!.label).toBe("generated-titles-refresh");
   expect(calls[1]!.prompt).toContain('titled "Add onboarding flow"');
   expect(calls[1]!.prompt).toContain(prompt);
-  // Redelivered prompt: judged already.
+  // Redelivered prompt, even after the cooldown: judged already.
+  later();
   expect(
     await titles.refreshGeneratedTitle(id, prompt, { user: "ada", session }),
   ).toBeNull();
@@ -153,6 +204,7 @@ test("a meaningfully different task replaces the title", async () => {
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   answer = async () => '"Fix flaky login test."';
   expect(
     await titles.refreshGeneratedTitle(
@@ -163,13 +215,14 @@ test("a meaningfully different task replaces the title", async () => {
   ).toBe("Fix flaky login test");
   expect(titles.getGeneratedTitle(id)).toBe("Fix flaky login test");
   expect((await registry())[id]).toBe("Fix flaky login test");
-  // A short imperative is a task for the model to judge, not a follow-up.
+  later();
   answer = async () => "Fix upload progress bar";
   expect(
-    await titles.refreshGeneratedTitle(id, "Now fix uploads", {
-      user: "ada",
-      session,
-    }),
+    await titles.refreshGeneratedTitle(
+      id,
+      "Login is done too. Now the upload progress bar freezes at ninety percent.",
+      { user: "ada", session },
+    ),
   ).toBe("Fix upload progress bar");
   expect(calls.at(-1)!.prompt).toContain('titled "Fix flaky login test"');
 });
@@ -178,6 +231,7 @@ test("prose, an unchanged title and an empty answer are all kept", async () => {
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   const prompt = (n: number) =>
     `Message number ${n} about a task that is long enough to be judged by the model`;
   answer = async () =>
@@ -185,15 +239,19 @@ test("prose, an unchanged title and an empty answer are all kept", async () => {
   expect(
     await titles.refreshGeneratedTitle(id, prompt(1), { user: "ada", session }),
   ).toBeNull();
+  later();
   answer = async () => "add onboarding flow";
   expect(
     await titles.refreshGeneratedTitle(id, prompt(2), { user: "ada", session }),
   ).toBeNull();
+  later();
   answer = async () => null;
   expect(
     await titles.refreshGeneratedTitle(id, prompt(3), { user: "ada", session }),
   ).toBeNull();
-  // A failed call is not remembered as judged: the same prompt may retry.
+  // A failed call is not remembered as judged: the same prompt may retry
+  // once the cooldown has passed.
+  later();
   answer = async () => "Rename the widgets";
   expect(
     await titles.refreshGeneratedTitle(id, prompt(3), { user: "ada", session }),
@@ -204,6 +262,7 @@ test("manual renames, fixed-title sessions and machine prompters are never re-ti
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   answer = async () => "Fix flaky login test";
   const prompt =
     "Switch to the flaky login integration test and find out why it fails";
@@ -242,6 +301,7 @@ test("a rename made while the model call is in flight wins", async () => {
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   const gate = deferred<string | null>();
   answer = () => gate.promise;
   const pending = titles.refreshGeneratedTitle(
@@ -265,6 +325,7 @@ test("prompts arriving during an in-flight call coalesce onto the latest one", a
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   const gates: Array<ReturnType<typeof deferred<string | null>>> = [];
   answer = () => {
     const gate = deferred<string | null>();
@@ -288,6 +349,7 @@ test("prompts arriving during an in-flight call coalesce onto the latest one", a
   );
   await waitForCalls(2);
   expect(gates.length).toBe(1);
+  later();
   gates[0]!.resolve("KEEP");
   expect(await a).toBeNull();
   await waitForCalls(3);
@@ -300,7 +362,8 @@ test("prompts arriving during an in-flight call coalesce onto the latest one", a
     "Migrate billing to Stripe",
   ]);
   expect(titles.getGeneratedTitle(id)).toBe("Migrate billing to Stripe");
-  // The lane is free again: a new prompt runs immediately.
+  // The lane is free again: a new prompt past the cooldown runs immediately.
+  later();
   answer = async () => "KEEP";
   await titles.refreshGeneratedTitle(
     id,
@@ -314,6 +377,7 @@ test("a parked refresh is judged against the title the previous call stored", as
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   const gate = deferred<string | null>();
   answer = () => gate.promise;
   const a = titles.refreshGeneratedTitle(
@@ -327,6 +391,7 @@ test("a parked refresh is judged against the title the previous call stored", as
     { user: "ada", session },
   );
   await waitForCalls(2);
+  later();
   answer = async () => "KEEP";
   gate.resolve("Fix flaky login test");
   expect(await a).toBe("Fix flaky login test");
@@ -334,10 +399,35 @@ test("a parked refresh is judged against the title the previous call stored", as
   expect(calls[2]!.prompt).toContain('titled "Fix flaky login test"');
 });
 
+test("a prompt parked behind a judgment in the same window is dropped", async () => {
+  const id = sessionId();
+  answer = async () => "Add onboarding flow";
+  await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
+  const gate = deferred<string | null>();
+  answer = () => gate.promise;
+  const a = titles.refreshGeneratedTitle(
+    id,
+    "Prompt one is long enough to be judged by the model for sure",
+    { user: "ada", session },
+  );
+  const b = titles.refreshGeneratedTitle(
+    id,
+    "Prompt two is long enough to be judged by the model for sure",
+    { user: "ada", session },
+  );
+  await waitForCalls(2);
+  gate.resolve("KEEP");
+  expect(await a).toBeNull();
+  expect(await b).toBeNull();
+  expect(calls.length).toBe(2);
+});
+
 test("a throwing model call is soft and frees the lane", async () => {
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Please add an onboarding flow");
+  later();
   answer = async () => {
     throw new Error("provider down");
   };
@@ -349,7 +439,8 @@ test("a throwing model call is soft and frees the lane", async () => {
     ),
   ).toBeNull();
   expect(titles.getGeneratedTitle(id)).toBe("Add onboarding flow");
-  // The lane is free: the next prompt reaches the model.
+  // The lane is free: the next prompt past the cooldown reaches the model.
+  later();
   answer = async () => "KEEP";
   await titles.refreshGeneratedTitle(
     id,
@@ -472,14 +563,19 @@ test("revisiting an earlier task after another task can refresh its title again"
   const id = sessionId();
   answer = async () => "Add onboarding flow";
   await titles.ensureGeneratedTitle(id, "Add onboarding flow");
+  const login = "The login tests fail on every run now, please fix them";
+  const dark = "Add a dark mode to the settings page with a toggle";
+  later();
   answer = async () => "Fix login tests";
-  await titles.refreshGeneratedTitle(id, "Fix login tests", { session });
+  await titles.refreshGeneratedTitle(id, login, { session });
+  later();
   answer = async () => "Add dark mode";
-  await titles.refreshGeneratedTitle(id, "Add dark mode", { session });
+  await titles.refreshGeneratedTitle(id, dark, { session });
+  later();
   answer = async () => "Fix login tests";
-  expect(
-    await titles.refreshGeneratedTitle(id, "Fix login tests", { session }),
-  ).toBe("Fix login tests");
+  expect(await titles.refreshGeneratedTitle(id, login, { session })).toBe(
+    "Fix login tests",
+  );
 });
 
 test("a persisted title retries failed workspace naming through the catalog sweep without another model call", async () => {

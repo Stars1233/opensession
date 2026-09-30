@@ -3046,9 +3046,10 @@ async function runSessionPromptInner(
   // line of the prompt forever. Retries summarize the stored provisional
   // title (the opening prompt's first line), not this turn's message, so a
   // mid-conversation "yes, do it" never becomes the title source. Once a
-  // session HAS a generated title, each later human prompt is judged against
-  // it and only a clearly different task replaces it (refreshGeneratedTitle
-  // keeps follow-ups, machine prompts and renamed sessions as they are).
+  // session HAS a generated title, a later human prompt is occasionally
+  // judged against it and only an unrelated task replaces it
+  // (refreshGeneratedTitle skips short and follow-up prompts, machine
+  // prompts, renamed sessions and sessions judged in the last 30 minutes).
   // Automation and goal sessions carry deliberate titles; a manual rename
   // wins anyway.
   if (
