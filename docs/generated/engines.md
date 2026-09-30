@@ -72,4 +72,4 @@ Every accepted id resolves to Pi before dispatch.
 | --- | --- |
 | `pi/anthropic/claude-opus-5` | pi |
 | `anthropic/claude-opus-5` | pi |
-| `openai/gpt-5.6-sol` | pi |
+| `openai/gpt-6.1-sol` | pi |

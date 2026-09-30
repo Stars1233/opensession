@@ -1615,7 +1615,7 @@ export async function automationMcpServersByName(
 
 /** Default engine+model for automations. Model-less routines use the same Sol
  * tier as before, now on Pi's ChatGPT-subscription path. */
-export const DEFAULT_PI_AUTOMATION_MODEL = "pi/openai/gpt-5.6-sol";
+export const DEFAULT_PI_AUTOMATION_MODEL = "pi/openai/gpt-6.1-sol";
 
 /** Map an automation's stored model, a router override, or a fallback onto Pi
  * while preserving the concrete provider/model tier. Legacy Pi-prefixed

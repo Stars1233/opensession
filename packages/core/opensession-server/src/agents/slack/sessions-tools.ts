@@ -1526,7 +1526,7 @@ export function createSessionsMcpServer(
             .string()
             .optional()
             .describe(
-              "Optional model id or unambiguous visible slug (e.g. 'gpt-5.6-sol', 'claude-opus-5', or 'glm-5.3').",
+              "Optional model id or unambiguous visible slug (e.g. 'gpt-6.1-sol', 'claude-opus-5', or 'glm-5.3').",
             ),
           mode: z
             .enum(["ask", "code", "scratch"])
